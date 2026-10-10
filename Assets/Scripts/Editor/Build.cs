@@ -1325,15 +1325,15 @@ namespace Simulator.Editor
 
         void OnGUI()
         {
-            EditorGUILayout.LabelField($"Would you like to go to {Web.Config.CloudUrl} to upload built asset?", EditorStyles.wordWrappedLabel);
+            EditorGUILayout.LabelField($"To use built bundles, copy them into the maps, vehicles or plugins folder of the local asset library {Web.Config.AssetsPath}", EditorStyles.wordWrappedLabel);
             GUILayout.Space(30);
-            if (GUILayout.Button("Yes"))
+            if (GUILayout.Button("Open asset library"))
             {
-                Application.OpenURL(Web.Config.CloudUrl);
+                EditorUtility.RevealInFinder(Web.Config.AssetsPath);
                 this.Close();
             }
             GUILayout.Space(10);
-            if (GUILayout.Button("No"))
+            if (GUILayout.Button("Close"))
             {
                 this.Close();
             }

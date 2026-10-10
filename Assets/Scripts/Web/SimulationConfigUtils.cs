@@ -302,6 +302,44 @@ namespace Simulator.Web
             return template.Alias == InternalTemplateAliases.API_ONLY || template.Alias == InternalTemplateAliases.RANDOM_TRAFFIC;
         }
 
+        // Fixed id so the simulation shows up once in the list of previous simulations
+        public const string ApiOnlySimulationId = "4b6c3d1e-5a7f-4e1b-9c2d-0a1b2c3d4e5f";
+
+        /// <summary>
+        /// The simulation WISE sent for its "API Only" template: no map or vehicles, Python API clients set up the rest.
+        /// </summary>
+        public static SimulationData CreateApiOnlySimulation()
+        {
+            return new SimulationData
+            {
+                Id = ApiOnlySimulationId,
+                Name = "API Only",
+                Version = "1.0",
+                ApiOnly = true,
+                Interactive = false,
+                Headless = false,
+                Template = new TemplateData
+                {
+                    Alias = InternalTemplateAliases.API_ONLY,
+                    Parameters = new TemplateParameter[0],
+                },
+                Cluster = new ClusterData
+                {
+                    Name = "Local",
+                    Instances = new[]
+                    {
+                        new InstanceData
+                        {
+                            SimId = Config.SimID,
+                            Ip = new[] { "127.0.0.1" },
+                            IsMaster = true,
+                        },
+                    },
+                },
+                Vehicles = new VehicleData[0],
+            };
+        }
+
         private static string GetSimulationVolumesPath(string simulationId)
         {
             return Path.Combine(

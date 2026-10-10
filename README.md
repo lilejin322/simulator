@@ -19,6 +19,56 @@
   </h4>
 </div>
 
+## Running without WISE
+
+This fork runs without the WISE cloud service, which was shut down in 2022. Maps, vehicles and plugins come from a
+local asset library folder instead, and the simulator starts an API Only simulation on launch, so Python API scripts
+(`lgsvl` PythonAPI 2021.3) connect to port 8181 and work unchanged, including the WISE ids in `lgsvl.wise.DefaultAssets`.
+
+### Local asset library
+
+```
+<assets_path>/
+  maps/           map bundles, named by assetGuid
+  vehicles/       vehicle bundles
+  plugins/        sensor and bridge plugin bundles
+  metadata/       WISE records (*.json): names, ids and vehicle sensor configurations
+  npcs/           NPC vehicle bundles, loaded at startup (subfolders allowed)
+  pedestrians/    pedestrian bundles, loaded at startup
+  controllables/  controllable bundles, loaded at startup
+```
+
+Maps, vehicles and plugins are loaded when a simulation asks for them; NPCs, pedestrians and controllables are loaded
+when the simulator starts, since every simulation may use them.
+
+Records in `metadata/*.json` are arrays of `{"cid": <WISE id>, "ctype": "vehicle" | "configuration", "endpoint": "/api/v1/<maps|vehicles|plugins>/<id>", "data": {...}}`,
+the format used by [SORA-SVL](https://github.com/YuqiHuai/SORA-SVL). The bundles and the `maps.json`, `vehicles.json`
+and `plugins.json` records published by that project make a complete library. Bundles without a record are still listed,
+under the name from their manifest; bundles built with `Simulator/Build...` can be copied into the matching folder as is.
+
+Assets are looked up by WISE id, assetGuid or name. When several assets share a name, the ones published by
+"SVL Content" are preferred. A vehicle looked up by the id of one of its sensor configurations comes with that
+configuration's sensors and bridge; looked up by name it gets the sensors of its first configuration and no bridge.
+
+The NPC, pedestrian and controllable bundles of the official 2021.3 release are in its `AssetBundles` folder; copy its
+`NPCs`, `Pedestrians` and `Controllables` folders into `npcs/`, `pedestrians/` and `controllables/`. The simulator still
+loads bundles from the `AssetBundles` folder next to its executable too, as LG releases did; an asset present in both
+places is loaded once, from the library.
+
+### Configuration
+
+`config.yml` next to the simulator executable (or in the project folder when running in the Editor):
+
+```yaml
+api_hostname: "localhost"
+api_port: 8181
+assets_path: "/path/to/assets"   # relative paths are relative to the simulator folder, default "LocalAssets"
+start_api_only: true            # start an API Only simulation on launch
+```
+
+The command line options `--assets <path>` and `--no-api-only` and the `SIMULATOR_ASSETS` environment variable override it.
+Bundles are linked (or copied on Windows) into the data folder when used; clearing the cache never touches the library.
+
 ## Sunsetting SVL Simulator
 
 ### LG has made the difficult decision to suspend active development of SVL Simulator, as of January 1, 2022.

@@ -59,15 +59,13 @@ namespace Simulator.Web
                 return;
             }
 
-            SimulatorVersionText.text = $"Simulator Version: {CloudAPI.GetInfo().version}";
+            SimulatorVersionText.text = $"Simulator Version: {Config.SimulatorVersion}";
             UnityVersionText.text = $"Unity Version: {Application.unityVersion}";
             ColorUtility.TryParseHtmlString("#1F2940", out offlineColor);
             ColorUtility.TryParseHtmlString("#FFFFFF", out onlineColor);
             statusButtonIcon.material.color = Color.white;
             instance = this;
             statusButton.onClick.AddListener(OnStatusButtonClicked);
-            statusMenuButton.onClick.AddListener(OnStatusMenuButtonClicked);
-            linkButton.onClick.AddListener(OnLinkButtonClicked);
             offlineStartButton.onClick.AddListener(OnOfflineStartButtonClicked);
             offlineStopButton.onClick.AddListener(OnOfflineStopButtonClicked);
             clearAssetCacheButton.onClick.AddListener(() =>
@@ -78,14 +76,11 @@ namespace Simulator.Web
             {
                 LoadedAssetsWindow.SetActive(true);
             });
-            unlinkButton.onClick.AddListener(OnUnlinkButtonClicked);
             quitButton.onClick.AddListener(OnQuitButtonClicked);
             SettingsButton.onClick.AddListener(OnSettingsButtonClicked);
-            UpdateDropdown();
             offlineDropdown.onValueChanged.AddListener(OnDropdownValueChanged);
-            UpdateStatus(ConnectionManager.Status, "");
+            ShowLocalStatus();
             TaskProgressManager.Instance.OnUpdate += UpdateDownloadProgress;
-            ConnectionManager.OnStatusChanged += UpdateStatus;
         }
 
         public void UpdateDownloadProgress()
@@ -99,63 +94,25 @@ namespace Simulator.Web
                 statusText.text = text;
         }
 
-        public void UpdateStatus(ConnectionManager.ConnectionStatus status, string message)
+        // Idle loader screen: simulations are started from the list of previous simulations or by Python API clients.
+        // Linking to a WISE cluster and going online no longer exist.
+        public void ShowLocalStatus()
         {
-            if (statusText == null || linkButton == null || statusButtonIcon == null || statusButtonText == null || linkButtonText == null || statusButton == null)
+            if (statusText == null || statusButtonIcon == null || statusButtonText == null || statusButton == null)
                 return; // fix for editor stop playmode null
 
-            switch (status)
-            {
-                case ConnectionManager.ConnectionStatus.Connecting:
-                    statusText.text = message;
-                    unlinkButton.interactable = false;
-                    linkButton.gameObject.SetActive(false);
-                    statusButtonIcon.color = offlineColor;
-                    offlineDropdown.gameObject.SetActive(false);
-                    offlineStartButton.gameObject.SetActive(false);
-                    VSEButton.gameObject.SetActive(false);
-                    CloudTypeText.text = $"URL: {ConnectionManager.API?.CloudType}";
-                    break;
-                case ConnectionManager.ConnectionStatus.Connected:
-                    statusText.text = "";
-                    statusButtonText.text = "Online";
-                    statusMenuButtonText.text = "Go Offline";
-                    statusButtonIcon.color = offlineColor;
-                    linkButtonText.text = "LINK TO CLOUD";
-                    unlinkButton.interactable = false;
-                    linkButton.gameObject.SetActive(true);
-                    offlineDropdown.gameObject.SetActive(false);
-                    offlineStartButton.gameObject.SetActive(false);
-                    VSEButton.gameObject.SetActive(false);
-                    CloudTypeText.text = $"URL: {ConnectionManager.API?.CloudType}";
-                    break;
-                case ConnectionManager.ConnectionStatus.Offline:
-                    statusText.text = message ?? "Go Online to start new simulation or run previous simulations while being Offline";
-                    statusButtonText.text = "Offline";
-                    statusMenuButtonText.text = "Go Online";
-                    statusButtonIcon.color = offlineColor;
-                    unlinkButton.interactable = true;
-                    linkButton.gameObject.SetActive(false);
-                    offlineDropdown.gameObject.SetActive(true);
-                    offlineStartButton.gameObject.SetActive(true);
-                    VSEButton.gameObject.SetActive(false);
-                    UpdateDropdown();
-                    CloudTypeText.text = $"OFFLINE ({ConnectionManager.API?.CloudType})";
-                    break;
-                case ConnectionManager.ConnectionStatus.Online:
-                    statusButtonText.text = "Online";
-                    statusMenuButtonText.text = "Go Offline";
-                    statusButtonIcon.color = onlineColor;
-                    statusText.text = "";
-                    linkButtonText.text = "OPEN BROWSER";
-                    unlinkButton.interactable = true;
-                    linkButton.gameObject.SetActive(true);
-                    offlineDropdown.gameObject.SetActive(false);
-                    offlineStartButton.gameObject.SetActive(false);
-                    VSEButton.gameObject.SetActive(true);
-                    CloudTypeText.text = $"URL: {ConnectionManager.API?.CloudType}";
-                    break;
-            }
+            statusText.text = "Start a simulation below, or connect with the Python API after starting API Only";
+            statusButtonText.text = "Local";
+            statusButtonIcon.color = onlineColor;
+            statusMenuButton.gameObject.SetActive(false);
+            unlinkButton.gameObject.SetActive(false);
+            linkButton.gameObject.SetActive(false);
+            offlineDropdown.gameObject.SetActive(true);
+            offlineStartButton.gameObject.SetActive(true);
+            offlineStopButton.gameObject.SetActive(false);
+            VSEButton.gameObject.SetActive(true);
+            UpdateDropdown();
+            CloudTypeText.text = $"Assets: {Config.AssetsPath}";
         }
 
         public void UpdateStatusText(string text)
@@ -220,32 +177,9 @@ namespace Simulator.Web
             Loader.Instance.StopAsync();
         }
 
-        public void SetLinkingButtonActive(bool active)
-        {
-            linkButton.gameObject.SetActive(active);
-        }
-
         public void SetVSEButtonActive(bool active)
         {
             VSEButton.gameObject.SetActive(active);
-        }
-
-        public void OnStatusMenuButtonClicked()
-        {
-            statusMenuRoot.gameObject.SetActive(false);
-            ConnectionManager.instance.ConnectionStatusEvent();
-        }
-
-        public void OnLinkButtonClicked()
-        {
-            if (ConnectionManager.Status == ConnectionManager.ConnectionStatus.Connected)
-            {
-                Application.OpenURL(ConnectionManager.instance.LinkUrl);
-            }
-            else if (ConnectionManager.Status == ConnectionManager.ConnectionStatus.Online)
-            {
-                Application.OpenURL(Simulator.Web.Config.CloudUrl);
-            }
         }
 
         public void SetLoaderUIState(LoaderUIStateType state)
@@ -254,26 +188,20 @@ namespace Simulator.Web
             switch (LoaderUIState)
             {
                 case LoaderUIStateType.START:
+                    ShowLocalStatus();
                     break;
                 case LoaderUIStateType.PROGRESS:
                     statusButtonText.text = "Loading...";
                     statusText.text = "Loading...";
+                    offlineDropdown.gameObject.SetActive(false);
+                    offlineStartButton.gameObject.SetActive(false);
                     break;
                 case LoaderUIStateType.READY:
                     statusButtonText.text = "API ready!";
-                    statusText.text = "API ready!";
+                    statusText.text = $"API ready! Python API listens on {Config.ApiHost}:{Config.ApiPort}";
+                    offlineStopButton.gameObject.SetActive(true);
                     break;
             }
-        }
-
-        public void OnUnlinkButtonClicked()
-        {
-            statusMenuRoot.SetActive(false);
-            if (ConnectionManager.Status == ConnectionManager.ConnectionStatus.Online)
-            {
-                ConnectionManager.instance.Disconnect();
-            }
-            Config.RegenerateSimID();
         }
 
         public void EnterScenarioEditor()
