@@ -59,6 +59,9 @@ namespace Simulator.Api
         public float TimeScale;
 
         WebSocketServer Server;
+
+        // False when the server could not bind Config.ApiHost:Config.ApiPort in Awake, e.g. the port is in use
+        public bool IsListening => Server != null && Server.IsListening;
         
         public static Dictionary<string, ICommand> Commands = new Dictionary<string, ICommand>();
 

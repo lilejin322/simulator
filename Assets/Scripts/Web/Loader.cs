@@ -498,6 +498,12 @@ namespace Simulator
                     {
                         var API = Instantiate(ApiManagerPrefab);
                         API.name = "ApiManager";
+                        // ApiManager.Awake only logs it when the server cannot listen, e.g. the port is in use
+                        if ((!Network.IsClusterSimulation || Network.IsMaster) && !API.IsListening)
+                        {
+                            Destroy(API.gameObject);
+                            throw new Exception($"Python API cannot listen on {Config.ApiHost}:{Config.ApiPort}, is the port in use?");
+                        }
 
                         ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.READY);
 
@@ -547,15 +553,22 @@ namespace Simulator
                     Debug.LogException(ex);
 
                     reportStatus(SimulatorStatus.Error, ex.Message);
+                    // only Stopping may go back to Idle, also when the loader scene is still active (e.g. API Only failed)
+                    reportStatus(SimulatorStatus.Stopping);
 
                     if (SceneManager.GetActiveScene().name != LoaderScene)
                     {
-                        reportStatus(SimulatorStatus.Stopping);
                         SceneManager.LoadScene(LoaderScene);
                     }
 
                     reportStatus(SimulatorStatus.Idle);
                     await Network.Deinitialize();
+
+                    if (ConnectionUI != null)
+                    {
+                        ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.START);
+                        ConnectionUI.UpdateStatusText($"Failed to start '{simulation.Name}': {ex.Message}");
+                    }
                 }
             });
         }

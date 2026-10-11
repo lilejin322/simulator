@@ -82,7 +82,6 @@ public class CacheControlWindow : MonoBehaviour
             cat.GetComponent<CacheCategory>().DeleteCategory();
         }
         DeleteAllConfirmPanel.SetActive(false);
-        ConnectionUI.instance.UpdateDropdown();
     }
 
     private void DeleteAllCancel()

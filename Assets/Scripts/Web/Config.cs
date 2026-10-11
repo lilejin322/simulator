@@ -94,7 +94,7 @@ namespace Simulator.Web
             Root = Path.Combine(Application.dataPath, "..");
             PersistentDataPath = Application.persistentDataPath;
             PersistentDataPath += "-" + SimulatorVersion;
-            AssetsPath = Path.Combine(Root, "LocalAssets");
+            AssetsPath = Path.GetFullPath(Path.Combine(Root, "LocalAssets"));
 
             AssetService = new AssetService();
 
@@ -121,6 +121,7 @@ namespace Simulator.Web
             Sensors = SensorTypes.ListSensorFields(SensorPrefabs);
 
             DatabaseManager.Init();
+            DownloadManager.PruneCache();
 
             ClientSettingsService csservice = new ClientSettingsService();
             if (string.IsNullOrEmpty(SimID))
