@@ -44,6 +44,18 @@ public class ConnectionManager : MonoBehaviour
             yield return null;
         }
 
+        // No Python API without an asset library: the loader screen asks for a folder, and in batch mode, where
+        // nobody can choose one, the simulator quits instead of running without the API.
+        if (!LocalAssetLibrary.Exists)
+        {
+            if (Application.isBatchMode)
+            {
+                Debug.LogError($"Quitting: the Python API needs the asset library {Config.AssetsPath}, which does not exist");
+                Application.Quit(1);
+            }
+            yield break;
+        }
+
         if (Loader.Instance.Status == SimulatorStatus.Idle)
         {
             Debug.Log($"Starting API Only simulation, Python API listens on {Config.ApiHost}:{Config.ApiPort}");

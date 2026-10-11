@@ -111,6 +111,12 @@ namespace Simulator.Web
                 CreateLockFile();
             }
 
+            if (!Directory.Exists(AssetsPath))
+            {
+                Debug.LogError($"Local asset library not found: {AssetsPath}. Set assets_path in config.yml, pass --assets <path> " +
+                               "or set SIMULATOR_ASSETS. The Python API does not start without an asset library.");
+            }
+
             AssetBundle.UnloadAllAssetBundles(false);
             Sensors = new List<SensorConfig>();
             SensorPrefabs = new List<SensorBase>();
@@ -279,10 +285,39 @@ namespace Simulator.Web
             // NPCs, pedestrians and controllables are loaded at startup from the local asset library (npcs/, pedestrians/,
             // controllables/), then from AssetBundles next to the simulator where LG releases and Simulator/Build... put them.
             // An asset found in both places is loaded once, from the library.
-            LoadStartupAssets(AssetsPath, type => BundleConfig.pluralOf(type).ToLowerInvariant());
+            LoadStartupAssets(AssetsPath, LibraryFolder);
             LoadStartupAssets(Path.Combine(Application.dataPath, "..", "AssetBundles"), BundleConfig.pluralOf);
 
             Debug.Log($"Loaded NPCs behaviours: {NPCBehaviours.Count}  NPC models: {NPCVehicles.Count}  Pedestrians: {Pedestrians.Count} Controllables: {Controllables.Count} Bridges: {BridgePlugins.All.Count } Sensors: {Sensors.Count} in {sw.Elapsed}");
+        }
+
+        // npcs, pedestrians, ... in the local asset library
+        private static string LibraryFolder(BundleConfig.BundleTypes type) => BundleConfig.pluralOf(type).ToLowerInvariant();
+
+        /// <summary>
+        /// Uses another local asset library for this run; config.yml is not changed. Maps, vehicles and plugins come from
+        /// it right away. Its NPCs, pedestrians and controllables are added to the ones loaded at startup, which stay
+        /// loaded until the simulator restarts.
+        /// </summary>
+        /// <param name="path">absolute, or relative to the simulator folder like assets_path</param>
+        /// <returns>null when switched, otherwise why not</returns>
+        public static string SetAssetsPath(string path)
+        {
+            var fullPath = Path.GetFullPath(Path.Combine(Root, path.Trim()));
+            if (!Directory.Exists(fullPath))
+            {
+                return $"{fullPath} does not exist";
+            }
+            if (!new[] { "maps", "vehicles", "plugins", "metadata" }.Any(folder => Directory.Exists(Path.Combine(fullPath, folder))))
+            {
+                return $"{fullPath} has no maps, vehicles, plugins or metadata folder";
+            }
+
+            AssetsPath = fullPath;
+            LocalAssetLibrary.Reload();
+            DownloadManager.PruneCache();
+            LoadStartupAssets(AssetsPath, LibraryFolder);
+            return null;
         }
 
         private static void LoadStartupAssets(string root, Func<BundleConfig.BundleTypes, string> folderOf)

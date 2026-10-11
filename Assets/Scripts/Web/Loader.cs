@@ -999,27 +999,27 @@ namespace Simulator
 
             if (SimulatorManager.InstanceAvailable || ApiManager.Instance)
             {
-                ConnectionUI.UpdateStatusText("Cannot enter Scenario Editor during a simulation, stop it first.");
-                Debug.LogWarning("Cannot enter Scenario Editor during a simulation.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Cannot enter Scenario Editor during a simulation, stop it first.");
+                return;
+            }
+
+            if (!LocalAssetLibrary.Exists)
+            {
+                CancelScenarioEditor($"Scenario Editor requires the asset library {Config.AssetsPath}, which does not exist.");
                 return;
             }
 
             var maps = await LocalAssetLibrary.GetLibrary<MapDetailData>();
             if (maps.Length == 0)
             {
-                ConnectionUI.UpdateStatusText("Scenario Editor requires at least one map added to the library.");
-                Debug.LogWarning("Scenario Editor requires at least one map added to the library.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Scenario Editor requires at least one map added to the library.");
                 return;
             }
 
             var egos = await LocalAssetLibrary.GetLibrary<VehicleDetailData>();
             if (egos.Length == 0)
             {
-                ConnectionUI.UpdateStatusText("Scenario Editor requires at least one ego vehicle added to the library.");
-                Debug.LogWarning("Scenario Editor requires at least one ego vehicle added to the library.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Scenario Editor requires at least one ego vehicle added to the library.");
                 return;
             }
 
@@ -1027,6 +1027,17 @@ namespace Simulator
             {
                 IsInScenarioEditor = true;
                 SceneManager.LoadScene(ScenarioEditorSceneName);
+            }
+        }
+
+        void CancelScenarioEditor(string reason)
+        {
+            Debug.LogWarning(reason);
+            // back to the loader screen first, which resets the status line, then show why
+            ExitScenarioEditor();
+            if (ConnectionUI != null)
+            {
+                ConnectionUI.UpdateStatusText(reason);
             }
         }
 

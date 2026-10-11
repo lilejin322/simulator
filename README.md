@@ -67,6 +67,15 @@ start_api_only: true            # start an API Only simulation on launch
 ```
 
 The command line options `--assets <path>` and `--no-api-only` and the `SIMULATOR_ASSETS` environment variable override it.
+
+Without an existing asset library folder the simulator logs an error at startup and does not start the Python API:
+the loader screen asks for a folder, and in batch mode (`run-headless.sh`) the simulator exits with code 1.
+
+Bundles are linked (or copied on Windows) into the data folder when used; clearing the cache never touches the library.
+The library is the only source of assets: after `assets_path` changes or the library moves, cached links into any other
+folder are dropped at startup and made again from the library when used, and an asset missing from the library fails
+to load instead of being taken from an old cache.
+
 ### Headless
 
 `run-headless.sh [path/to/simulator] [arguments...]` runs the simulator without a window: Unity batch mode on a virtual
@@ -75,13 +84,13 @@ In batch mode, or with `headless: true`, the simulation renders the sensors only
 
 ### Loader screen
 
-With `start_api_only: false` the loader screen has a Start API button next to a port field showing `api_port` and an
-"Allow remote" checkbox (listen on all network interfaces); what is chosen there applies to that run only and is not
-written back to `config.yml`.
-Bundles are linked (or copied on Windows) into the data folder when used; clearing the cache never touches the library.
-The library is the only source of assets: after `assets_path` changes or the library moves, cached links into any other
-folder are dropped at startup and made again from the library when used, and an asset missing from the library fails
-to load instead of being taken from an old cache.
+With `start_api_only: false` the loader screen has a Start API button next to a port field showing `api_port`, an
+"Allow remote" checkbox (listen on all network interfaces) and a "Headless" checkbox showing `headless`, and an
+"Assets" field showing the local asset library, with a folder dialog button where zenity is installed (Ubuntu desktop
+has it). What is chosen there applies to that run only and is not written back to `config.yml`. NPCs, pedestrians and
+controllables of a library chosen there are added to the ones loaded at startup, which stay loaded until a restart.
+Confirming the Assets field revalidates and rescans the library even when the path is unchanged, so correcting a
+rejected path or restoring a missing folder clears the error and refreshes the available actions.
 
 ## Sunsetting SVL Simulator
 

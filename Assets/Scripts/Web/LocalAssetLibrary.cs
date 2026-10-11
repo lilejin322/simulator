@@ -51,6 +51,17 @@ namespace Simulator.Web
 
         public static string Root => Config.AssetsPath;
 
+        /// <summary>Whether the library folder exists; without it the simulator does not start the Python API.</summary>
+        public static bool Exists => !string.IsNullOrEmpty(Root) && Directory.Exists(Root);
+
+        static void EnsureExists()
+        {
+            if (!Exists)
+            {
+                throw new Exception($"asset library {Root} does not exist");
+            }
+        }
+
         /// <summary>Forget everything read from disk; the next request reads the library again.</summary>
         public static void Reload()
         {
@@ -61,6 +72,19 @@ namespace Simulator.Web
             }
         }
 
+        /// <returns>What the library holds, e.g. "94 maps, 31 vehicles, 224 sensor configurations, 59 plugins"</returns>
+        public static string Describe()
+        {
+            EnsureLoaded();
+            return Contents();
+        }
+
+        static string Contents() =>
+            $"{records[Collection.Maps].Count} maps, " +
+            $"{records[Collection.Vehicles].Values.Count(r => r.Kind != "configuration")} vehicles, " +
+            $"{records[Collection.Vehicles].Values.Count(r => r.Kind == "configuration")} sensor configurations, " +
+            $"{records[Collection.Plugins].Count} plugins";
+
         /// <returns>Path of the bundle file for the asset, or null when the library does not have it.</returns>
         public static string GetBundlePath(string assetGuid)
         {
@@ -70,6 +94,7 @@ namespace Simulator.Web
 
         public static Task<T> Get<T>(string id) where T : CloudAssetDetails
         {
+            EnsureExists();
             EnsureLoaded();
             var collection = CollectionOf<T>();
             if (!records[collection].TryGetValue(id, out var record))
@@ -82,6 +107,7 @@ namespace Simulator.Web
 
         public static Task<T[]> GetLibrary<T>() where T : CloudAssetDetails
         {
+            EnsureExists();
             EnsureLoaded();
             var library = Listed(CollectionOf<T>()).Select(r => Resolve(r).ToObject<T>()).ToArray();
             return Task.FromResult(library);
@@ -89,6 +115,7 @@ namespace Simulator.Web
 
         public static Task<T> GetByIdOrName<T>(string idOrName) where T : CloudAssetDetails
         {
+            EnsureExists();
             EnsureLoaded();
             var collection = CollectionOf<T>();
             if (records[collection].ContainsKey(idOrName))
@@ -227,7 +254,7 @@ namespace Simulator.Web
 
                 if (string.IsNullOrEmpty(Root) || !Directory.Exists(Root))
                 {
-                    Debug.LogWarning($"Local asset library not found at '{Root}'. Set assets_path in config.yml or pass --assets <path>.");
+                    // reported at startup by Config, and by the queries above
                     return;
                 }
 
@@ -268,10 +295,7 @@ namespace Simulator.Web
 
                 AddBundlesWithoutMetadata();
 
-                Debug.Log($"Local asset library {Root}: {records[Collection.Maps].Count} maps, " +
-                          $"{records[Collection.Vehicles].Values.Count(r => r.Kind != "configuration")} vehicles, " +
-                          $"{records[Collection.Vehicles].Values.Count(r => r.Kind == "configuration")} sensor configurations, " +
-                          $"{records[Collection.Plugins].Count} plugins, {bundles.Count} bundles in {sw.Elapsed}");
+                Debug.Log($"Local asset library {Root}: {Contents()}, {bundles.Count} bundles in {sw.Elapsed}");
             }
         }
 
