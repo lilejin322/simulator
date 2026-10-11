@@ -67,7 +67,21 @@ start_api_only: true            # start an API Only simulation on launch
 ```
 
 The command line options `--assets <path>` and `--no-api-only` and the `SIMULATOR_ASSETS` environment variable override it.
+### Headless
+
+`run-headless.sh [path/to/simulator] [arguments...]` runs the simulator without a window: Unity batch mode on a virtual
+X server (`xvfb-run`), rendering with Vulkan on the GPU. Unity 2020.3 on Linux needs an X server even in batch mode.
+In batch mode, or with `headless: true`, the simulation renders the sensors only, not the main view.
+
+### Loader screen
+
+With `start_api_only: false` the loader screen has a Start API button next to a port field showing `api_port` and an
+"Allow remote" checkbox (listen on all network interfaces); what is chosen there applies to that run only and is not
+written back to `config.yml`.
 Bundles are linked (or copied on Windows) into the data folder when used; clearing the cache never touches the library.
+The library is the only source of assets: after `assets_path` changes or the library moves, cached links into any other
+folder are dropped at startup and made again from the library when used, and an asset missing from the library fails
+to load instead of being taken from an old cache.
 
 ## Sunsetting SVL Simulator
 

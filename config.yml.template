@@ -1,3 +1,4 @@
+# Render only the sensors, not the main view. Always on in Unity batch mode (-batchmode, see run-headless.sh).
 headless: false
 read_only: false
 api_hostname: "localhost"

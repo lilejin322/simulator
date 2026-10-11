@@ -317,7 +317,8 @@ namespace Simulator.Web
                 Version = "1.0",
                 ApiOnly = true,
                 Interactive = false,
-                Headless = false,
+                // headless: the main view renders the UI only (sensors still render), there is no window in batch mode anyway
+                Headless = Config.Headless || Application.isBatchMode,
                 Template = new TemplateData
                 {
                     Alias = InternalTemplateAliases.API_ONLY,

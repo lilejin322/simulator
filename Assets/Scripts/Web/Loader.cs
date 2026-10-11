@@ -481,11 +481,6 @@ namespace Simulator
             {
                 try
                 {
-                    if (Config.Headless && (simulation.Headless))
-                    {
-                        throw new Exception("Simulator is configured to run in headless mode, only headless simulations are allowed");
-                    }
-
                     if (ConnectionUI != null)
                     {
                         ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.PROGRESS);
