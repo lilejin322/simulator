@@ -1,6 +1,7 @@
 # Render only the sensors, not the main view. Always on in Unity batch mode (-batchmode, see run-headless.sh).
 headless: false
 read_only: false
+# "*" listens on all interfaces, so other machines can reach api_port. Open that port in the firewall first.
 api_hostname: "localhost"
 api_port: 8181
 # Local asset library: maps/, vehicles/, plugins/ bundles and metadata/*.json records.
