@@ -41,3 +41,9 @@ LICENSE text eol=crlf
 LICENSE-3RD-PARTY text eol=crlf
 PRIVACY text eol=crlf
 README.md text eol=crlf
+Docs/**/*.png -filter -diff -merge -text
+Docs/**/*.PNG -filter -diff -merge -text
+Docs/**/*.jpg -filter -diff -merge -text
+Docs/**/*.JPG -filter -diff -merge -text
+Docs/**/*.jpeg -filter -diff -merge -text
+Docs/**/*.JPEG -filter -diff -merge -text
