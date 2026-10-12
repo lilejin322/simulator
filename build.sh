@@ -13,6 +13,10 @@
 # unity CLI and of Unity Hub (old and new); set UNITY to the editor executable to use one installed elsewhere. Either
 # way the editor must report the project's version.
 #
+# The local asset library is LocalAssets in this repo: when it is missing or incomplete, it is first downloaded from
+# the Hugging Face dataset lilejin322/svl-assets with the hf CLI (about 12 GB; run again to continue an interrupted
+# download, files already downloaded are kept).
+#
 # The Unity log goes to Logs/build-linux64.log. If the output folder has no config.yml, one is created pointing
 # assets_path at this repo's LocalAssets; an existing config.yml is left as is.
 #
@@ -20,6 +24,9 @@
 set -e
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
+
+ASSETS=$ROOT/LocalAssets
+ASSETS_REPO=lilejin322/svl-assets
 
 VERSION=$(sed -n 's/^m_EditorVersion: //p' "$ROOT/ProjectSettings/ProjectVersion.txt")
 
@@ -78,6 +85,52 @@ if ! command -v xvfb-run > /dev/null; then
     exit 1
 fi
 
+# complete: every file of the dataset is there with its size, by the file list hf saves with a download
+# (.cache/huggingface/trees/<commit>.json); without that list the library has not been checked against the dataset yet
+assets_complete() {
+    python3 -I - "$ASSETS" << 'EOF'
+import glob, json, os, sys
+root = sys.argv[1]
+trees = sorted(glob.glob(os.path.join(root, ".cache", "huggingface", "trees", "*.json")), key=os.path.getmtime)
+if not trees:
+    sys.exit(1)
+with open(trees[-1]) as f:
+    files = {path: info for path, info in json.load(f)["files"].items() if path != ".gitattributes"}
+missing = [path for path, info in files.items()
+           if not (os.path.isfile(os.path.join(root, path)) and os.path.getsize(os.path.join(root, path)) == info["size"])]
+if missing:
+    print(f"{len(missing)} of {len(files)} files of the asset library are missing or incomplete", file=sys.stderr)
+    sys.exit(1)
+EOF
+}
+
+if ! command -v python3 > /dev/null; then
+    echo "python3 not found, it is needed to check the asset library" >&2
+    exit 1
+fi
+
+if ! assets_complete; then
+    if ! command -v hf > /dev/null; then
+        echo "The asset library $ASSETS is missing or incomplete. Downloading it needs the Hugging Face CLI:" >&2
+        echo "  curl -LsSf https://hf.co/cli/install.sh | bash -s" >&2
+        exit 1
+    fi
+    echo "Downloading the asset library (about 12 GB) from https://huggingface.co/datasets/$ASSETS_REPO into $ASSETS"
+    if ! hf download "$ASSETS_REPO" --repo-type dataset --local-dir "$ASSETS" --exclude .gitattributes; then
+        echo "Downloading the asset library failed; run build.sh again to continue, files already downloaded are kept" >&2
+        exit 1
+    fi
+    # an interrupted download leaves its partial files behind, and hf downloads those files again from the start
+    if [ -d "$ASSETS/.cache/huggingface/download" ]; then
+        find "$ASSETS/.cache/huggingface/download" -name "*.incomplete" -delete
+    fi
+    # an hf version that saves no file list leaves nothing to check; its successful download has to do
+    if ls "$ASSETS"/.cache/huggingface/trees/*.json > /dev/null 2>&1 && ! assets_complete; then
+        echo "The asset library $ASSETS is still incomplete after the download" >&2
+        exit 1
+    fi
+fi
+
 mkdir -p "$OUTPUT" "$ROOT/Logs"
 OUTPUT=$(cd "$OUTPUT" && pwd)
 
@@ -129,7 +182,7 @@ fi
 chmod +x "$OUTPUT/simulator" "$OUTPUT/simulator_Data/Plugins/ffmpeg"
 
 if [ ! -f "$OUTPUT/config.yml" ]; then
-    sed "s|^assets_path:.*|assets_path: \"$ROOT/LocalAssets\"|" "$ROOT/config.yml.template" > "$OUTPUT/config.yml"
+    sed "s|^assets_path:.*|assets_path: \"$ASSETS\"|" "$ROOT/config.yml.template" > "$OUTPUT/config.yml"
     echo "Created $OUTPUT/config.yml"
 fi
 
