@@ -19,6 +19,8 @@
   </h4>
 </div>
 
+![SVL Simulator Offline Version](./Docs/lgsvl.png)
+
 ## Running without WISE
 
 This fork runs without the WISE cloud service, which was shut down in 2022. Maps, vehicles and plugins come from a
@@ -140,23 +142,12 @@ A: The [Simulator Software License Agreement](https://github.com/lgsvl/simulator
 
 A: There are no plans at this time to offer a SVL Simulator Premium product or cloud service.
 
-##### **Q: Can users still post technical questions on GitHub?**
 
-A: Technical questions may be posted to the [SVL Simulator Issues](https://github.com/lgsvl/simulator/issues) page on GitHub but may not be answered by the SVL Simulator team. We encourage users to help each other with questions or issues that are posted.
-
-##### **Q: What if there are other questions not addressed in this document?**
-
-A: Other questions may be posted to the [SVL Simulator Issues](https://github.com/lgsvl/simulator/issues) page on GitHub.
 
 <br/>
 
 ------ 
 # Project README
-
-## Stay Informed
-
-Check out our latest [news](https://www.svlsimulator.com/news/) and subscribe to our [mailing list](http://eepurl.com/htlRjH) to get the latest updates.
-
 
 ## Introduction
 
@@ -169,8 +160,6 @@ We hope to build a collaborative community among robotics and autonomous vehicle
 
 *To use the simulator with Autoware.auto, first download the simulator binary, then follow the guide on our [Autoware.auto](https://autowarefoundation.gitlab.io/autoware.auto/AutowareAuto/lgsvl.html).*
 
-For users in China, you can view our latest videos [here](https://space.bilibili.com/412295691) and download our simulator releases [here](https://pan.baidu.com/s/1M33ysJYZfi4vya41gmB0rw) (code: 6k91).
-对于中国的用户，您也可在[哔哩哔哩](https://space.bilibili.com/412295691)上观看我们最新发布的视频，从[百度网盘](https://pan.baidu.com/s/1M33ysJYZfi4vya41gmB0rw)(提取码: 6k91)上下载使用我们的仿真器。
 
 
 ## Paper
@@ -233,14 +222,6 @@ Check out our instructions for getting started with building from source [here](
 ### Guide to simulator functionality
 
 Look [here](https://www.svlsimulator.com/docs) for a guide to currently available functionality and features.
-
-
-
-## Contact
-
-Please feel free to provide feedback or ask questions by creating a Github issue. For inquiries about collaboration, please email us at [contact@svlsimulator.com](mailto:contact@svlsimulator.com).
-
-
 
 ## Copyright and License
 
