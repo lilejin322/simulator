@@ -71,6 +71,24 @@ namespace Simulator.Plugins
                     Ffmpeg = Path.Combine(Application.dataPath, "Plugins", "ffmpeg.exe");
                 }
             }
+            else if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.MacOSX)
+            {
+                // Recording is optional. Use an explicitly configured executable or one on PATH.
+                Ffmpeg = Environment.GetEnvironmentVariable("FFMPEG_PATH");
+                if (string.IsNullOrEmpty(Ffmpeg))
+                {
+                    foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
+                    {
+                        if (string.IsNullOrEmpty(directory)) continue;
+                        var candidate = Path.Combine(directory, "ffmpeg");
+                        if (File.Exists(candidate))
+                        {
+                            Ffmpeg = candidate;
+                            break;
+                        }
+                    }
+                }
+            }
             else
             {
                 if (Application.isEditor)

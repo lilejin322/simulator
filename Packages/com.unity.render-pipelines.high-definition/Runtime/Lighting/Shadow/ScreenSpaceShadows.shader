@@ -3,9 +3,11 @@ Shader "Hidden/HDRP/ScreenSpaceShadows"
     HLSLINCLUDE
 
         #pragma target 4.5
-        #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+        #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
-        #pragma multi_compile SHADOW_LOW SHADOW_MEDIUM SHADOW_HIGH
+        #pragma multi_compile_fragment PUNCTUAL_SHADOW_LOW PUNCTUAL_SHADOW_MEDIUM PUNCTUAL_SHADOW_HIGH
+        #pragma multi_compile_fragment DIRECTIONAL_SHADOW_LOW DIRECTIONAL_SHADOW_MEDIUM DIRECTIONAL_SHADOW_HIGH
+        #pragma multi_compile_fragment AREA_SHADOW_MEDIUM AREA_SHADOW_HIGH
 
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
@@ -59,13 +61,13 @@ Shader "Hidden/HDRP/ScreenSpaceShadows"
             DirectionalLightData light = _DirectionalLightDatas[_DirectionalShadowIndex];
             float3 L = -light.forward;
 
-            // We also need the normal 
+            // We also need the normal
             NormalData normalData;
             DecodeFromNormalBuffer(posInput.positionSS.xy, normalData);
             float3 normalWS = normalData.normalWS;
 
             // Note: we use shading normal here and not GetNormalForShadowBias() as it is not available
-            return GetDirectionalShadowAttenuation(context.shadowContext, posInput.positionSS.xy, posInput.positionWS, normalWS, _DirectionalShadowIndex, L);
+            return GetDirectionalShadowAttenuation(context.shadowContext, posInput.positionSS.xy, posInput.positionWS, normalWS, light.shadowIndex, L);
         }
     ENDHLSL
 

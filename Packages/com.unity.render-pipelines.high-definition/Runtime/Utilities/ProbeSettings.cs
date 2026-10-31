@@ -46,6 +46,10 @@ namespace UnityEngine.Rendering.HighDefinition
         resolution = 1 << 16,
         /// <summary>Rough reflections.</summary>
         roughReflections = 1 << 17,
+        /// <summary>cube resolution.</summary>
+        cubeResolution = 1 << 18,
+        /// <summary>importance</summary>
+        importance = 1 << 19,
     }
 
     /// <summary>
@@ -115,26 +119,30 @@ namespace UnityEngine.Rendering.HighDefinition
         public struct Lighting
         {
             /// <summary>Default value.</summary>
-            [Obsolete("Since 2019.3, use Lighting.NewDefault() instead.")]
+            [Obsolete("Use Lighting.NewDefault() instead. #from(2019.3)")]
             public static readonly Lighting @default = default;
             /// <summary>Default value.</summary>
             /// <returns>The default value.</returns>
             public static Lighting NewDefault() => new Lighting
             {
+                importance = 1,
                 multiplier = 1.0f,
                 weight = 1.0f,
-                lightLayer = LightLayerEnum.LightLayerDefault,
+                lightLayer = (RenderingLayerMask) (uint) UnityEngine.RenderingLayerMask.defaultRenderingLayerMask,
                 fadeDistance = 10000f,
                 rangeCompressionFactor = 1.0f
             };
 
+            /// <summary>A value used to better filter probes than only by size. Probe with higher importance are displayed over the lower ones,
+            /// and smaller (volume) probes of same importance are displayed on top of bigger ones.</summary>
+            public int importance;
             /// <summary>A multiplier applied to the radiance of the Probe.</summary>
             public float multiplier;
             /// <summary>A weight applied to the influence of the Probe.</summary>
-            [Range(0,1)]
+            [Range(0, 1)]
             public float weight;
             /// <summary>An enum flag to select which Light Layers this Probe interacts with.</summary>
-            public LightLayerEnum lightLayer;
+            public RenderingLayerMask lightLayer;
             /// <summary>The distance at which reflections smoothly fade out before HDRP cut them completely.</summary>
             public float fadeDistance;
             /// <summary>The result of the rendering of the probe will be divided by this factor. When the probe is read, this factor is undone as the probe data is read.
@@ -148,7 +156,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public struct ProxySettings
         {
             /// <summary>Default value.</summary>
-            [Obsolete("Since 2019.3, use ProxySettings.NewDefault() instead.")]
+            [Obsolete("Use ProxySettings.NewDefault() instead. #from(2019.3)")]
             public static readonly ProxySettings @default = default;
             /// <summary>Default value.</summary>
             /// <returns>The default value.</returns>
@@ -156,7 +164,7 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 capturePositionProxySpace = Vector3.zero,
                 captureRotationProxySpace = Quaternion.identity,
-                useInfluenceVolumeAsProxyVolume = false
+                useInfluenceVolumeAsProxyVolume = true
             };
 
             /// <summary>
@@ -179,7 +187,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public struct Frustum
         {
             /// <summary>Obsolete</summary>
-            [Obsolete("Since 2019.3, use Frustum.NewDefault() instead.")]
+            [Obsolete("Use Frustum.NewDefault() instead. #from(2019.3)")]
             public static readonly Frustum @default = default;
             /// <summary>Default value.</summary>
             /// <returns>The default value.</returns>
@@ -222,9 +230,17 @@ namespace UnityEngine.Rendering.HighDefinition
             public float viewerScale;
         }
 
+        /// <summary> CubeReflectionResolution scalable setting value.</summary>
+        [Serializable]
+        public class CubeReflectionResolutionScalableSettingValue : ScalableSettingValue<CubeReflectionResolution>
+        {
+        }
+
+        internal const CubeReflectionResolution k_DefaultCubeResolution = CubeReflectionResolution.CubeReflectionResolution128;
+
         /// <summary>Default value.</summary>
-        [Obsolete("Since 2019.3, use ProbeSettings.NewDefault() instead.")]
-        public static ProbeSettings @default = default;
+        [Obsolete("Use ProbeSettings.NewDefault() instead. #from(2019.3)")]
+        public static readonly ProbeSettings @default = default;
         /// <summary>Default value.</summary>
         /// <returns>The default value.</returns>
         public static ProbeSettings NewDefault()
@@ -233,6 +249,7 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 type = ProbeType.ReflectionProbe,
                 realtimeMode = RealtimeMode.EveryFrame,
+                timeSlicing = false,
                 mode = Mode.Baked,
                 cameraSettings = CameraSettings.NewDefault(),
                 influence = null,
@@ -241,10 +258,12 @@ namespace UnityEngine.Rendering.HighDefinition
                 proxySettings = ProxySettings.NewDefault(),
                 frustum = Frustum.NewDefault(),
                 resolutionScalable = new PlanarReflectionAtlasResolutionScalableSettingValue(),
+                cubeResolution = new CubeReflectionResolutionScalableSettingValue(),
                 roughReflections = true,
                 distanceBasedRoughness = false,
             };
             probeSettings.resolutionScalable.@override = PlanarReflectionAtlasResolution.Resolution512;
+            probeSettings.cubeResolution.@override = k_DefaultCubeResolution;
 
             return probeSettings;
         }
@@ -257,6 +276,8 @@ namespace UnityEngine.Rendering.HighDefinition
         public Mode mode;
         /// <summary>The mode of the probe.</summary>
         public RealtimeMode realtimeMode;
+        /// <summary>Whether a realtime probe uses time slicing.</summary>
+        public bool timeSlicing;
         /// <summary>The lighting of the probe.</summary>
         public Lighting lighting;
         /// <summary>The influence volume of the probe.</summary>
@@ -268,10 +289,13 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary> An int scalable setting value</summary>
         [Serializable] public class PlanarReflectionAtlasResolutionScalableSettingValue : ScalableSettingValue<PlanarReflectionAtlasResolution> { }
         /// <summary>Camera settings to use when capturing data.</summary>
-        /// <summary>The resolution of the probe.</summary>
+        /// <summary>The resolution of the planar probe.</summary>
         public PlanarReflectionAtlasResolutionScalableSettingValue resolutionScalable;
         [SerializeField]
         internal PlanarReflectionAtlasResolution resolution;
+        /// <summary>The resolution of the cube probe.</summary>
+        [SerializeField]
+        public CubeReflectionResolutionScalableSettingValue cubeResolution;
         /// <summary>Probe camera settings.</summary>
         [Serialization.FormerlySerializedAs("camera")]
         public CameraSettings cameraSettings;
@@ -300,6 +324,13 @@ namespace UnityEngine.Rendering.HighDefinition
             h2 = cameraSettings.GetHash();
             HashUtilities.AppendHash(ref h2, ref h);
 
+            CubeReflectionResolution cubeReflectionRes = k_DefaultCubeResolution;
+            var hdrp = RenderPipelineManager.currentPipeline as HDRenderPipeline;
+            if (hdrp != null)
+                cubeReflectionRes = cubeResolution.Value(hdrp.asset.currentPlatformRenderPipelineSettings.cubeReflectionResolution);
+            HashUtilities.ComputeHash128(ref cubeReflectionRes, ref h2);
+            HashUtilities.AppendHash(ref h2, ref h);
+
             if (influence != null)
             {
                 h2 = influence.ComputeHash();
@@ -312,5 +343,6 @@ namespace UnityEngine.Rendering.HighDefinition
             }
             return h;
         }
+
     }
 }

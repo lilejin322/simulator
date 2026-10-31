@@ -171,7 +171,7 @@ namespace Simulator.Network.Core.Components
 
                 //Check if rigidbody is sleeping
                 if (CachedRigidbody.IsSleeping() &&
-                    Math.Abs(CachedRigidbody.velocity.magnitude) < 0.1f &&
+                    Math.Abs(CachedRigidbody.linearVelocity.magnitude) < 0.1f &&
                     Mathf.Abs(CachedRigidbody.angularVelocity.magnitude) < 0.1f)
                 {
                     if (IsSleeping)
@@ -269,7 +269,7 @@ namespace Simulator.Network.Core.Components
                 {
                     case MockingSimulationType.ExtrapolateVelocities:
                         messageContent.PushCompressedVector3(CachedRigidbody.angularVelocity, -10.0f, 10.0f, 2);
-                        messageContent.PushCompressedVector3(CachedRigidbody.velocity, -200.0f, 200.0f, 2);
+                        messageContent.PushCompressedVector3(CachedRigidbody.linearVelocity, -200.0f, 200.0f, 2);
                         messageContent.PushCompressedRotation(CachedRigidbody.rotation);
                         messageContent.PushCompressedPosition(localPosition);
                         break;

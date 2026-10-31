@@ -2,14 +2,21 @@
 #error SHADERPASS_is_not_correctly_define
 #endif
 
+
 #ifdef _WRITE_TRANSPARENT_MOTION_VECTOR
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/MotionVectorVertexShaderCommon.hlsl"
 
 PackedVaryingsType Vert(AttributesMesh inputMesh, AttributesPass inputPass)
 {
     VaryingsType varyingsType;
+#ifdef HAVE_VFX_MODIFICATION
+    AttributesElement inputElement;
+    varyingsType.vmesh = VertMesh(inputMesh, inputElement);
+    return MotionVectorVS(varyingsType, inputMesh, inputPass, inputElement);
+#else
     varyingsType.vmesh = VertMesh(inputMesh);
     return MotionVectorVS(varyingsType, inputMesh, inputPass);
+#endif
 }
 
 #ifdef TESSELLATION_ON
@@ -18,12 +25,7 @@ PackedVaryingsToPS VertTesselation(VaryingsToDS input)
 {
     VaryingsToPS output;
     output.vmesh = VertMeshTesselation(input.vmesh);
-    MotionVectorPositionZBias(output);
-
-    output.vpass.positionCS = input.vpass.positionCS;
-    output.vpass.previousPositionCS = input.vpass.previousPositionCS;
-
-    return PackVaryingsToPS(output);
+    return MotionVectorTessellation(output, input);
 }
 
 #endif // TESSELLATION_ON
@@ -64,7 +66,6 @@ PackedVaryingsToPS VertTesselation(VaryingsToDS input)
     return PackVaryingsToPS(output);
 }
 
-
 #endif // TESSELLATION_ON
 
 #endif // _WRITE_TRANSPARENT_MOTION_VECTOR
@@ -74,46 +75,74 @@ PackedVaryingsToPS VertTesselation(VaryingsToDS input)
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/TessellationShare.hlsl"
 #endif
 
-#ifdef UNITY_VIRTUAL_TEXTURING
-#define VT_BUFFER_TARGET SV_Target1
-#define EXTRA_BUFFER_TARGET SV_Target2
-#else
-#define EXTRA_BUFFER_TARGET SV_Target1
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Debug/DebugDisplayMaterial.hlsl"
+
+#if defined(_TRANSPARENT_REFRACTIVE_SORT) || defined(_ENABLE_FOG_ON_TRANSPARENT)
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Water/Shaders/UnderWaterUtilities.hlsl"
 #endif
 
-void Frag(PackedVaryingsToPS packedInput,
-        #ifdef OUTPUT_SPLIT_LIGHTING
-            out float4 outColor : SV_Target0,  // outSpecularLighting
-            #ifdef UNITY_VIRTUAL_TEXTURING
-                out float4 outVTFeedback : VT_BUFFER_TARGET,
-            #endif
-            out float4 outDiffuseLighting : EXTRA_BUFFER_TARGET,
-            OUTPUT_SSSBUFFER(outSSSBuffer)
-        #else
-            out float4 outColor : SV_Target0
-            #ifdef UNITY_VIRTUAL_TEXTURING
-                ,out float4 outVTFeedback : VT_BUFFER_TARGET
-            #endif
-        #ifdef _WRITE_TRANSPARENT_MOTION_VECTOR
-          , out float4 outMotionVec : EXTRA_BUFFER_TARGET
-        #endif // _WRITE_TRANSPARENT_MOTION_VECTOR
-        #endif // OUTPUT_SPLIT_LIGHTING
-        #ifdef _DEPTHOFFSET_ON
-            , out float outputDepth : SV_Depth
+//NOTE: some shaders set target1 to be
+//   Blend 1 One OneMinusSrcAlpha
+//The reason for this blend mode is to let virtual texturing alpha dither work.
+//Anything using Target1 should write 1.0 or 0.0 in alpha to write / not write into the target.
+
+#ifdef UNITY_VIRTUAL_TEXTURING
+    #ifdef OUTPUT_SPLIT_LIGHTING
+        #define DIFFUSE_LIGHTING_TARGET SV_Target2
+        #define SSS_BUFFER_TARGET SV_Target3
+    #elif defined(_WRITE_TRANSPARENT_MOTION_VECTOR)
+        #define MOTION_VECTOR_TARGET SV_Target2
+        #ifdef _TRANSPARENT_REFRACTIVE_SORT
+            #define BEFORE_REFRACTION_TARGET SV_Target3
+            #define BEFORE_REFRACTION_ALPHA_TARGET SV_Target4
         #endif
+    #endif
+    #pragma rendertarget_format_hint MRT1 R16G16_UNorm
+#else
+    #ifdef OUTPUT_SPLIT_LIGHTING
+        #define DIFFUSE_LIGHTING_TARGET SV_Target1
+        #define SSS_BUFFER_TARGET SV_Target2
+    #elif defined(_WRITE_TRANSPARENT_MOTION_VECTOR)
+        #define MOTION_VECTOR_TARGET SV_Target1
+        #ifdef _TRANSPARENT_REFRACTIVE_SORT
+            #define BEFORE_REFRACTION_TARGET SV_Target2
+            #define BEFORE_REFRACTION_ALPHA_TARGET SV_Target3
+        #endif
+    #endif
+#endif
+
+void Frag(PackedVaryingsToPS packedInput
+    , out float4 outColor : SV_Target0  // outSpecularLighting when outputting split lighting
+    #ifdef UNITY_VIRTUAL_TEXTURING
+        , out float4 outVTFeedback : SV_Target1
+    #endif
+    #ifdef OUTPUT_SPLIT_LIGHTING
+        , out float4 outDiffuseLighting : DIFFUSE_LIGHTING_TARGET
+        , OUTPUT_SSSBUFFER(outSSSBuffer) : SSS_BUFFER_TARGET
+    #elif defined(_WRITE_TRANSPARENT_MOTION_VECTOR)
+          , out float4 outMotionVec : MOTION_VECTOR_TARGET
+        #ifdef _TRANSPARENT_REFRACTIVE_SORT
+          , out float4 outBeforeRefractionColor : BEFORE_REFRACTION_TARGET
+          , out float4 outBeforeRefractionAlpha : BEFORE_REFRACTION_ALPHA_TARGET
+        #endif
+    #endif
+    #ifdef _DEPTHOFFSET_ON
+        , out float outputDepth : DEPTH_OFFSET_SEMANTIC
+    #endif
 )
 {
 #ifdef _WRITE_TRANSPARENT_MOTION_VECTOR
     // Init outMotionVector here to solve compiler warning (potentially unitialized variable)
     // It is init to the value of forceNoMotion (with 2.0)
-    outMotionVec = float4(2.0, 0.0, 0.0, 0.0);
+    // Always write 1.0 in alpha since blend mode could be active on this target as a side effect of VT feedback buffer
+    // motion vector expected output format is RG16
+    outMotionVec = float4(2.0, 0.0, 0.0, 1.0);
 #endif
 
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(packedInput);
     FragInputs input = UnpackVaryingsToFragInputs(packedInput);
 
-    // We need to readapt the SS position as our screen space positions are for a low res buffer, but we try to access a full res buffer.
-    input.positionSS.xy = _OffScreenRendering > 0 ? (input.positionSS.xy * _OffScreenDownsampleFactor) : input.positionSS.xy;
+    AdjustFragInputsToOffScreenRendering(input, _OffScreenRendering > 0, _OffScreenDownsampleFactor);
 
     uint2 tileIndex = uint2(input.positionSS.xy) / GetTileSize();
 
@@ -142,53 +171,13 @@ void Frag(PackedVaryingsToPS packedInput,
 #ifdef DEBUG_DISPLAY
     // Init in debug display mode to quiet warning
 #ifdef OUTPUT_SPLIT_LIGHTING
-    outDiffuseLighting = 0;
+    // Always write 1.0 in alpha since blend mode could be active on this target as a side effect of VT feedback buffer
+    // Diffuse output is expected to be RGB10, so alpha must always be 1 to ensure it is written.
+    outDiffuseLighting = float4(0, 0, 0, 1);
     ENCODE_INTO_SSSBUFFER(surfaceData, posInput.positionSS, outSSSBuffer);
 #endif
 
-
-
-    // Same code in ShaderPassForwardUnlit.shader
-    // Reminder: _DebugViewMaterialArray[i]
-    //   i==0 -> the size used in the buffer
-    //   i>0  -> the index used (0 value means nothing)
-    // The index stored in this buffer could either be
-    //   - a gBufferIndex (always stored in _DebugViewMaterialArray[1] as only one supported)
-    //   - a property index which is different for each kind of material even if reflecting the same thing (see MaterialSharedProperty)
-    bool viewMaterial = false;
-    int bufferSize = _DebugViewMaterialArray[0].x;
-    if (bufferSize != 0)
-    {
-        bool needLinearToSRGB = false;
-        float3 result = float3(1.0, 0.0, 1.0);
-
-        // Loop through the whole buffer
-        // Works because GetSurfaceDataDebug will do nothing if the index is not a known one
-        for (int index = 1; index <= bufferSize; index++)
-        {
-            int indexMaterialProperty = _DebugViewMaterialArray[index].x;
-
-            // skip if not really in use
-            if (indexMaterialProperty != 0)
-            {
-                viewMaterial = true;
-
-                GetPropertiesDataDebug(indexMaterialProperty, result, needLinearToSRGB);
-                GetVaryingsDataDebug(indexMaterialProperty, input, result, needLinearToSRGB);
-                GetBuiltinDataDebug(indexMaterialProperty, builtinData, posInput, result, needLinearToSRGB);
-                GetSurfaceDataDebug(indexMaterialProperty, surfaceData, result, needLinearToSRGB);
-                GetBSDFDataDebug(indexMaterialProperty, bsdfData, result, needLinearToSRGB);
-            }
-        }
-
-        // TEMP!
-        // For now, the final blit in the backbuffer performs an sRGB write
-        // So in the meantime we apply the inverse transform to linear data to compensate, unless we output to AOVs.
-        if (!needLinearToSRGB && _DebugAOVOutput == 0)
-            result = SRGBToLinear(max(0, result));
-
-        outColor = float4(result, 1.0);
-    }
+    bool viewMaterial = GetMaterialDebugColor(outColor, input, builtinData, posInput, surfaceData, bsdfData);
 
     if (!viewMaterial)
     {
@@ -227,27 +216,47 @@ void Frag(PackedVaryingsToPS packedInput,
             if (_EnableSubsurfaceScattering != 0 && ShouldOutputSplitLighting(bsdfData))
             {
                 outColor = float4(specularLighting, 1.0);
+                // Always write 1.0 in alpha since blend mode could be active on this target as a side effect of VT feedback buffer
+                // Diffuse output is expected to be RGB10, so alpha must always be 1 to ensure it is written.
                 outDiffuseLighting = float4(TagLightingForSSS(diffuseLighting), 1.0);
             }
             else
             {
                 outColor = float4(diffuseLighting + specularLighting, 1.0);
-                outDiffuseLighting = 0;
+                // Always write 1.0 in alpha since blend mode could be active on this target as a side effect of VT feedback buffer
+                // Diffuse output is expected to be RGB10, so alpha must always be 1 to ensure it is written.
+                outDiffuseLighting = float4(0, 0, 0, 1);
             }
             ENCODE_INTO_SSSBUFFER(surfaceData, posInput.positionSS, outSSSBuffer);
 #else
             outColor = ApplyBlendMode(diffuseLighting, specularLighting, builtinData.opacity);
+
+            #ifdef _ENABLE_FOG_ON_TRANSPARENT
             outColor = EvaluateAtmosphericScattering(posInput, V, outColor);
+            #endif
+
+            #ifdef _TRANSPARENT_REFRACTIVE_SORT
+            ComputeRefractionSplitColor(posInput, outColor, outBeforeRefractionColor, outBeforeRefractionAlpha);
+            #endif
 #endif
 
 #ifdef _WRITE_TRANSPARENT_MOTION_VECTOR
             VaryingsPassToPS inputPass = UnpackVaryingsPassToPS(packedInput.vpass);
             bool forceNoMotion = any(unity_MotionVectorsParams.yw == 0.0);
             // outMotionVec is already initialize at the value of forceNoMotion (see above)
+
+             //Motion vector is enabled in SG but not active in VFX
+#if defined(HAVE_VFX_MODIFICATION) && !VFX_FEATURE_MOTION_VECTORS
+            forceNoMotion = true;
+#endif
+
             if (!forceNoMotion)
             {
                 float2 motionVec = CalculateMotionVector(inputPass.positionCS, inputPass.previousPositionCS);
                 EncodeMotionVector(motionVec * 0.5, outMotionVec);
+
+                // Always write 1.0 in alpha since blend mode could be active on this target as a side effect of VT feedback buffer
+                // motion vector expected output format is RG16
                 outMotionVec.zw = 1.0;
             }
 #endif
@@ -262,6 +271,11 @@ void Frag(PackedVaryingsToPS packedInput,
 #endif
 
 #ifdef UNITY_VIRTUAL_TEXTURING
-    outVTFeedback = builtinData.vtPackedFeedback;
+    float vtAlphaValue = builtinData.opacity;
+    #if defined(HAS_REFRACTION) && HAS_REFRACTION
+        vtAlphaValue = 1.0f - bsdfData.transmittanceMask;
+    #endif
+    outVTFeedback = PackVTFeedbackWithAlpha(builtinData.vtPackedFeedback, input.positionSS.xy, vtAlphaValue);
+    outVTFeedback.rgb *= outVTFeedback.a; // premuliplied alpha
 #endif
 }

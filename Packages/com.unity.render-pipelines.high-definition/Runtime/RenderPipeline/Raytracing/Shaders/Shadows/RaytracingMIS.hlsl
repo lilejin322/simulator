@@ -1,5 +1,5 @@
 // Matrix used to move the samples from world space to local area light space in order to get the UV mapping values
-float4x4 _RaytracingLightWorldToLocal;
+float4x4 _RaytracingAreaWorldToLocal;
 
 struct MISSamplingInput
 {
@@ -88,7 +88,7 @@ void InitSphericalQuad(LightData areaLightData, float3 positionWS, out SphQuad s
 bool InitSphericalQuad(LightData light, float3 positionWS, float3 normalWS, inout SphQuad squad)
 {
     ZERO_INITIALIZE(SphQuad, squad);
-    
+
     // Dimension of the area light
     float halfWidth  = light.size.x * 0.5;
     float halfHeight = light.size.y * 0.5;
@@ -111,7 +111,7 @@ bool InitSphericalQuad(LightData light, float3 positionWS, float3 normalWS, inou
     float d = -dot(normalWS, positionWS);
     if (positionLS.z <= 0.0 || (positionLS.z > 0.0 && ((dot(normalWS, v0) + d < 0) && (dot(normalWS, v1) + d < 0) && (dot(normalWS, v2) + d < 0) && (dot(normalWS, v3) + d < 0))))
         return false;
-        
+
     float3 ex = v1 - v0;
     float3 ey = v3 - v0;
 
@@ -160,7 +160,7 @@ bool GenerateMISSample(inout MISSamplingInput misInput, SphQuad squad, float3 vi
 
             // The next question is: This the sample point inside the triangle? To do that for the moment we move it to the local space of the light and see if its distance to the center of the light
             // is coherent with the dimensions of the light
-            float4 lsPoint = mul(_RaytracingLightWorldToLocal, float4(misSamplingOutput.pos, 1.0)) * 2.0;
+            float4 lsPoint = mul(_RaytracingAreaWorldToLocal, float4(misSamplingOutput.pos, 1.0)) * 2.0;
             validity = abs(lsPoint.x) < misInput.rectDimension.x && abs(lsPoint.y) < misInput.rectDimension.y;
             if (validity)
             {
@@ -182,7 +182,7 @@ bool GenerateMISSample(inout MISSamplingInput misInput, SphQuad squad, float3 vi
         // Compute the Light PDF
         misSamplingOutput.lightPDF = 1.0f / squad.S;
         // Compute the uv on the light
-        float4 lsPoint = mul(_RaytracingLightWorldToLocal, float4(misSamplingOutput.pos, 1.0)) * 2.0;
+        float4 lsPoint = mul(_RaytracingAreaWorldToLocal, float4(misSamplingOutput.pos, 1.0)) * 2.0;
         misSamplingOutput.sampleUV = float2((lsPoint.x + misInput.rectDimension.x) / (2.0 * misInput.rectDimension.x), (lsPoint.y + misInput.rectDimension.y) /  (2.0 * misInput.rectDimension.y));
     }
     return validity;

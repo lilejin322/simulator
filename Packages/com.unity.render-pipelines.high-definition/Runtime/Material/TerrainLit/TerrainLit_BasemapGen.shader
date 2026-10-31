@@ -7,18 +7,17 @@ Shader "Hidden/HDRP/TerrainLit_BasemapGen"
 
     SubShader
     {
-        Tags { "SplatCount" = "8" }
+        Tags { "RenderPipeline" = "HDRenderPipeline" "SplatCount" = "8" }
 
         HLSLINCLUDE
 
         #pragma target 4.5
-        #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+        #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
         #define SURFACE_GRADIENT // Must use Surface Gradient as the normal map texture format is now RG floating point
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
         #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
         #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
-        #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/NormalSurfaceGradient.hlsl"
         #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/TerrainLit/TerrainLitSurfaceData.hlsl"
 
         // Terrain builtin keywords

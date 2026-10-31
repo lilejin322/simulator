@@ -10,10 +10,12 @@ namespace UnityEngine.Rendering.HighDefinition
         Color,
         /// <summary>DepthStencil buffer at the end of the frame.</summary>
         DepthStencil,
-        /// <summary>Normals buffer at the end of the frame.</summary>
+        /// <summary>Normals (world space) buffer at the end of the frame.</summary>
         Normals,
         /// <summary>Motion vectors buffer at the end of the frame.</summary>
-        MotionVectors
+        MotionVectors,
+        /// <summary>Volumetric fog at the end of the frame.</summary>
+        VolumetricFog
     }
 
     /// <summary>

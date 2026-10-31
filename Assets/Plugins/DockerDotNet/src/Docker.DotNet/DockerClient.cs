@@ -9,7 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Net.Http.Client;
 
-#if (NETSTANDARD1_6 || NETSTANDARD2_0 || UNITY_2020)
+#if (NETSTANDARD1_6 || NETSTANDARD2_0 || UNITY_2020_1_OR_NEWER)
 using System.Net.Sockets;
 #endif
 
@@ -101,13 +101,13 @@ namespace Docker.DotNet
                     handler = new ManagedHandler();
                     break;
 
-#if (NETSTANDARD1_6 || NETSTANDARD2_0 || UNITY_2020)
+#if (NETSTANDARD1_6 || NETSTANDARD2_0 || UNITY_2020_1_OR_NEWER)
                 case "unix":
                     var pipeString = uri.LocalPath;
                     handler = new ManagedHandler(async (string host, int port, CancellationToken cancellationToken) =>
                     {
                         var sock = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-                        await sock.ConnectAsync(new UnixDomainSocketEndPoint(pipeString));
+                        await sock.ConnectAsync(new Microsoft.Net.Http.Client.UnixDomainSocketEndPoint(pipeString));
                         return sock;
                     });
                     uri = new UriBuilder("http", uri.Segments.Last()).Uri;

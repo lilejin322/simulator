@@ -1,13 +1,7 @@
-void ApplyDecalToSurfaceData(DecalSurfaceData decalSurfaceData, float3 vtxNormal, inout SurfaceData surfaceData)
+void ApplyDecalToSurfaceDataNoNormal(DecalSurfaceData decalSurfaceData, inout SurfaceData surfaceData)
 {
     // using alpha compositing https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch23.html
     surfaceData.baseColor.xyz = surfaceData.baseColor.xyz * decalSurfaceData.baseColor.w + decalSurfaceData.baseColor.xyz;
-
-    // Always test the normal as we can have decompression artifact
-    if (decalSurfaceData.normalWS.w < 1.0)
-    {
-        surfaceData.normalWS.xyz = SafeNormalize(surfaceData.normalWS.xyz * decalSurfaceData.normalWS.w + decalSurfaceData.normalWS.xyz);
-    }
 
 #ifdef DECALS_4RT // only smoothness in 3RT mode
     // Don't apply any metallic modification
@@ -26,7 +20,7 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     // however specularOcclusion can come from the graph, so need to be init here so it can be override.
     surfaceData.specularOcclusion = 1.0;
 
-	// copy across graph values, if defined
+    // copy across graph values, if defined
     $SurfaceDescription.BaseColor:                  surfaceData.baseColor =                 surfaceDescription.BaseColor;
     $SurfaceDescription.SpecularOcclusion:          surfaceData.specularOcclusion =         surfaceDescription.SpecularOcclusion;
     $SurfaceDescription.Smoothness:                 surfaceData.perceptualSmoothness =      surfaceDescription.Smoothness;
@@ -35,6 +29,11 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     $SurfaceDescription.Mask:                       surfaceData.mask =                      surfaceDescription.Mask;
     $SurfaceDescription.DiffusionProfileHash:       surfaceData.diffusionProfileHash =      asuint(surfaceDescription.DiffusionProfileHash);
     $SurfaceDescription.SubsurfaceMask:             surfaceData.subsurfaceMask = surfaceDescription.SubsurfaceMask;
+    $SurfaceDescription.IrisPlaneOffset:             surfaceData.irisPlaneOffset =           surfaceDescription.IrisPlaneOffset;
+    $SurfaceDescription.IrisRadius:                 surfaceData.irisRadius =                surfaceDescription.IrisRadius;
+    $SurfaceDescription.CausticIntensity:           surfaceData.causticIntensity =          surfaceDescription.CausticIntensity;
+    // Input by graph needs to be saturated to avoid unwated behaviors
+    $SurfaceDescription.CausticBlend:               surfaceData.causticBlend =              saturate(surfaceDescription.CausticBlend);
 
     // These static material feature allow compile time optimization
     surfaceData.materialFeatures = 0;
@@ -47,49 +46,41 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
         surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_EYE_CINEMATIC;
     #endif
 
-    #ifdef _DOUBLESIDED_ON
-        float3 doubleSidedConstants = _DoubleSidedConstants.xyz;
-    #else
-        float3 doubleSidedConstants = float3(1.0, 1.0, 1.0);
+    #ifdef _MATERIAL_FEATURE_EYE_CAUSTIC_LUT
+    surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_EYE_CAUSTIC_FROM_LUT | MATERIALFEATUREFLAGS_EYE_CINEMATIC; //force light refraction with caustic
     #endif
+
+    float3 doubleSidedConstants = GetDoubleSidedConstants();
+
+    ApplyDecalAndGetNormal(fragInputs, posInput, surfaceDescription, surfaceData);
 
     // Note: It is assume that user in the shader graph provide a normal map with flat normal at the Cornea location
     // and an iris normal map. Same for smoothness, IOR and for subsurface mask. So we don't do any operation here.
 
-    // normal delivered to master node
-    $SurfaceDescription.NormalOS: surfaceData.normalWS = TransformObjectToWorldNormal(surfaceDescription.NormalOS);
-    $SurfaceDescription.NormalTS: GetNormalWS(fragInputs, surfaceDescription.NormalTS, surfaceData.normalWS, doubleSidedConstants);
-    $SurfaceDescription.NormalWS: surfaceData.normalWS = surfaceDescription.NormalWS;
-
     surfaceData.irisNormalWS = surfaceData.normalWS;
-    $SurfaceDescription.IrisNormalOS: surfaceData.irisNormalWS = TransformObjectToWorldNormal(surfaceDescription.IrisNormalOS);
+    $SurfaceDescription.IrisNormalOS: GetNormalWS_SrcOS(fragInputs, surfaceDescription.IrisNormalOS, surfaceData.irisNormalWS, doubleSidedConstants);
     $SurfaceDescription.IrisNormalTS: GetNormalWS(fragInputs, surfaceDescription.IrisNormalTS, surfaceData.irisNormalWS, doubleSidedConstants);
-    $SurfaceDescription.IrisNormalWS: surfaceData.irisNormalWS = surfaceDescription.IrisNormalWS;
+    $SurfaceDescription.IrisNormalWS: GetNormalWS_SrcWS(fragInputs, surfaceDescription.IrisNormalWS, surfaceData.irisNormalWS, doubleSidedConstants);
 
     surfaceData.geomNormalWS = fragInputs.tangentToWorld[2];
 
-    #if HAVE_DECALS
-        if (_EnableDecals)
-        {
-            float alpha = 1.0;
-            $SurfaceDescription.Alpha: alpha = surfaceDescription.Alpha;
+    bentNormalWS = surfaceData.irisNormalWS; // Use diffuse normal (iris) to fetch GI, unless users provide explicit bent normal (not affected by decals)
+    $BentNormal: GetNormalWS(fragInputs, surfaceDescription.BentNormal, bentNormalWS, doubleSidedConstants);
 
-            // Both uses and modifies 'surfaceData.normalWS'.
-            DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, fragInputs, alpha);
-            ApplyDecalToSurfaceData(decalSurfaceData, fragInputs.tangentToWorld[2], surfaceData);
+    #ifdef DEBUG_DISPLAY
+    #if !defined(SHADER_STAGE_RAY_TRACING)
+        // Mipmap mode debugging isn't supported with ray tracing as it relies on derivatives
+        if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
+        {
+            #ifdef FRAG_INPUTS_USE_TEXCOORD0
+                surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG(posInput.positionSS, fragInputs.texCoord0);
+            #else
+                surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG_NO_UV(posInput.positionSS);
+            #endif
         }
     #endif
 
-    bentNormalWS = surfaceData.irisNormalWS; // Use diffuse normal (iris) to fetch GI, unless users provide explicit bent normal (not affected by decals)
-    $BentNormal: GetNormalWS(fragInputs, surfaceDescription.BentNormal, bentNormalWS, doubleSidedConstants);
-       
-    #ifdef DEBUG_DISPLAY
-        if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
-        {
-            // TODO: need to update mip info
-        }
-
-        // We need to call ApplyDebugToSurfaceData after filling the surfarcedata and before filling builtinData
+        // We need to call ApplyDebugToSurfaceData after filling the surfaceData and before filling builtinData
         // as it can modify attribute use for static lighting
         ApplyDebugToSurfaceData(fragInputs.tangentToWorld, surfaceData);
     #endif
@@ -98,7 +89,7 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
         // Just use the value passed through via the slot (not active otherwise)
     #elif defined(_SPECULAR_OCCLUSION_FROM_AO_BENT_NORMAL)
         // If we have bent normal and ambient occlusion, process a specular occlusion
-        surfaceData.specularOcclusion = GetSpecularOcclusionFromBentAO(V, bentNormalWS, surfaceData.normalWS, surfaceData.ambientOcclusion, PerceptualSmoothnessToPerceptualRoughness(surfaceData.perceptualSmoothness));
+        surfaceData.specularOcclusion = GetSpecularOcclusionFromBentAO(V, bentNormalWS, surfaceData.normalWS, surfaceData.ambientOcclusion, PerceptualSmoothnessToRoughness(surfaceData.perceptualSmoothness));
     #elif defined(_AMBIENT_OCCLUSION) && defined(_SPECULAR_OCCLUSION_FROM_AO)
         surfaceData.specularOcclusion = GetSpecularOcclusionFromAmbientOcclusion(ClampNdotV(dot(surfaceData.normalWS, V)), surfaceData.ambientOcclusion, PerceptualSmoothnessToRoughness(surfaceData.perceptualSmoothness));
     #endif

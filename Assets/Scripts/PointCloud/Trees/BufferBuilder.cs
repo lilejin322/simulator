@@ -9,6 +9,7 @@ namespace Simulator.PointCloud.Trees
 {
     using System;
     using System.Collections.Generic;
+    using Unity.Collections;
     using Unity.Collections.LowLevel.Unsafe;
     using UnityEngine;
     using UnityEngine.Rendering;
@@ -26,27 +27,29 @@ namespace Simulator.PointCloud.Trees
         
         private readonly int rebuildSteps;
         
-        private ComputeBuffer bufferA;
-        private ComputeBuffer bufferB;
+        // Buffers are written without synchronization with the GPU, so they rotate: the ready one, the one under
+        // construction, and the previously ready one, which rests for a whole build while frames still in flight
+        // may read it.
+        private ComputeBuffer[] buffers;
 
         private int lastProcessedNodeIndex;
         private int currentStepCount;
         private int constructedBufferItemsCount;
         protected int readyBufferItemsCount;
         
-        private bool bufferSwapFlag;
+        private int readyBufferIndex;
         
         protected bool busy;
 
-        public bool Valid => !nodeLoader.Disposed && bufferA != null;
+        public bool Valid => !nodeLoader.Disposed && buffers != null;
 
         public int MaxBufferElements => maxBufferElements;
 
         public int RebuildSteps => rebuildSteps;
 
-        protected ComputeBuffer ReadyBuffer => bufferSwapFlag ? bufferB : bufferA;
+        protected ComputeBuffer ReadyBuffer => buffers[readyBufferIndex];
         
-        private ComputeBuffer ConstructedBuffer => bufferSwapFlag ? bufferA : bufferB;
+        private ComputeBuffer ConstructedBuffer => buffers[(readyBufferIndex + 1) % buffers.Length];
 
         /// <summary>
         /// Creates a new instance of this class with given parameters.
@@ -60,11 +63,35 @@ namespace Simulator.PointCloud.Trees
             this.maxBufferElements = maxBufferElements;
             this.rebuildSteps = rebuildSteps;
 
-            bufferA = new ComputeBuffer(maxBufferElements, UnsafeUtility.SizeOf<PointCloudPoint>(),
-                ComputeBufferType.Default, ComputeBufferMode.Immutable);
+            buffers = new ComputeBuffer[3];
+            for (var i = 0; i < buffers.Length; i++)
+                buffers[i] = CreatePointBuffer(maxBufferElements);
+        }
 
-            bufferB = new ComputeBuffer(maxBufferElements, UnsafeUtility.SizeOf<PointCloudPoint>(),
-                ComputeBufferType.Default, ComputeBufferMode.Immutable);
+        /// <summary>
+        /// Creates a buffer for given amount of points that can be refilled with <see cref="WritePoints"/>.
+        /// </summary>
+        /// <param name="elements">Amount of points that can be stored in buffer.</param>
+        public static ComputeBuffer CreatePointBuffer(int elements)
+        {
+            // Written in place with BeginWrite/EndWrite. With SetData, Unity 6000.6 on Metal keeps a copy of the
+            // whole buffer for every call and never frees it.
+            return new ComputeBuffer(elements, UnsafeUtility.SizeOf<PointCloudPoint>(),
+                ComputeBufferType.Default, ComputeBufferMode.SubUpdates);
+        }
+
+        /// <summary>
+        /// Copies points into a buffer created with <see cref="CreatePointBuffer"/>. The GPU must not be using the
+        /// written range.
+        /// </summary>
+        /// <param name="buffer">Buffer to write to.</param>
+        /// <param name="points">Points to copy.</param>
+        /// <param name="start">Index of buffer element that will receive the first point.</param>
+        public static void WritePoints(ComputeBuffer buffer, NativeArray<PointCloudPoint> points, int start)
+        {
+            var target = buffer.BeginWrite<PointCloudPoint>(start, points.Length);
+            target.CopyFrom(points);
+            buffer.EndWrite<PointCloudPoint>(points.Length);
         }
 
         /// <summary>
@@ -91,7 +118,7 @@ namespace Simulator.PointCloud.Trees
                 constructedBufferItemsCount = 0;
                 currentStepCount = 0;
                 
-                bufferSwapFlag = !bufferSwapFlag;
+                readyBufferIndex = (readyBufferIndex + 1) % buffers.Length;
                 busy = false;
             }
         }
@@ -110,7 +137,7 @@ namespace Simulator.PointCloud.Trees
             constructedBufferItemsCount = 0;
             currentStepCount = 0;
                 
-            bufferSwapFlag = !bufferSwapFlag;
+            readyBufferIndex = (readyBufferIndex + 1) % buffers.Length;
             busy = false;
         }
 
@@ -132,7 +159,7 @@ namespace Simulator.PointCloud.Trees
                     break;
                 }
 
-                constructedBuffer.SetData(node.Points, 0, constructedBufferItemsCount, count);
+                WritePoints(constructedBuffer, node.Points, constructedBufferItemsCount);
 
                 constructedBufferItemsCount += count;
             }
@@ -180,11 +207,13 @@ namespace Simulator.PointCloud.Trees
         /// <inheritdoc/>
         public virtual void Dispose()
         {
-            bufferA?.Release();
-            bufferB?.Release();
+            if (buffers != null)
+            {
+                foreach (var buffer in buffers)
+                    buffer?.Release();
+            }
 
-            bufferA = null;
-            bufferB = null;
+            buffers = null;
         }
     }
 }

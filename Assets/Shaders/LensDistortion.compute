@@ -24,6 +24,17 @@ float frustumWidth, frustumHeight;
 float b1, b2, b3, b4;
 float xi;
 
+// _DistortedTexture is created as sRGB but bound as RWTexture2D. On D3D and Vulkan a storage write skips the sRGB
+// conversion, so the value is encoded here; Metal converts on write, so there the linear value is stored as is.
+float3 EncodeForStorage(float3 color)
+{
+#if defined(SHADER_API_METAL)
+	return color;
+#else
+	return LinearToSRGB(color);
+#endif
+}
+
 // Distort UV using Plumb Bob model.
 // Refer https://wiki.lgsvl.com/display/AUT/Lens+Distortion for more details.
 float2 UndistortUvPlumbBob(float2 uv)
@@ -48,11 +59,7 @@ void PlumBobDistortion(uint3 id : SV_DispatchThreadID)
 	float2 normalizedUv = id.xy / float2(_TexSize.x, _TexSize.y);
 	float2 undistortedUv = UndistortUvPlumbBob(normalizedUv);
 	float3 color = SAMPLE_TEXTURE2D_X_LOD(_InputTexture, sampler_InputTexture, undistortedUv, 0).rgb;
-	// Since _DistortedTexture is bound to RWTexture2D,
-	// the value written into it is always linear.
-	// But the texture is created as sRGB, so we need to do gamma correction here.
-	color = LinearToSRGB(color);
-	_DistortedTexture[COORD_TEXTURE2D_X(id.xy)] = float4(color, 1);
+	_DistortedTexture[COORD_TEXTURE2D_X(id.xy)] = float4(EncodeForStorage(color), 1);
 }
 
 // Distort UV using Unified Projection model.
@@ -83,9 +90,5 @@ void UnifiedProjectionDistortion(uint3 id : SV_DispatchThreadID)
 	float2 normalizedUv = id.xy / float2(_TexSize.x, _TexSize.y);
 	float3 cubeTexCoord = UndistortUvUnifiedProjection(normalizedUv);
 	float3 color = _InputCubemapTexture.SampleLevel(sampler_InputCubemapTexture, cubeTexCoord, 0).rgb;
-	// Since _DistortedTexture is bound to RWTexture2D,
-	// the value written into it is always linear.
-	// But the texture is created as sRGB, so we need to do gamma correction here.
-	color = LinearToSRGB(color);
-	_DistortedTexture[COORD_TEXTURE2D_X(id.xy)] = float4(color, 1);
+	_DistortedTexture[COORD_TEXTURE2D_X(id.xy)] = float4(EncodeForStorage(color), 1);
 }

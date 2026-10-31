@@ -207,15 +207,8 @@ PreLightData GetPreLightData(float3 V, PositionInputs posInput, inout BSDFData b
     preLightData.iblR = reflect(-V, N);
 
     // Area light
-    // UVs for sampling the LUTs
-    float theta = FastACosPos(clampedNdotV); // For Area light - UVs for sampling the LUTs
-    float2 uv = LTC_LUT_OFFSET + LTC_LUT_SCALE * float2(bsdfData.perceptualRoughness, theta * INV_HALF_PI);
-
-    preLightData.ltcTransformDiffuse = k_identity3x3;
-
-    preLightData.ltcTransformSpecular      = 0.0;
-    preLightData.ltcTransformSpecular._m22 = 1.0;
-    preLightData.ltcTransformSpecular._m00_m02_m11_m20 = SAMPLE_TEXTURE2D_ARRAY_LOD(_LtcData, s_linear_clamp_sampler, uv, LTC_GGX_MATRIX_INDEX, 0);
+    preLightData.ltcTransformDiffuse  = k_identity3x3;
+    preLightData.ltcTransformSpecular = SampleLtcMatrix(bsdfData.perceptualRoughness, clampedNdotV, LTCLIGHTINGMODEL_GGX);
 
     // Construct a right-handed view-dependent orthogonal basis around the normal
     preLightData.orthoBasisViewNormal = GetOrthoBasisViewNormal(V, N, preLightData.NdotV);
@@ -233,6 +226,14 @@ PreLightData GetPreLightData(float3 V, PositionInputs posInput, inout BSDFData b
 #endif
 
     return preLightData;
+}
+
+NormalData ConvertSurfaceDataToNormalData(SurfaceData surfaceData)
+{
+    NormalData normalData;
+    normalData.normalWS = surfaceData.normalWS;
+    normalData.perceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(surfaceData.perceptualSmoothness);
+    return normalData;
 }
 
 #ifdef HAS_LIGHTLOOP
@@ -290,7 +291,7 @@ CBSDF EvaluateBSDF(float3 V, float3 L, PreLightData preLightData, BSDFData bsdfD
 
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/Reflection/VolumeProjection.hlsl"
 
-void EvaluateLight_EnvIntersection(float3 positionWS, float3 normalWS, EnvLightData lightData, int influenceShapeType, inout float3 R, inout float weight)
+float EvaluateLight_EnvIntersection(float3 positionWS, float3 normalWS, EnvLightData light, int influenceShapeType, inout float3 R, inout float weight)
 {
     // Guideline for reflection volume: In HDRenderPipeline we separate the projection volume (the proxy of the scene) from the influence volume (what pixel on the screen is affected)
     // However we add the constrain that the shape of the projection and influence volume is the same (i.e if we have a sphere shape projection volume, we have a shape influence).
@@ -298,25 +299,42 @@ void EvaluateLight_EnvIntersection(float3 positionWS, float3 normalWS, EnvLightD
     // Users can also chose to not have any projection, in this case we use the property minProjectionDistance to minimize code change. minProjectionDistance is set to huge number
     // that simulate effect of no shape projection
 
-    float3x3 worldToIS = WorldToInfluenceSpace(lightData); // IS: Influence space
-    float3 positionIS = WorldToInfluencePosition(lightData, worldToIS, positionWS);
-    float3 dirIS = mul(R, worldToIS);
+    float3x3 worldToIS = WorldToInfluenceSpace(light); // IS: Influence space
+    float3 positionIS = WorldToInfluencePosition(light, worldToIS, positionWS);
+    float3 dirIS = normalize(mul(R, worldToIS));
+
+    float3x3 worldToPS = WorldToProxySpace(light); // PS: Proxy space
+    float3 positionPS = WorldToProxyPosition(light, worldToPS, positionWS);
+    float3 dirPS = mul(R, worldToPS);
+
+    float projectionDistance = 0;
 
     // Process the projection
     // In Unity the cubemaps are capture with the localToWorld transform of the component.
     // This mean that location and orientation matter. So after intersection of proxy volume we need to convert back to world.
     if (influenceShapeType == ENVSHAPETYPE_SPHERE)
     {
-        weight = InfluenceSphereWeight(lightData, normalWS, positionWS, positionIS, dirIS);
+        projectionDistance = IntersectSphereProxy(light, dirPS, positionPS);
+        // We can reuse dist calculate in LS directly in WS as there is no scaling. Also the offset is already include in light.capturePositionRWS
+        R = (positionWS + projectionDistance * R) - light.capturePositionRWS;
+
+        weight = InfluenceSphereWeight(light, normalWS, positionWS, positionIS, dirIS);
     }
     else if (influenceShapeType == ENVSHAPETYPE_BOX)
     {
-        weight = InfluenceBoxWeight(lightData, normalWS, positionWS, positionIS, dirIS);
+        projectionDistance = IntersectBoxProxy(light, dirPS, positionPS);
+        // No need to normalize for fetching cubemap
+        // We can reuse dist calculate in LS directly in WS as there is no scaling. Also the offset is already include in light.capturePositionRWS
+        R = (positionWS + projectionDistance * R) - light.capturePositionRWS;
+
+        weight = InfluenceBoxWeight(light, normalWS, positionWS, positionIS, dirIS);
     }
 
     // Smooth weighting
     weight = Smoothstep01(weight);
-    weight *= lightData.weight;
+    weight *= light.weight;
+
+    return projectionDistance;
 }
 
 #define OVERRIDE_EVALUATE_ENV_INTERSECTION
@@ -327,9 +345,10 @@ void EvaluateLight_EnvIntersection(float3 positionWS, float3 normalWS, EnvLightD
 #endif
 #define LIGHT_EVALUATION_NO_CONTACT_SHADOWS
 // TODO: validate that the condition will work!
-#if !HDRP_ENABLE_SHADOWS
+#if defined(_RECEIVE_SHADOWS_OFF)
 #define LIGHT_EVALUATION_NO_SHADOWS
 #endif
+#define LIGHT_EVALUATION_NO_CLOUDS_SHADOWS
 
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightEvaluation.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/MaterialEvaluation.hlsl"

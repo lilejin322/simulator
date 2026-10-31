@@ -1,8 +1,9 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Experimental.Rendering;
-using System;
+using UnityEngine.Rendering.HighDefinition;
 
 // Include material common properties names
 using static UnityEngine.Rendering.HighDefinition.HDMaterialProperties;
@@ -14,42 +15,39 @@ namespace UnityEditor.Rendering.HighDefinition
     /// </summary>
     class TerrainLitGUI : HDShaderGUI, ITerrainLayerCustomUI
     {
-        const SurfaceOptionUIBlock.Features surfaceOptionFeatures = SurfaceOptionUIBlock.Features.Unlit;
+        const SurfaceOptionUIBlock.Features surfaceOptionFeatures = SurfaceOptionUIBlock.Features.Unlit | SurfaceOptionUIBlock.Features.ReceiveDecal | SurfaceOptionUIBlock.Features.AlphaCutoff;
+        const AdvancedOptionsUIBlock.Features advancedOptionsFeatures = AdvancedOptionsUIBlock.Features.Instancing | AdvancedOptionsUIBlock.Features.SpecularOcclusion;
 
         [Flags]
         enum Expandable
         {
-            Terrain     = 1 << 0,
+            Terrain = 1 << 1,
         }
 
         MaterialUIBlockList uiBlocks = new MaterialUIBlockList
         {
-            new SurfaceOptionUIBlock(MaterialUIBlock.Expandable.Base, features: surfaceOptionFeatures),
-            new AdvancedOptionsUIBlock(MaterialUIBlock.Expandable.Advance, AdvancedOptionsUIBlock.Features.Instancing),
+            new SurfaceOptionUIBlock(MaterialUIBlock.ExpandableBit.Base, features: surfaceOptionFeatures),
+            new AdvancedOptionsUIBlock(MaterialUIBlock.ExpandableBit.Advance, features: advancedOptionsFeatures),
         };
 
         protected override void OnMaterialGUI(MaterialEditor materialEditor, MaterialProperty[] props)
         {
             FindMaterialProperties(props);
-            using (var changed = new EditorGUI.ChangeCheckScope())
-            {
-                uiBlocks.Initialize(materialEditor, props);
-                uiBlocks.FetchUIBlock< SurfaceOptionUIBlock >().UpdateMaterialProperties(props);
-                uiBlocks.FetchUIBlock< SurfaceOptionUIBlock >().OnGUI();
 
-                // TODO: move the terrain UI to a MaterialUIBlock to clarify the code
-                DrawTerrainGUI(materialEditor);
+            uiBlocks.Initialize(materialEditor, props);
+            uiBlocks.FetchUIBlock<SurfaceOptionUIBlock>().UpdateMaterialProperties(props);
+            uiBlocks.FetchUIBlock<SurfaceOptionUIBlock>().OnGUI();
 
-                uiBlocks.FetchUIBlock< SurfaceOptionUIBlock >().UpdateMaterialProperties(props);
-                uiBlocks.FetchUIBlock< AdvancedOptionsUIBlock >().OnGUI();
+            // TODO: move the terrain UI to a MaterialUIBlock to clarify the code
+            DrawTerrainGUI(materialEditor);
 
-                ApplyKeywordsAndPassesIfNeeded(changed.changed, uiBlocks.materials);
-            }
+            uiBlocks.FetchUIBlock<AdvancedOptionsUIBlock>().UpdateMaterialProperties(props);
+            uiBlocks.FetchUIBlock<AdvancedOptionsUIBlock>().OnGUI();
         }
 
         private class StylesLayer
         {
-            public readonly string terrainText = "Terrain";
+            public GUIContent header { get; } = EditorGUIUtility.TrTextContent("Terrain");
             public readonly GUIContent enableHeightBlend = new GUIContent("Enable Height-based Blend", "Blend terrain layers based on height values.");
             public readonly GUIContent heightTransition = new GUIContent("Height Transition", "Size in world units of the smooth transition between layers.");
             public readonly GUIContent enableInstancedPerPixelNormal = new GUIContent("Enable Per-pixel Normal", "Enable per-pixel normal when the terrain uses instanced rendering.");
@@ -83,15 +81,8 @@ namespace UnityEditor.Rendering.HighDefinition
         }
 
         MaterialProperty enableHeightBlend;
-        const string kEnableHeightBlend = "_EnableHeightBlend";
-        const string kSpecularOcclusionMode = "_SpecularOcclusionMode";
-
-        // Height blend
         MaterialProperty heightTransition = null;
-        const string kHeightTransition = "_HeightTransition";
-
         MaterialProperty enableInstancedPerPixelNormal = null;
-        const string kEnableInstancedPerPixelNormal = "_EnableInstancedPerPixelNormal";
 
         // Custom fields
         List<MaterialProperty> customProperties = new List<MaterialProperty>();
@@ -107,7 +98,7 @@ namespace UnityEditor.Rendering.HighDefinition
                     heightTransition = prop;
                 else if (prop.name == kEnableInstancedPerPixelNormal)
                     enableInstancedPerPixelNormal = prop;
-                else if ((prop.flags & (MaterialProperty.PropFlags.HideInInspector | MaterialProperty.PropFlags.PerRendererData)) == 0)
+                else if ((prop.propertyFlags & (ShaderPropertyFlags.HideInInspector | ShaderPropertyFlags.PerRendererData)) == 0)
                     customProperties.Add(prop);
             }
         }
@@ -129,26 +120,6 @@ namespace UnityEditor.Rendering.HighDefinition
         }
 
         // All Setup Keyword functions must be static. It allow to create script to automatically update the shaders with a script if code change
-        static public void SetupMaterialKeywordsAndPass(Material material)
-        {
-            BaseLitGUI.SetupBaseLitKeywords(material);
-            BaseLitGUI.SetupBaseLitMaterialPass(material);
-            bool receiveSSR = material.GetSurfaceType() == SurfaceType.Opaque ? (material.HasProperty(kReceivesSSR) ? material.GetInt(kReceivesSSR) != 0 : false)
-                        : (material.HasProperty(kReceivesSSRTransparent) ? material.GetInt(kReceivesSSRTransparent) != 0 : false);
-            BaseLitGUI.SetupStencil(material, receiveSSR, material.GetMaterialId() == MaterialId.LitSSS);
-
-            // TODO: planar/triplannar support
-            //SetupLayersMappingKeywords(material);
-
-            bool enableHeightBlend = material.HasProperty(kEnableHeightBlend) && material.GetFloat(kEnableHeightBlend) > 0;
-            CoreUtils.SetKeyword(material, "_TERRAIN_BLEND_HEIGHT", enableHeightBlend);
-
-            bool enableInstancedPerPixelNormal = material.HasProperty(kEnableInstancedPerPixelNormal) && material.GetFloat(kEnableInstancedPerPixelNormal) > 0.0f;
-            CoreUtils.SetKeyword(material, "_TERRAIN_INSTANCED_PERPIXEL_NORMAL", enableInstancedPerPixelNormal);
-
-            int specOcclusionMode = material.GetInt(kSpecularOcclusionMode);
-            CoreUtils.SetKeyword(material, "_SPECULAR_OCCLUSION_NONE", specOcclusionMode == 0);
-        }
 
         static public bool TextureHasAlpha(Texture2D inTex)
         {
@@ -165,7 +136,7 @@ namespace UnityEditor.Rendering.HighDefinition
             if (enableHeightBlend == null && enableInstancedPerPixelNormal == null && customProperties.Count == 0)
                 return;
 
-            using (var header = new MaterialHeaderScope(styles.terrainText, (uint)Expandable.Terrain, materialEditor))
+            using (var header = new MaterialHeaderScope(styles.header, (uint)Expandable.Terrain, materialEditor))
             {
                 if (header.expanded)
                 {
@@ -219,7 +190,15 @@ namespace UnityEditor.Rendering.HighDefinition
             // Don't use the member field enableHeightBlend as ShaderGUI.OnGUI might not be called if the material UI is folded.
             bool heightBlend = terrain.materialTemplate.HasProperty(kEnableHeightBlend) && terrain.materialTemplate.GetFloat(kEnableHeightBlend) > 0;
 
-            terrainLayer.diffuseTexture = EditorGUILayout.ObjectField(styles.diffuseTexture, terrainLayer.diffuseTexture, typeof(Texture2D), false) as Texture2D;
+            EditorGUI.BeginChangeCheck();
+            var diffuseTexture = EditorGUILayout.ObjectField(styles.diffuseTexture, terrainLayer.diffuseTexture, typeof(Texture2D), false) as Texture2D;
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(terrainLayer, "Terrain Layer Diffuse Texture");
+                terrainLayer.diffuseTexture = diffuseTexture;
+            }
+            // Anchor before validation, which may insert help boxes.
+            var diffuseFieldRect = GUILayoutUtility.GetLastRect();
             TerrainLayerUtility.ValidateDiffuseTextureUI(terrainLayer.diffuseTexture);
 
             var diffuseRemapMin = terrainLayer.diffuseRemapMin;
@@ -229,7 +208,7 @@ namespace UnityEditor.Rendering.HighDefinition
             bool enableDensity = false;
             if (terrainLayer.diffuseTexture != null)
             {
-                var rect = GUILayoutUtility.GetLastRect();
+                var rect = diffuseFieldRect;
                 rect.y += 16 + 4;
                 rect.width = EditorGUIUtility.labelWidth + 64;
                 rect.height = 16;
@@ -256,26 +235,47 @@ namespace UnityEditor.Rendering.HighDefinition
 
             if (EditorGUI.EndChangeCheck())
             {
+                Undo.RecordObject(terrainLayer, "Terrain Layer Diffuse Remap");
                 terrainLayer.diffuseRemapMin = diffuseRemapMin;
                 terrainLayer.diffuseRemapMax = diffuseRemapMax;
             }
 
-            terrainLayer.normalMapTexture = EditorGUILayout.ObjectField(styles.normalMapTexture, terrainLayer.normalMapTexture, typeof(Texture2D), false) as Texture2D;
+            EditorGUI.BeginChangeCheck();
+            var normalMapTexture = EditorGUILayout.ObjectField(styles.normalMapTexture, terrainLayer.normalMapTexture, typeof(Texture2D), false) as Texture2D;
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(terrainLayer, "Terrain Layer Normal Map");
+                terrainLayer.normalMapTexture = normalMapTexture;
+            }
+            // Anchor before validation, which may insert help boxes.
+            var normalMapFieldRect = GUILayoutUtility.GetLastRect();
             TerrainLayerUtility.ValidateNormalMapTextureUI(terrainLayer.normalMapTexture, TerrainLayerUtility.CheckNormalMapTextureType(terrainLayer.normalMapTexture));
 
             if (terrainLayer.normalMapTexture != null)
             {
-                var rect = GUILayoutUtility.GetLastRect();
+                var rect = normalMapFieldRect;
                 rect.y += 16 + 4;
                 rect.width = EditorGUIUtility.labelWidth + 64;
                 rect.height = 16;
 
                 ++EditorGUI.indentLevel;
-                terrainLayer.normalScale = EditorGUI.FloatField(rect, styles.normalScale, terrainLayer.normalScale);
+                EditorGUI.BeginChangeCheck();
+                var normalScale = EditorGUI.FloatField(rect, styles.normalScale, terrainLayer.normalScale);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObject(terrainLayer, "Terrain Layer Normal Scale");
+                    terrainLayer.normalScale = normalScale;
+                }
                 --EditorGUI.indentLevel;
             }
 
-            terrainLayer.maskMapTexture = EditorGUILayout.ObjectField(heightBlend ? styles.maskMapTexture : styles.maskMapTextureWithoutHeight, terrainLayer.maskMapTexture, typeof(Texture2D), false) as Texture2D;
+            EditorGUI.BeginChangeCheck();
+            var maskMapTexture = EditorGUILayout.ObjectField(heightBlend ? styles.maskMapTexture : styles.maskMapTextureWithoutHeight, terrainLayer.maskMapTexture, typeof(Texture2D), false) as Texture2D;
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(terrainLayer, "Terrain Layer Mask Map");
+                terrainLayer.maskMapTexture = maskMapTexture;
+            }
             TerrainLayerUtility.ValidateMaskMapTextureUI(terrainLayer.maskMapTexture);
 
             var maskMapRemapMin = terrainLayer.maskMapRemapMin;
@@ -348,19 +348,39 @@ namespace UnityEditor.Rendering.HighDefinition
                     maskMapRemapMin.y = Mathf.Min(maskMapRemapMin.y, maskMapRemapMax.y);
                     maskMapRemapMin.z = Mathf.Min(Mathf.Max(0, maskMapRemapMin.z), maskMapRemapMax.z);
 
+                    // See also: TerrainLitShaderGUI, TerrainLayerInspector.
                     if (TextureHasAlpha(terrainLayer.diffuseTexture))
                     {
-                        GUIStyle warnStyle = new GUIStyle(GUI.skin.label);
-                        warnStyle.wordWrap = true;
-                        GUILayout.Label("Smoothness is controlled by diffuse alpha channel", warnStyle);
+                        EditorGUI.BeginChangeCheck();
+                        var smoothnessSource = (UnityEngine.TerrainLayerSmoothnessSource)EditorGUILayout.EnumPopup(
+                            EditorGUIUtility.TrTextContent("Smoothness Source"), terrainLayer.smoothnessSource);
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            Undo.RecordObject(terrainLayer, "Terrain Layer Smoothness Source");
+                            terrainLayer.smoothnessSource = smoothnessSource;
+                        }
+
+                        if (terrainLayer.smoothnessSource == TerrainLayerSmoothnessSource.DiffuseAlphaChannel)
+                        {
+                            GUIStyle warnStyle = new GUIStyle(GUI.skin.label);
+                            warnStyle.wordWrap = true;
+                            GUILayout.Label("Smoothness is controlled by diffuse alpha channel", warnStyle);
+                        }
+                        else
+                        {
+                            smoothness = EditorGUILayout.Slider(s_Styles.smoothness, smoothness, 0, 1);
+                        }
                     }
                     else
+                    {
                         smoothness = EditorGUILayout.Slider(s_Styles.smoothness, smoothness, 0, 1);
+                    }
                 }
             }
 
             if (EditorGUI.EndChangeCheck())
             {
+                Undo.RecordObject(terrainLayer, "Terrain Layer Mask Map Remap");
                 terrainLayer.maskMapRemapMin = maskMapRemapMin;
                 terrainLayer.maskMapRemapMax = maskMapRemapMax;
                 terrainLayer.smoothness = smoothness;
@@ -374,6 +394,6 @@ namespace UnityEditor.Rendering.HighDefinition
             return true;
         }
 
-        protected override void SetupMaterialKeywordsAndPassInternal(Material material) => SetupMaterialKeywordsAndPass(material);
+        public override void ValidateMaterial(Material material) => TerrainLitAPI.ValidateMaterial(material);
     }
 } // namespace UnityEditor

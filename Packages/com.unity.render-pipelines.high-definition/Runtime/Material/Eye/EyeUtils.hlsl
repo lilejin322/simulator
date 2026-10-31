@@ -3,9 +3,14 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
 
+// This defines the radius of the iris in the geometry provided by the HDRP package
+#define BUILTIN_IRIS_RADIUS 0.22
+#define BUILTIN_CORNEA_IOR 1.3333
+#define BUILTIN_IRIS_PLANE_OFFSET 0.02
+
 void GetScleraUVLocation(float3 positionOS, out float2 scleraUV)
 {
-    scleraUV =  positionOS.xy + float2(0.5, 0.5);
+    scleraUV = positionOS.xy + float2(0.5, 0.5);
 }
 
 void GetIrisUVLocation(float3 positionOS, float irisRadius, out float2 irisUV)
@@ -49,7 +54,7 @@ void CirclePupilAnimation(float2 irusUV, float pupilRadius, float pupilAperture,
 
 void CorneaRefraction(float3 positionOS, float3 viewDirectionOS, float3 corneaNormalOS, float corneaIOR, float irisPlaneOffset, out float3 refractedPositionOS)
 {
-    // Compute the refracted 
+    // Compute the refracted
     float eta = 1.0 / (corneaIOR);
     corneaNormalOS = normalize(corneaNormalOS);
     viewDirectionOS = -normalize(viewDirectionOS);
@@ -98,7 +103,7 @@ void ScleraLimbalRing(float3 positionOS, float3 viewOS, float irisRadius, float 
 
 void ScleraIrisBlend(float3 scleraColor, float3 scleraNormal, float scleraSmoothness,
                             float3 irisColor, float3 irisNormal, float corneaSmoothness,
-                            float irisRadius, 
+                            float irisRadius,
                             float3 positionOS,
                             float diffusionProfileSclera, float diffusionProfileIris,
                             out float3 eyeColor, out float surfaceMask,

@@ -266,8 +266,8 @@ public class NPCController : MonoBehaviour, ITriggerAgent, IMessageSender, IMess
         if (MetaData.RefRB != null)
         {
             rb.mass = MetaData.RefRB.mass;
-            rb.drag = MetaData.RefRB.drag;
-            rb.angularDrag = MetaData.RefRB.angularDrag;
+            rb.linearDamping = MetaData.RefRB.linearDamping;
+            rb.angularDamping = MetaData.RefRB.angularDamping;
             rb.useGravity = MetaData.RefRB.useGravity;
             rb.isKinematic = MetaData.RefRB.isKinematic;
             rb.interpolation = MetaData.RefRB.interpolation;
@@ -520,7 +520,7 @@ public class NPCController : MonoBehaviour, ITriggerAgent, IMessageSender, IMess
         StopNPCCoroutines();
         ResetLights();
         rb.angularVelocity = Vector3.zero;
-        rb.velocity = Vector3.zero;
+        rb.linearVelocity = Vector3.zero;
         isLeftTurn = false;
         isRightTurn = false;
         isForcedStop = false;

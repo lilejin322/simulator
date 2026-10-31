@@ -215,7 +215,7 @@ public class SimulatorCameraController : MonoBehaviour
         var targetPos = targetObject.transform.position;
 
         var rigidBody = targetObject.GetComponent<Rigidbody>();
-        var velocityVec = rigidBody != null ? rigidBody.velocity : (targetPos - lastTargetPosition) / Time.unscaledDeltaTime;
+        var velocityVec = rigidBody != null ? rigidBody.linearVelocity : (targetPos - lastTargetPosition) / Time.unscaledDeltaTime;
         lastTargetPosition = targetPos;
 
         var velocity = Mathf.Clamp(velocityVec.magnitude, 0f, 25f);

@@ -19,8 +19,8 @@ namespace UnityEditor.Rendering.HighDefinition
         /// <c>false</c> if it has a single value.
         /// </summary>
         public bool hasMultipleValues => useOverride.hasMultipleDifferentValues
-                || useOverride.boolValue && @override.hasMultipleDifferentValues
-                || !useOverride.boolValue && level.hasMultipleDifferentValues;
+        || useOverride.boolValue && @override.hasMultipleDifferentValues
+        || !useOverride.boolValue && level.hasMultipleDifferentValues;
 
         public SerializedScalableSettingValue(SerializedProperty property)
         {
@@ -210,18 +210,22 @@ namespace UnityEditor.Rendering.HighDefinition
             EditorGUI.BeginProperty(levelRect, label, self.useOverride);
             {
                 EditorGUI.BeginChangeCheck();
-                var (level, useOverride) = LevelFieldGUI(
-                    levelRect,
-                    GUIContent.none,
-                    schema,
-                    self.level.intValue,
-                    self.useOverride.boolValue
-                );
-                if (EditorGUI.EndChangeCheck())
+
+                using (new EditorGUI.MixedValueScope(self.useOverride.hasMultipleDifferentValues || !self.useOverride.boolValue && self.level.hasMultipleDifferentValues))
                 {
-                    self.useOverride.boolValue = useOverride;
-                    if (!self.useOverride.boolValue)
-                        self.level.intValue = level;
+                    var (level, useOverride) = LevelFieldGUI(
+                        levelRect,
+                        GUIContent.none,
+                        schema,
+                        EditorGUI.showMixedValue ? -1 : self.level.intValue, // Force the GUI to update even if we select the same level as the first item
+                        self.useOverride.boolValue
+                    );
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        self.useOverride.boolValue = useOverride;
+                        if (!self.useOverride.boolValue)
+                            self.level.intValue = level;
+                    }
                 }
             }
             EditorGUI.EndProperty();
@@ -232,7 +236,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
         /// <summary>
         /// Draw the scalable setting as a popup and field GUI in a single line.
-        /// 
+        ///
         /// This helper statically dispatch the appropriate GUI call depending
         /// on the multiselection state of the serialized properties.
         /// </summary>
@@ -381,7 +385,14 @@ namespace UnityEditor.Rendering.HighDefinition
                 string sourceName
             )
             {
-                EditorGUI.LabelField(fieldRect, $"{(sourceValue != null ? sourceValue[self.level.intValue] : 0)} ({sourceName})");
+                if (sourceValue != null && sourceValue[self.level.intValue] >= 0)
+                {
+                    EditorGUI.LabelField(fieldRect, $"{sourceValue[self.level.intValue]} ({sourceName})");
+                }
+                else
+                {
+                    EditorGUI.LabelField(fieldRect, $"--- ({sourceName})");
+                }
             }
 
             public void MixedValueDescriptionGUI(

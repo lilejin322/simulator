@@ -4,7 +4,7 @@ using UnityEngine.Rendering.HighDefinition;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
-    [VolumeComponentEditor(typeof(Vignette))]
+    [CustomEditor(typeof(Vignette))]
     sealed class VignetteEditor : VolumeComponentEditor
     {
         SerializedDataParameter m_Mode;
@@ -39,6 +39,8 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public override void OnInspectorGUI()
         {
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.Vignette);
+
             PropertyField(m_Mode);
             PropertyField(m_Color);
 

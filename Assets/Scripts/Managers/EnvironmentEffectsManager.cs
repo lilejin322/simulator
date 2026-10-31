@@ -274,6 +274,20 @@ public class EnvironmentEffectsManager : MonoBehaviour
         TimeOfDayLights.ForEach(x => x.Init(CurrentTimeOfDayState));
         Array.ForEach(FindObjectsOfType<TimeOfDayBuilding>(), x => x.Init(CurrentTimeOfDayState));
         TimeOfDayCycle();
+        DropTerrainTreeBillboards();
+    }
+
+    // HDRP 10 never drew terrain tree billboards, so a terrain showed its trees within the billboard distance only,
+    // as meshes. HDRP 17 draws the billboards as dark boxes. Keep the HDRP 10 look: no billboards, the trees within
+    // the billboard distance as meshes.
+    private static void DropTerrainTreeBillboards()
+    {
+        foreach (var terrain in Terrain.activeTerrains)
+        {
+            terrain.treeDistance = Mathf.Min(terrain.treeDistance, terrain.treeBillboardDistance);
+            terrain.treeBillboardDistance = terrain.treeDistance;
+            terrain.treeMaximumFullLODCount = int.MaxValue;
+        }
     }
 
     public void Reset()

@@ -6,7 +6,8 @@ namespace UnityEngine.Rendering.HighDefinition
     /// A volume component that holds settings for the Panini Projection effect.
     /// </summary>
     [Serializable, VolumeComponentMenu("Post-processing/Panini Projection")]
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Post-Processing-Panini-Projection" + Documentation.endURL)]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
+    [HDRPHelpURL("Post-Processing-Panini-Projection")]
     public sealed class PaniniProjection : VolumeComponent, IPostProcessComponent
     {
         /// <summary>
@@ -19,6 +20,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// Controls how much cropping HDRP applies to the screen with the panini projection effect. A value of 1 crops the distortion to the edge of the screen.
         /// </summary>
         [Tooltip("Controls how much cropping HDRP applies to the screen with the panini projection effect. A value of 1 crops the distortion to the edge of the screen.")]
+        [Indent]
         public ClampedFloatParameter cropToFit = new ClampedFloatParameter(1f, 0f, 1f);
 
         /// <summary>

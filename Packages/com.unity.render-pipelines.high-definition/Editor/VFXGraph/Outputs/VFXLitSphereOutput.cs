@@ -1,18 +1,17 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor.VFX.Block;
-using UnityEngine;
 
-namespace UnityEditor.VFX
+namespace UnityEditor.VFX.HDRP
 {
-    [VFXInfo(experimental = true)]
+    [VFXInfo(name = "Output Particle|HDRP Lit|Sphere", category = "#5Output Debug", experimental = true)]
     class VFXLitSphereOutput : VFXAbstractParticleHDRPLitOutput
     {
-        public override string name { get { return "Output Particle Lit Sphere"; } }
-        public override string codeGeneratorTemplate { get { return RenderPipeTemplate("VFXParticleSphere"); } }
-        public override VFXTaskType taskType { get { return VFXTaskType.ParticleQuadOutput; } }
+        public override string name => "Output Particle".AppendLabel("HDRP Lit", false) + "\nSphere";
+        public override string codeGeneratorTemplate => RenderPipeTemplate("VFXParticleSphere");
+        public override VFXTaskType taskType => VFXTaskType.ParticleQuadOutput;
 
-        protected override bool allowTextures { get { return false; } }
+        protected override bool allowTextures => false;
 
         public override void OnEnable()
         {
@@ -44,7 +43,7 @@ namespace UnityEditor.VFX
         {
             get
             {
-                var orient = VFXBlock.CreateImplicitBlock<Orient>(GetData());
+                var orient = GetOrCreateImplicitBlock<Orient>(GetData());
                 orient.mode = Orient.Mode.FaceCameraPosition;
                 yield return orient;
             }
@@ -57,11 +56,38 @@ namespace UnityEditor.VFX
                 foreach (var setting in base.filteredOutSettings)
                     yield return setting;
 
-                yield return "cullMode";
-                yield return "blendMode";
-                yield return "useAlphaClipping";
-                yield return "doubleSided";
-                yield return "shaderGraph";
+                yield return nameof(cullMode);
+                yield return nameof(blendMode);
+                yield return nameof(useAlphaClipping);
+                yield return nameof(doubleSided);
+                yield return nameof(shaderGraph);
+                yield return nameof(enableRayTracing);
+            }
+        }
+
+        protected override IEnumerable<string> untransferableSettings
+        {
+            get
+            {
+                foreach (var setting in base.untransferableSettings)
+                {
+                    yield return setting;
+                }
+                yield return nameof(blendMode);
+                yield return nameof(doubleSided);
+                yield return nameof(shaderGraph);
+                yield return nameof(enableRayTracing);
+            }
+        }
+
+        public override IEnumerable<string> additionalDefines
+        {
+            get
+            {
+                foreach (var define in base.additionalDefines)
+                    yield return define;
+
+                yield return "_CONSERVATIVE_DEPTH_OFFSET";
             }
         }
     }

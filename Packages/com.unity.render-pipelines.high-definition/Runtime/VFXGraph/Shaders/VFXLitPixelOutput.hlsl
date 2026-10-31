@@ -1,5 +1,6 @@
 #if (SHADERPASS == SHADERPASS_FORWARD)
 
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Debug/DebugDisplayMaterial.hlsl"
 
 float4 VFXCalcPixelOutputForward(const SurfaceData surfaceData, const BuiltinData builtinData, const PreLightData preLightData, BSDFData bsdfData, const PositionInputs posInput, float3 posRWS)
 {
@@ -22,55 +23,34 @@ float4 VFXCalcPixelOutputForward(const SurfaceData surfaceData, const BuiltinDat
 
     #endif
 
-    LightLoopOutput lightLoopOutput;
-    LightLoop(GetWorldSpaceNormalizeViewDir(posRWS), posInput, preLightData, bsdfData, builtinData, featureFlags, lightLoopOutput);
+    #if VFX_MATERIAL_TYPE_SIX_WAY_SMOKE
+    featureFlags &= ~(LIGHTFEATUREFLAGS_ENV | LIGHTFEATUREFLAGS_SKY | LIGHTFEATUREFLAGS_SSREFRACTION | LIGHTFEATUREFLAGS_SSREFLECTION);
+    #endif
 
-    // Alias
-    float3 diffuseLighting = lightLoopOutput.diffuseLighting;
-    float3 specularLighting = lightLoopOutput.specularLighting;
+    float4 outColor = float4(0,0,0,0);
+    #if IS_TRANSPARENT_PARTICLE
+    if(_EnableBlendModePreserveSpecularLighting || builtinData.opacity > 0)
+        #endif
+    {
+        LightLoopOutput lightLoopOutput;
+        LightLoop(GetWorldSpaceNormalizeViewDir(posRWS), posInput, preLightData, bsdfData, builtinData, featureFlags, lightLoopOutput);
 
-    diffuseLighting *= GetCurrentExposureMultiplier();
-    specularLighting *= GetCurrentExposureMultiplier();
+        // Alias
+        float3 diffuseLighting = lightLoopOutput.diffuseLighting;
+        float3 specularLighting = lightLoopOutput.specularLighting;
 
-    float4 outColor = ApplyBlendMode(diffuseLighting, specularLighting, builtinData.opacity);
-    outColor = EvaluateAtmosphericScattering(posInput, GetWorldSpaceNormalizeViewDir(posRWS), outColor);
+        diffuseLighting *= GetCurrentExposureMultiplier();
+        specularLighting *= GetCurrentExposureMultiplier();
+
+        outColor = ApplyBlendMode(diffuseLighting, specularLighting, builtinData.opacity);
+        outColor = EvaluateAtmosphericScattering(posInput, GetWorldSpaceNormalizeViewDir(posRWS), outColor);
+    }
 
 #ifdef DEBUG_DISPLAY
-    // Same code in ShaderPassForward.shader
-    // Reminder: _DebugViewMaterialArray[i]
-    //   i==0 -> the size used in the buffer
-    //   i>0  -> the index used (0 value means nothing)
-    // The index stored in this buffer could either be
-    //   - a gBufferIndex (always stored in _DebugViewMaterialArray[1] as only one supported)
-    //   - a property index which is different for each kind of material even if reflecting the same thing (see MaterialSharedProperty)
-    int bufferSize = _DebugViewMaterialArray[0].x;
-    if (bufferSize != 0)
+    float4 debugColor = 0;
+    if (GetMaterialDebugColor(debugColor, builtinData, posInput, surfaceData, bsdfData))
     {
-        float3 result = float3(1.0, 0.0, 1.0);
-        bool needLinearToSRGB = false;
-                
-        // Loop through the whole buffer
-        // Works because GetSurfaceDataDebug will do nothing if the index is not a known one
-        for (int index = 1; index <= bufferSize; index++)
-        {
-            int indexMaterialProperty = _DebugViewMaterialArray[index].x;
-            if (indexMaterialProperty != 0)
-            {
-                GetPropertiesDataDebug(indexMaterialProperty, result, needLinearToSRGB);
-                //GetVaryingsDataDebug(indexMaterialProperty, input, result, needLinearToSRGB);
-                GetBuiltinDataDebug(indexMaterialProperty, builtinData, posInput, result, needLinearToSRGB);
-                GetSurfaceDataDebug(indexMaterialProperty, surfaceData, result, needLinearToSRGB);
-                GetBSDFDataDebug(indexMaterialProperty, bsdfData, result, needLinearToSRGB);
-            }
-        }
-        
-        // TEMP!
-        // For now, the final blit in the backbuffer performs an sRGB write
-        // So in the meantime we apply the inverse transform to linear data to compensate, unless we output to AOVs.
-        if (!needLinearToSRGB && _DebugAOVOutput == 0)
-            result = SRGBToLinear(max(0, result));
-
-        outColor = float4(result, 1.0);
+        outColor = debugColor;
     }
 
     if (_DebugFullScreenMode == FULLSCREENDEBUGMODE_TRANSPARENCY_OVERDRAW)
@@ -85,7 +65,7 @@ float4 VFXCalcPixelOutputForward(const SurfaceData surfaceData, const BuiltinDat
 
 #ifndef VFX_SHADERGRAPH
 
-float4 VFXGetPixelOutputForward(const VFX_VARYING_PS_INPUTS i, float3 normalWS, const VFXUVData uvData)
+float4 VFXGetPixelOutputForward(const VFX_VARYING_PS_INPUTS i, float3 normalWS, const VFXUVData uvData, bool frontFace)
 {
     SurfaceData surfaceData;
     BuiltinData builtinData;
@@ -93,7 +73,7 @@ float4 VFXGetPixelOutputForward(const VFX_VARYING_PS_INPUTS i, float3 normalWS, 
     PreLightData preLightData;
 
     uint2 tileIndex = uint2(i.VFX_VARYING_POSCS.xy) / GetTileSize();
-    VFXGetHDRPLitData(surfaceData,builtinData,bsdfData,preLightData,i,normalWS,uvData,tileIndex);
+    VFXGetHDRPLitData(surfaceData,builtinData,bsdfData,preLightData,i,normalWS,uvData, frontFace, tileIndex);
 
     float3 posRWS = VFXGetPositionRWS(i);
     PositionInputs posInput = GetPositionInput(i.VFX_VARYING_POSCS.xy, _ScreenSize.zw, i.VFX_VARYING_POSCS.z, i.VFX_VARYING_POSCS.w, posRWS, tileIndex);
@@ -132,10 +112,9 @@ float4 VFXGetPixelOutputForwardShaderGraph(const VFX_VARYING_PS_INPUTS i, const 
 
 void VFXSetupBuiltinForGBuffer(const VFX_VARYING_PS_INPUTS i, const SurfaceData surface, float3 emissiveColor, float opacity, out BuiltinData builtin)
 {
-    uint2 tileIndex = uint2(0,0);
     float3 posRWS = VFXGetPositionRWS(i);
     float4 posSS = i.VFX_VARYING_POSCS;
-    PositionInputs posInput = GetPositionInput(posSS.xy, _ScreenSize.zw, posSS.z, posSS.w, posRWS, tileIndex);
+    PositionInputs posInput = GetPositionInput(posSS.xy, _ScreenSize.zw, posSS.z, posSS.w, posRWS);
     InitBuiltinData(posInput, opacity, surface.normalWS, -surface.normalWS, (float4)0, (float4)0, builtin);
     builtin.emissiveColor = emissiveColor;
     PostInitBuiltinData(GetWorldSpaceNormalizeViewDir(posInput.positionWS), posInput, surface, builtin);
@@ -150,6 +129,9 @@ void VFXSetupBuiltinForGBuffer(const VFX_VARYING_PS_INPUTS i, const SurfaceData 
     ENCODE_INTO_GBUFFER(surfaceData, builtinData, i.VFX_VARYING_POSCS.xy, outGBuffer); \
 }
 
+#ifdef VFXComputePixelOutputToNormalBuffer
+#undef VFXComputePixelOutputToNormalBuffer
+#endif
 #define VFXComputePixelOutputToNormalBuffer(i,normalWS,uvData,outNormalBuffer) \
 { \
     SurfaceData surfaceData; \

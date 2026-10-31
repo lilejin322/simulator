@@ -7,6 +7,7 @@ namespace UnityEditor.Rendering.HighDefinition
     class SerializedHDShadowAtlasInitParams
     {
         public SerializedProperty shadowMapResolution;
+        public SerializedProperty cachedResolution;
         public SerializedProperty shadowMapDepthBits;
         public SerializedProperty useDynamicViewportRescale;
     }
@@ -17,27 +18,28 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public SerializedProperty directionalShadowMapDepthBits;
 
-        public SerializedHDShadowAtlasInitParams serializedPunctualAtlasInit = new SerializedHDShadowAtlasInitParams();
-        public SerializedHDShadowAtlasInitParams serializedAreaAtlasInit = new SerializedHDShadowAtlasInitParams();
+        public SerializedHDShadowAtlasInitParams serializedPunctualAtlasInit;
+        public SerializedHDShadowAtlasInitParams serializedAreaAtlasInit;
 
         public SerializedScalableSetting shadowResolutionDirectional;
         public SerializedScalableSetting shadowResolutionPunctual;
         public SerializedScalableSetting shadowResolutionArea;
 
+        public SerializedProperty allowDirectionalMixedCachedShadows;
         public SerializedProperty maxDirectionalShadowMapResolution;
         public SerializedProperty maxPunctualShadowMapResolution;
         public SerializedProperty maxAreaShadowMapResolution;
 
         public SerializedProperty maxShadowRequests;
 
-        public SerializedProperty shadowFilteringQuality;
+        public SerializedProperty punctualShadowFilteringQuality;
+        public SerializedProperty directionalShadowFilteringQuality;
+        public SerializedProperty areaShadowFilteringQuality;
 
         public SerializedProperty supportScreenSpaceShadows;
+        public SerializedProperty supportContactShadows;
         public SerializedProperty maxScreenSpaceShadowSlots;
         public SerializedProperty screenSpaceShadowBufferFormat;
-
-        public SerializedProperty cachedPunctualShadowAtlasResolution;
-        public SerializedProperty cachedAreaShadowAtlasResolution;
 
         public SerializedHDShadowInitParameters(SerializedProperty root)
         {
@@ -45,12 +47,22 @@ namespace UnityEditor.Rendering.HighDefinition
 
             directionalShadowMapDepthBits = root.Find((HDShadowInitParameters s) => s.directionalShadowsDepthBits);
 
-            serializedPunctualAtlasInit.shadowMapResolution = root.Find((HDShadowInitParameters s) => s.punctualLightShadowAtlas.shadowAtlasResolution);
-            serializedAreaAtlasInit.shadowMapResolution = root.Find((HDShadowInitParameters s) => s.areaLightShadowAtlas.shadowAtlasResolution);
-            serializedPunctualAtlasInit.shadowMapDepthBits = root.Find((HDShadowInitParameters s) => s.punctualLightShadowAtlas.shadowAtlasDepthBits);
-            serializedAreaAtlasInit.shadowMapDepthBits = root.Find((HDShadowInitParameters s) => s.areaLightShadowAtlas.shadowAtlasDepthBits);
-            serializedPunctualAtlasInit.useDynamicViewportRescale = root.Find((HDShadowInitParameters s) => s.punctualLightShadowAtlas.useDynamicViewportRescale);
-            serializedAreaAtlasInit.useDynamicViewportRescale = root.Find((HDShadowInitParameters s) => s.areaLightShadowAtlas.useDynamicViewportRescale);
+            serializedPunctualAtlasInit = new SerializedHDShadowAtlasInitParams
+            {
+                shadowMapResolution = root.Find((HDShadowInitParameters s) => s.punctualLightShadowAtlas.shadowAtlasResolution),
+                cachedResolution = root.Find((HDShadowInitParameters s) => s.cachedPunctualLightShadowAtlas),
+                shadowMapDepthBits = root.Find((HDShadowInitParameters s) => s.punctualLightShadowAtlas.shadowAtlasDepthBits),
+                useDynamicViewportRescale = root.Find((HDShadowInitParameters s) => s.punctualLightShadowAtlas.useDynamicViewportRescale)
+            };
+
+            serializedAreaAtlasInit = new SerializedHDShadowAtlasInitParams
+            {
+                shadowMapResolution = root.Find((HDShadowInitParameters s) => s.areaLightShadowAtlas.shadowAtlasResolution),
+                cachedResolution = root.Find((HDShadowInitParameters s) => s.cachedAreaLightShadowAtlas),
+                shadowMapDepthBits = root.Find((HDShadowInitParameters s) => s.areaLightShadowAtlas.shadowAtlasDepthBits),
+                useDynamicViewportRescale = root.Find((HDShadowInitParameters s) => s.areaLightShadowAtlas.useDynamicViewportRescale)
+            };
+
             maxShadowRequests = root.Find((HDShadowInitParameters s) => s.maxShadowRequests);
 
             shadowResolutionDirectional = new SerializedScalableSetting(root.Find((HDShadowInitParameters s) => s.shadowResolutionDirectional));
@@ -59,12 +71,13 @@ namespace UnityEditor.Rendering.HighDefinition
             maxDirectionalShadowMapResolution = root.Find((HDShadowInitParameters s) => s.maxDirectionalShadowMapResolution);
             maxPunctualShadowMapResolution = root.Find((HDShadowInitParameters s) => s.maxPunctualShadowMapResolution);
             maxAreaShadowMapResolution = root.Find((HDShadowInitParameters s) => s.maxAreaShadowMapResolution);
+            allowDirectionalMixedCachedShadows = root.Find((HDShadowInitParameters s) => s.allowDirectionalMixedCachedShadows);
 
-            cachedPunctualShadowAtlasResolution = root.Find((HDShadowInitParameters s) => s.cachedPunctualLightShadowAtlas);
-            cachedAreaShadowAtlasResolution = root.Find((HDShadowInitParameters s) => s.cachedAreaLightShadowAtlas);
-
-            shadowFilteringQuality = root.Find((HDShadowInitParameters s) => s.shadowFilteringQuality);
+            punctualShadowFilteringQuality = root.Find((HDShadowInitParameters s) => s.punctualShadowFilteringQuality);
+            directionalShadowFilteringQuality = root.Find((HDShadowInitParameters s) => s.directionalShadowFilteringQuality);
+            areaShadowFilteringQuality = root.Find((HDShadowInitParameters s) => s.areaShadowFilteringQuality);
             supportScreenSpaceShadows = root.Find((HDShadowInitParameters s) => s.supportScreenSpaceShadows);
+            supportContactShadows = root.Find((HDShadowInitParameters s) => s.supportContactShadows);
             maxScreenSpaceShadowSlots = root.Find((HDShadowInitParameters s) => s.maxScreenSpaceShadowSlots);
             screenSpaceShadowBufferFormat = root.Find((HDShadowInitParameters s) => s.screenSpaceShadowBufferFormat);
         }

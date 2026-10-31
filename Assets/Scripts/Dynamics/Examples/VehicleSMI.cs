@@ -14,7 +14,7 @@ using UnityEngine;
 public class VehicleSMI : MonoBehaviour, IVehicleDynamics
 {
     private Rigidbody RB;
-    public Vector3 Velocity => RB.velocity;
+    public Vector3 Velocity => RB.linearVelocity;
     public Vector3 AngularVelocity => RB.angularVelocity;
 
     public Transform BaseLink { get { return BaseLinkTransform; } }
@@ -44,7 +44,7 @@ public class VehicleSMI : MonoBehaviour, IVehicleDynamics
         {
             if (RB != null)
             {
-                return RB.velocity.magnitude;
+                return RB.linearVelocity.magnitude;
             }
             return 0f;
         }
@@ -162,9 +162,9 @@ public class VehicleSMI : MonoBehaviour, IVehicleDynamics
     public void FixedUpdate()
     {
         GetInput();
-        RB.AddForce(-AirDragCoeff * RB.velocity * RB.velocity.magnitude); //air drag (quadratic)
-        RB.AddForce(-AirDownForceCoeff * RB.velocity.sqrMagnitude * transform.up); //downforce (quadratic)
-        RB.AddForceAtPosition(-TireDragCoeff * RB.velocity, transform.position); //tire drag (Linear)
+        RB.AddForce(-AirDragCoeff * RB.linearVelocity * RB.linearVelocity.magnitude); //air drag (quadratic)
+        RB.AddForce(-AirDownForceCoeff * RB.linearVelocity.sqrMagnitude * transform.up); //downforce (quadratic)
+        RB.AddForceAtPosition(-TireDragCoeff * RB.linearVelocity, transform.position); //tire drag (Linear)
 
         SetGearRatio();
         SetRPM();
@@ -279,7 +279,7 @@ public class VehicleSMI : MonoBehaviour, IVehicleDynamics
     {
         RB.MovePosition(pos);
         RB.MoveRotation(rot);
-        RB.velocity = Vector3.zero;
+        RB.linearVelocity = Vector3.zero;
         RB.angularVelocity = Vector3.zero;
         CurrentGear = 1;
         CurrentRPM = 0f;
@@ -356,7 +356,7 @@ public class VehicleSMI : MonoBehaviour, IVehicleDynamics
             if (CurrentRPM / MaxRPM > ShiftUpCurve.Evaluate(AccellInput) && Mathf.RoundToInt(CurrentGear) < GearRatios.Length)
             {
                 //don't shift up if we are just spinning in 1st
-                if (Mathf.RoundToInt(CurrentGear) > 1 || RB.velocity.magnitude > 15f)
+                if (Mathf.RoundToInt(CurrentGear) > 1 || RB.linearVelocity.magnitude > 15f)
                 {
                     GearboxShiftUp();
                 }
@@ -445,7 +445,7 @@ public class VehicleSMI : MonoBehaviour, IVehicleDynamics
         var yawRate = OldRotation - transform.eulerAngles.y;
         if (Mathf.Abs(yawRate) < 10f) //don't adjust if the yaw rate is super high
         {
-            RB.velocity = Quaternion.AngleAxis(yawRate * AutoSteerAmount, Vector3.up) * RB.velocity;
+            RB.linearVelocity = Quaternion.AngleAxis(yawRate * AutoSteerAmount, Vector3.up) * RB.linearVelocity;
         }
 
         OldRotation = transform.eulerAngles.y;

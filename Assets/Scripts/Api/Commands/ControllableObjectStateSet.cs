@@ -32,7 +32,7 @@ namespace Simulator.Api.Commands
                 var rb = controllable.gameObject.GetComponent<Rigidbody>();
                 if (rb != null)
                 {
-                    rb.velocity = velocity;
+                    rb.linearVelocity = velocity;
                     rb.angularVelocity = angular_velocity;
                 }
 

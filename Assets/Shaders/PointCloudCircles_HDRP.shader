@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Copyright (c) 2019-2021 LG Electronics, Inc.
  *
  * This software contains code licensed as described in LICENSE.
@@ -18,7 +18,6 @@ Shader "Simulator/PointCloud/HDRP/Circles"
 
     #pragma target 4.5
     #pragma only_renderers d3d11 ps4 xboxone vulkan metal switch
-    #pragma require geometry
 
     #include "PointCloudCommon.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
@@ -40,11 +39,10 @@ Shader "Simulator/PointCloud/HDRP/Circles"
         float3 ViewPos : TEXCOORD2;
     };
 
-    [maxvertexcount(4)]
-    void GeomDefault(point PointCloudPoint pt[1]: POINT, inout TriangleStream<g2fd> stream)
+    g2fd ExpandDefault(PointCloudPoint pt, uint vertexID)
     {
-        float3 pos = pt[0].Position;
-        float4 color = PointCloudUnpack(pt[0].Color);
+        float3 pos = pt.Position;
+        float4 color = PointCloudUnpack(pt.Color);
         float3 worldPos = PointCloudWorldPositionHDRP(pos);
         float4 clip = TransformWorldToHClip(worldPos);
         float3 view = TransformWorldToView(worldPos);
@@ -66,22 +64,20 @@ Shader "Simulator/PointCloud/HDRP/Circles"
             float2(-1, -1),
             float2(1, -1),
             float2(-1, 1),
+            float2(-1, 1),
+            float2(1, -1),
             float2(1, 1),
         };
 
-        UNITY_UNROLL
-        for (int i = 0; i < 4; i++)
-        {
-            g2fd o;
-            o.Position.xy = clip.xy + scale * offsets[i];
-            o.Position.zw = clip.zw;
-            o.Color = color;
-            o.TexCoord = offsets[i];
-            o.WorldPos = worldPos;
-            o.Height = pos.y;
-            o.ViewPos = view;
-            stream.Append(o);
-        }
+        g2fd o;
+        o.Position.xy = clip.xy + scale * offsets[vertexID];
+        o.Position.zw = clip.zw;
+        o.Color = color;
+        o.TexCoord = offsets[vertexID];
+        o.WorldPos = worldPos;
+        o.Height = pos.y;
+        o.ViewPos = view;
+        return o;
     }
 
     ENDHLSL
@@ -103,20 +99,19 @@ Shader "Simulator/PointCloud/HDRP/Circles"
             HLSLPROGRAM
 
             #pragma vertex Vert
-            #pragma geometry GeomDefault
             #pragma fragment Frag
             #pragma multi_compile_local _ _SIZE_IN_PIXELS
             #pragma multi_compile _CIRCLES _CONES
             #pragma multi_compile _ _PC_TARGET_GBUFFER
 
-            PointCloudPoint Vert(uint id : SV_VertexID) : POINT
+            g2fd Vert(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
             {
-                return _Buffer[id];
+                return ExpandDefault(_Buffer[instanceID], vertexID);
             }
 
             void Frag(g2fd Input,
             #ifdef _PC_TARGET_GBUFFER
-                out float4 outGBuffer0 : SV_Target0, 
+                out float4 outGBuffer0 : SV_Target0,
                 out float4 outGBuffer1 : SV_Target1,
                 out float4 outGBuffer2 : SV_Target2,
                 out float4 outGBuffer3 : SV_Target3
@@ -176,13 +171,12 @@ Shader "Simulator/PointCloud/HDRP/Circles"
             HLSLPROGRAM
 
             #pragma vertex Vert
-            #pragma geometry GeomDefault
             #pragma fragment Frag
             #pragma multi_compile_local _ _SIZE_IN_PIXELS
 
-            PointCloudPoint Vert(uint id : SV_VertexID) : POINT
+            g2fd Vert(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
             {
-                return _Buffer[id];
+                return ExpandDefault(_Buffer[instanceID], vertexID);
             }
 
             float3 EncodeFloatRGB(float v)
@@ -221,22 +215,15 @@ Shader "Simulator/PointCloud/HDRP/Circles"
             HLSLPROGRAM
 
             #pragma vertex Vert
-            #pragma geometry Geom
             #pragma fragment Frag
             #pragma multi_compile_local _ _SIZE_IN_PIXELS
 
             float4x4 _PointCloudMVP;
 
-            PointCloudPoint Vert(uint id : SV_VertexID) : POINT
+            g2fd ExpandCustom(PointCloudPoint pt, uint vertexID)
             {
-                return _Buffer[id];
-            }
-
-            [maxvertexcount(4)]
-            void Geom(point PointCloudPoint pt[1]: POINT, inout TriangleStream<g2fd> stream)
-            {
-                float3 pos = pt[0].Position;
-                float4 color = PointCloudUnpack(pt[0].Color);
+                float3 pos = pt.Position;
+                float4 color = PointCloudUnpack(pt.Color);
                 float3 worldPos = PointCloudWorldPositionHDRP(pos);
                 float4 clip = mul(_PointCloudMVP, float4(pos, 1));
                 float3 view = TransformWorldToView(worldPos);
@@ -258,22 +245,25 @@ Shader "Simulator/PointCloud/HDRP/Circles"
                     float2(-1, -1),
                     float2(1, -1),
                     float2(-1, 1),
+                    float2(-1, 1),
+                    float2(1, -1),
                     float2(1, 1),
                 };
 
-                UNITY_UNROLL
-                for (int i = 0; i < 4; i++)
-                {
-                    g2fd o;
-                    o.Position.xy = clip.xy + scale * offsets[i];
-                    o.Position.zw = clip.zw;
-                    o.Color = color;
-                    o.TexCoord = offsets[i];
-                    o.WorldPos = worldPos;
-                    o.Height = pos.y;
-                    o.ViewPos = view;
-                    stream.Append(o);
-                }
+                g2fd o;
+                o.Position.xy = clip.xy + scale * offsets[vertexID];
+                o.Position.zw = clip.zw;
+                o.Color = color;
+                o.TexCoord = offsets[vertexID];
+                o.WorldPos = worldPos;
+                o.Height = pos.y;
+                o.ViewPos = view;
+                return o;
+            }
+
+            g2fd Vert(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
+            {
+                return ExpandCustom(_Buffer[instanceID], vertexID);
             }
 
             void Frag(g2fd Input, out float4 outColor : SV_Target0)
@@ -294,13 +284,12 @@ Shader "Simulator/PointCloud/HDRP/Circles"
             HLSLPROGRAM
 
             #pragma vertex Vert
-            #pragma geometry GeomDefault
             #pragma fragment Frag
             #pragma multi_compile_local _ _SIZE_IN_PIXELS
 
-            PointCloudPoint Vert(uint id : SV_VertexID) : POINT
+            g2fd Vert(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
             {
-                return _Buffer[id];
+                return ExpandDefault(_Buffer[instanceID], vertexID);
             }
 
             float3 EncodeFloatRGB(float v)
@@ -335,7 +324,7 @@ Shader "Simulator/PointCloud/HDRP/Circles"
         Pass
         {
             Name "Point Cloud Circles ShadowCaster"
-        
+
             Cull [_CullMode]
 
             ZClip [_ZClip]
@@ -347,7 +336,6 @@ Shader "Simulator/PointCloud/HDRP/Circles"
             HLSLPROGRAM
 
             #pragma vertex Vert
-            #pragma geometry Geom
             #pragma fragment Frag
 
             struct g2f
@@ -356,16 +344,10 @@ Shader "Simulator/PointCloud/HDRP/Circles"
                 float2 TexCoord : TEXCOORD0;
             };
 
-            PointCloudPoint Vert(uint id : SV_VertexID) : POINT
+            g2f ExpandCustom(PointCloudPoint pt, uint vertexID)
             {
-                return _Buffer[id];
-            }
-
-            [maxvertexcount(4)]
-            void Geom(point PointCloudPoint pt[1]: POINT, inout TriangleStream<g2f> stream)
-            {
-                float3 pos = pt[0].Position;
-                float4 color = PointCloudUnpack(pt[0].Color);
+                float3 pos = pt.Position;
+                float4 color = PointCloudUnpack(pt.Color);
                 float3 positionWS = PointCloudWorldPositionHDRP(pos);
                 float4 clip = TransformWorldToHClip(positionWS);
                 float scale = _PCShadowVector.x;
@@ -376,18 +358,21 @@ Shader "Simulator/PointCloud/HDRP/Circles"
                     float2(-1, -1),
                     float2(1, -1),
                     float2(-1, 1),
+                    float2(-1, 1),
+                    float2(1, -1),
                     float2(1, 1),
                 };
 
-                UNITY_UNROLL
-                for (int i = 0; i < 4; i++)
-                {
-                    g2f o;
-                    o.Position.xy = clip.xy + scale * offsets[i];
-                    o.Position.zw = clip.zw;
-                    o.TexCoord = offsets[i];
-                    stream.Append(o);
-                }
+                g2f o;
+                o.Position.xy = clip.xy + scale * offsets[vertexID];
+                o.Position.zw = clip.zw;
+                o.TexCoord = offsets[vertexID];
+                return o;
+            }
+
+            g2f Vert(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
+            {
+                return ExpandCustom(_Buffer[instanceID], vertexID);
             }
 
             void Frag(g2f Input)

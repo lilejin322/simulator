@@ -7,9 +7,9 @@ Shader "Hidden/HDRP/CustomPassRenderersUtils"
     HLSLINCLUDE
 
     #pragma target 4.5
-    #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+    #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
-    // #pragma enable_d3d11_debug_symbols
+    // #pragma enable_debug_symbols
 
     //enable GPU instancing support
     #pragma multi_compile_instancing
@@ -34,13 +34,15 @@ Shader "Hidden/HDRP/CustomPassRenderersUtils"
 
     SubShader
     {
+        Tags{ "RenderPipeline" = "HDRenderPipeline" }
+
         Pass
         {
             Name "DepthToColorPass"
             Tags { "LightMode" = "DepthToColorPass" }
 
             Blend Off
-            ZWrite Off
+            ZWrite On
             ZTest LEqual
 
             Cull Back
@@ -60,7 +62,7 @@ Shader "Hidden/HDRP/CustomPassRenderersUtils"
                 surfaceData.normalWS = 0.0;
             }
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
 
             ENDHLSL
         }
@@ -90,7 +92,7 @@ Shader "Hidden/HDRP/CustomPassRenderersUtils"
                 surfaceData.normalWS = 0.0;
             }
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
 
             ENDHLSL
         }
@@ -101,7 +103,7 @@ Shader "Hidden/HDRP/CustomPassRenderersUtils"
             Tags { "LightMode" = "NormalToColorPass" }
 
             Blend Off
-            ZWrite Off
+            ZWrite On
             ZTest LEqual
 
             Cull Back
@@ -119,7 +121,7 @@ Shader "Hidden/HDRP/CustomPassRenderersUtils"
                 surfaceData.normalWS = 0.0;
             }
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
 
             ENDHLSL
         }
@@ -130,7 +132,7 @@ Shader "Hidden/HDRP/CustomPassRenderersUtils"
             Tags { "LightMode" = "TangentToColorPass" }
 
             Blend Off
-            ZWrite Off
+            ZWrite On
             ZTest LEqual
 
             Cull Back
@@ -148,7 +150,7 @@ Shader "Hidden/HDRP/CustomPassRenderersUtils"
                 surfaceData.normalWS = 0.0;
             }
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
 
             ENDHLSL
         }

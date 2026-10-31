@@ -40,6 +40,8 @@ Shader "Simulator/PointCloud/HDRP/Points"
             struct v2f
             {
                 float4 Position : SV_POSITION;
+                // Metal rasterizes points at an undefined size unless the shader sets one
+                float PointSize : PSIZE;
                 nointerpolation float4 Color: COLOR;
                 nointerpolation float Height : HEIGHT;
             };
@@ -50,6 +52,7 @@ Shader "Simulator/PointCloud/HDRP/Points"
 
                 v2f Output;
                 Output.Position = TransformWorldToHClip(PointCloudWorldPositionHDRP(v.Position));
+                Output.PointSize = 1;
                 Output.Color = PointCloudUnpack(v.Color);
                 Output.Height = v.Position.y;
                 return Output;

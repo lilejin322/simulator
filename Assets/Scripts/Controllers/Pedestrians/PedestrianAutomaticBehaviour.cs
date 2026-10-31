@@ -152,7 +152,7 @@ public class PedestrianAutomaticBehaviour : PedestrianBehaviourBase
         }
         else
         {
-            RB.velocity = Vector3.zero;
+            RB.linearVelocity = Vector3.zero;
         }
     
         var previousVelocity = controller.CurrentVelocity;

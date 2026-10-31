@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using UnityEditorInternal;
+using UnityEditor.Build;
+using UnityEditor.Inspector.GraphicsSettingsInspectors;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
-using UnityEditor.ShaderGraph;
 using UnityEngine.UIElements;
-using System.Runtime.CompilerServices;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
@@ -16,13 +16,24 @@ namespace UnityEditor.Rendering.HighDefinition
     /// </summary>
     class HDEditorUtils
     {
-        internal const string FormatingPath =
-            @"Packages/com.unity.render-pipelines.high-definition/Editor/USS/Formating";
         internal const string QualitySettingsSheetPath =
             @"Packages/com.unity.render-pipelines.high-definition/Editor/USS/QualitySettings";
-        internal const string WizardSheetPath =
-            @"Packages/com.unity.render-pipelines.high-definition/Editor/USS/Wizard";
+
         internal const string HDRPAssetBuildLabel = "HDRP:IncludeInBuild";
+
+        internal static bool NeedsToBeIncludedInBuild(HDRenderPipelineAsset hdRenderPipelineAsset)
+        {
+            var labelList = AssetDatabase.GetLabels(hdRenderPipelineAsset);
+            foreach (string item in labelList)
+            {
+                if (item == HDUtils.k_HdrpAssetBuildLabel)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
 
         private static (StyleSheet baseSkin, StyleSheet professionalSkin, StyleSheet personalSkin) LoadStyleSheets(string basePath)
             => (
@@ -47,9 +58,7 @@ namespace UnityEditor.Rendering.HighDefinition
             }
         }
 
-
         static readonly Action<SerializedProperty, GUIContent> k_DefaultDrawer = (p, l) => EditorGUILayout.PropertyField(p, l);
-
 
 
         internal static T LoadAsset<T>(string relativePath) where T : UnityEngine.Object
@@ -64,11 +73,12 @@ namespace UnityEditor.Rendering.HighDefinition
         /// True: managed to do the operation.
         /// False: unknown shader used in material
         /// </returns>
-        [Obsolete("Use HDShaderUtils.ResetMaterialKeywords instead")]
+        [Obsolete("Use HDShaderUtils.ResetMaterialKeywords instead. #from(2021.1)")]
         public static bool ResetMaterialKeywords(Material material)
             => HDShaderUtils.ResetMaterialKeywords(material);
 
         static readonly GUIContent s_OverrideTooltip = EditorGUIUtility.TrTextContent("", "Override this setting in component.");
+
         internal static bool FlagToggle<TEnum>(TEnum v, SerializedProperty property)
             where TEnum : struct, IConvertible // restrict to ~enum
         {
@@ -146,25 +156,6 @@ namespace UnityEditor.Rendering.HighDefinition
             }
         }
 
-        internal static void DrawToolBarButton<TEnum>(
-            TEnum button, Editor owner,
-            Dictionary<TEnum, EditMode.SceneViewEditMode> toolbarMode,
-            Dictionary<TEnum, GUIContent> toolbarContent,
-            params GUILayoutOption[] options
-        )
-            where TEnum : struct, IConvertible
-        {
-            var intButton = (int)(object)button;
-            bool enabled = toolbarMode[button] == EditMode.editMode;
-            EditorGUI.BeginChangeCheck();
-            enabled = GUILayout.Toggle(enabled, toolbarContent[button], EditorStyles.miniButton, options);
-            if (EditorGUI.EndChangeCheck())
-            {
-                EditMode.SceneViewEditMode targetMode = EditMode.editMode == toolbarMode[button] ? EditMode.SceneViewEditMode.None : toolbarMode[button];
-                EditMode.ChangeEditMode(targetMode, GetBoundsGetter(owner)(), owner);
-            }
-        }
-
         internal static Func<Bounds> GetBoundsGetter(Editor o)
         {
             return () =>
@@ -206,354 +197,431 @@ namespace UnityEditor.Rendering.HighDefinition
         }
 
         /// <summary>
-        /// This is to convert any int into LightLayer which is usefull for the version in shadow of lights.
-        /// LightLayer have a CustomPropertyDrawer so for SerializedProperty on LightLayer type,
-        /// prefer using EditorGUILayout.PropertyField.
-        /// </summary>
-        internal static void DrawLightLayerMaskFromInt(GUIContent label, SerializedProperty property)
-        {
-            Rect lineRect = GUILayoutUtility.GetRect(1, EditorGUIUtility.singleLineHeight);
-            DrawLightLayerMask_Internal(lineRect, label, property);
-        }
-
-        internal static void DrawLightLayerMask_Internal(Rect rect, GUIContent label, SerializedProperty property)
-        {
-            EditorGUI.BeginProperty(rect, label, property);
-
-            EditorGUI.BeginChangeCheck();
-            int changedValue = DrawLightLayerMask(rect, property.intValue, label);
-            if (EditorGUI.EndChangeCheck())
-                property.intValue = changedValue;
-
-            EditorGUI.EndProperty();
-        }
-
-        internal static void DrawDecalLayerMask_Internal(Rect rect, GUIContent label, SerializedProperty property)
-        {
-            if (HDRenderPipeline.defaultAsset == null)
-                return ;
-
-            EditorGUI.BeginProperty(rect, label, property);
-
-            EditorGUI.BeginChangeCheck();
-            int changedValue = EditorGUI.MaskField(rect, label ?? GUIContent.none, property.intValue, HDRenderPipeline.defaultAsset.decalLayerNames);
-            if (EditorGUI.EndChangeCheck())
-                property.intValue = changedValue;
-
-            EditorGUI.EndProperty();
-        }
-
-
-        /// <summary>
         /// Should be placed between BeginProperty / EndProperty
         /// </summary>
-        internal static int DrawLightLayerMask(Rect rect, int value, GUIContent label = null)
+        internal static uint DrawRenderingLayerMask(Rect rect, uint renderingLayer, GUIContent label = null, bool allowHelpBox = true)
         {
-            int lightLayer = HDAdditionalLightData.RenderingLayerMaskToLightLayer(value);
-            if (HDRenderPipeline.defaultAsset == null)
-                return lightLayer;
-
-            EditorGUI.BeginChangeCheck();
-            lightLayer = EditorGUI.MaskField(rect, label ?? GUIContent.none, lightLayer, HDRenderPipeline.defaultAsset.lightLayerNames);
-            if (EditorGUI.EndChangeCheck())
-                lightLayer = HDAdditionalLightData.LightLayerToRenderingLayerMask(lightLayer, value);
-            return lightLayer;
+            var value = EditorGUI.RenderingLayerMaskField(rect, label ?? GUIContent.none, renderingLayer);
+            return value;
         }
 
-        /// <summary>
-        /// Like EditorGUILayout.DrawTextField but for delayed text field
-        /// </summary>
-        internal static void DrawDelayedTextField(GUIContent label, SerializedProperty property)
+        internal static void DrawRenderingLayerMask(Rect rect, SerializedProperty property, GUIContent label)
         {
-            Rect lineRect = GUILayoutUtility.GetRect(1, EditorGUIUtility.singleLineHeight);
-            EditorGUI.BeginProperty(lineRect, label, property);
+            EditorGUI.BeginProperty(rect, label, property);
+
             EditorGUI.BeginChangeCheck();
-            string value = EditorGUI.DelayedTextField(lineRect, label, property.stringValue);
+            var renderingLayer = DrawRenderingLayerMask(rect, property.uintValue, label);
             if (EditorGUI.EndChangeCheck())
-                property.stringValue = value;
+            {
+                if(property.numericType == SerializedPropertyNumericType.UInt32)
+                    property.uintValue = renderingLayer;
+                else
+                    property.intValue = unchecked((int)renderingLayer);
+            }
+
             EditorGUI.EndProperty();
         }
 
-        /// <summary>
-        /// Similar to <see cref="EditorGUI.HandlePrefixLabel(Rect, Rect, GUIContent)"/> but indent the label
-        /// with <see cref="EditorGUI.indentLevel"/> value.
-        ///
-        /// Use this method to draw a label that will be highlighted during field search.
-        /// </summary>
-        /// <param name="totalPosition"></param>
-        /// <param name="labelPosition"></param>
-        /// <param name="label"></param>
-        internal static void HandlePrefixLabelWithIndent(Rect totalPosition, Rect labelPosition, GUIContent label)
+        internal static void DrawRenderingLayerMask(SerializedProperty property, GUIContent style)
         {
-            // HandlePrefixLabel does not indent with EditorGUI.indentLevel.
-            // It seems that it is 15 pixels per indent space.
-            // You can check by adding 'EditorGUI.LabelField(labelRect, field.label);' before and check that the
-            // is properly overdrawn
-            //
-            labelPosition.x += EditorGUI.indentLevel * 15;
-            EditorGUI.HandlePrefixLabel(totalPosition, labelPosition, label);
+            Rect rect = EditorGUILayout.GetControlRect(true);
+            DrawRenderingLayerMask(rect, property, style);
+        }
+
+        // IsPreset is an internal API - lets reuse the usable part of this function
+        // 93 is a "magic number" and does not represent a combination of other flags here
+        internal static bool IsPresetEditor(UnityEditor.Editor editor)
+        {
+            return (int)((editor.target as Component).gameObject.hideFlags) == 93;
+        }
+
+        internal static void QualitySettingsHelpBox(string message, MessageType type, HDRenderPipelineUI.ExpandableGroup uiGroupSection, string propertyPath)
+        {
+            CoreEditorUtils.DrawFixMeBox(message, type, "Open", () =>
+            {
+                SettingsService.OpenProjectSettings("Project/Quality/HDRP");
+                HDRenderPipelineUI.Inspector.Expand((int)uiGroupSection);
+                CoreEditorUtils.Highlight("Project Settings", propertyPath, HighlightSearchMode.Identifier);
+                GUIUtility.ExitGUI();
+            });
+        }
+
+        internal static void QualitySettingsHelpBox<TEnum>(string message, MessageType type, HDRenderPipelineUI.ExpandableGroup uiGroupSection, TEnum uiSection, string propertyPath)
+            where TEnum : struct, IConvertible
+        {
+            QualitySettingsHelpBoxForReflection(message, type, uiGroupSection, uiSection.ToInt32(System.Globalization.CultureInfo.InvariantCulture), propertyPath);
+        }
+
+        internal static void QualitySettingsHelpBoxForReflection(string message, MessageType type, HDRenderPipelineUI.ExpandableGroup uiGroupSection, int uiSection, string propertyPath)
+        {
+            CoreEditorUtils.DrawFixMeBox(message, type, "Open", () =>
+            {
+                SettingsService.OpenProjectSettings("Project/Quality/HDRP");
+                HDRenderPipelineUI.SubInspectors[uiGroupSection].Expand(uiSection == -1 ? (int)uiGroupSection : uiSection);
+
+                CoreEditorUtils.Highlight("Project Settings", propertyPath, HighlightSearchMode.Identifier);
+                GUIUtility.ExitGUI();
+            });
+        }
+
+        internal static void GlobalSettingsHelpBox<TGraphicsSettings>(string message, MessageType type)
+            where TGraphicsSettings: IRenderPipelineGraphicsSettings
+        {
+            CoreEditorUtils.DrawFixMeBox(message, type, "Open", () =>
+            {
+                GraphicsSettingsInspectorUtility.OpenAndScrollTo<TGraphicsSettings>();
+            });
+        }
+
+        internal static void GlobalSettingsHelpBox(string message, MessageType type, FrameSettingsField field, string displayName)
+        {
+            CoreEditorUtils.DrawFixMeBox(message, type, "Open", () =>
+            {
+                var attribute = FrameSettingsExtractedDatas.GetFieldAttribute(field);
+
+                GraphicsSettingsInspectorUtility.OpenAndScrollTo<RenderingPathFrameSettings, FrameSettingsArea.LineField>(line =>
+                {
+                    if (line.name != $"line-field-{field}")
+                        return false;
+
+                    FrameSettingsPropertyDrawer.SetExpended(FrameSettingsRenderType.Camera.ToString(), attribute.group, true);
+                    return true;
+                });
+            });
+        }
+
+        // This is used through reflection by inspector in srp core
+        static bool DataDrivenLensFlareHelpBox()
+        {
+            if (!HDRenderPipeline.currentAsset?.currentPlatformRenderPipelineSettings.supportDataDrivenLensFlare ?? false)
+            {
+                EditorGUILayout.Space();
+                HDEditorUtils.QualitySettingsHelpBox("The current HDRP Asset does not support Data Driven Lens Flare.", MessageType.Error,
+                    HDRenderPipelineUI.ExpandableGroup.PostProcess, HDRenderPipelineUI.ExpandablePostProcess.LensFlare, "m_RenderPipelineSettings.supportDataDrivenLensFlare");
+                return false;
+            }
+
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.LensFlareDataDriven);
+            return true;
+        }
+
+        static void OpenRenderingDebugger(string panelName)
+        {
+            EditorApplication.ExecuteMenuItem("Window/Analysis/Rendering Debugger");
+
+            if (panelName != null)
+            {
+                DebugManager.instance.RequestPanelSelection(panelName);
+            }
+        }
+
+        static void HighlightInDebugger(Camera camera, FrameSettingsField field, string displayName)
+        {
+            OpenRenderingDebugger(camera.name);
+
+            // Doesn't work for some reason
+            //CoreEditorUtils.Highlight("Rendering Debugger", displayName, HighlightSearchMode.Auto);
+            //GUIUtility.ExitGUI();
+        }
+
+        static IEnumerable<Camera> GetAllCameras()
+        {
+            foreach (SceneView sceneView in SceneView.sceneViews)
+                yield return sceneView.camera;
+            foreach (Camera camera in Camera.allCameras)
+                if (camera.cameraType == CameraType.Game)
+                    yield return camera;
+        }
+        
+        static IEnumerable<(Camera camera, FrameSettings @default, IFrameSettingsHistoryContainer historyContainer)> SelectFrameSettingsStages(IEnumerable<Camera> cameras)
+        {
+            var supportedFeatures = HDRenderPipeline.currentAsset.currentPlatformRenderPipelineSettings;
+            var defaultSettings = GraphicsSettings.GetRenderPipelineSettings<RenderingPathFrameSettings>().GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
+
+            foreach (var camera in cameras)
+            {
+                var additionalCameraData = HDUtils.TryGetAdditionalCameraDataOrDefault(camera);
+                var historyContainer = camera.cameraType == CameraType.SceneView ? FrameSettingsHistory.sceneViewFrameSettingsContainer : additionalCameraData;
+
+                FrameSettings dummy = default;
+                FrameSettingsHistory.AggregateFrameSettings(ref dummy, camera, historyContainer, ref defaultSettings, supportedFeatures);
+                yield return (camera, defaultSettings, historyContainer);
+            }
+        }
+        
+        static void FrameSettingsHelpBox(Camera camera, FrameSettingsField field, FrameSettings @default, IFrameSettingsHistoryContainer historyContainer)
+        {
+            FrameSettingsHistory history = historyContainer.frameSettingsHistory;
+            bool finalValue = history.debug.IsEnabled(field); 
+            if (finalValue) return; //must be false to call this method
+
+            bool defaultValue = @default.IsEnabled(field);
+            bool cameraOverrideState = historyContainer.hasCustomFrameSettings && history.customMask.mask[(uint)field];
+            bool cameraOverridenValue = history.overridden.IsEnabled(field);
+            bool cameraSanitizedValue = history.sanitazed.IsEnabled(field);
+
+            var attribute = FrameSettingsExtractedDatas.GetFieldAttribute(field);
+            bool dependenciesSanitizedValueOk = attribute.dependencies.All(fs => attribute.IsNegativeDependency(fs) ? !history.sanitazed.IsEnabled(fs) : history.sanitazed.IsEnabled(fs));
+
+            bool disabledByDefault = !defaultValue && !cameraOverrideState;
+            bool disabledByCameraOverride = cameraOverrideState && !cameraOverridenValue;
+
+            // If the setting is enabled in the frame settings but is disabled in the HDRP Asset (cameraSanitizedValue), it means the feature is disabled and we should not display anything.
+            bool disabledbySanitized = (cameraOverrideState ? cameraOverridenValue : defaultValue) && !cameraSanitizedValue;
+
+            var textBase = $"The Frame Setting required to render this effect in the {(camera.cameraType == CameraType.SceneView ? "Scene" : "Game")} view ";
+
+            if (disabledByDefault)
+                GlobalSettingsHelpBox(textBase + "is disabled in the HDRP Default Frame Settings.", MessageType.Warning, field, attribute.displayedName);
+            else if (disabledByCameraOverride)
+                CoreEditorUtils.DrawFixMeBox(textBase + $"is disabled in the {camera.name}'s Custom Frame Settings.", MessageType.Warning, "Open", () => EditorUtility.OpenPropertyEditor(camera));
+            else if (!dependenciesSanitizedValueOk)
+            {
+                if(cameraOverrideState)
+                    CoreEditorUtils.DrawFixMeBox(textBase + $"depends on a disabled Frame Setting parent in the {camera.name} Custom Frame Settings.", MessageType.Warning, "Open", () => EditorUtility.OpenPropertyEditor(camera));
+                else
+                    GlobalSettingsHelpBox(textBase + "depends on a disabled Frame Setting parent in the HDRP Default Frame Settings.", MessageType.Warning, field, attribute.displayedName);
+
+            }
+            else if (!finalValue && !disabledbySanitized)
+                CoreEditorUtils.DrawFixMeBox(textBase + "is disabled in the Rendering Debugger.", MessageType.Warning, "Open", () => HighlightInDebugger(camera, field, attribute.displayedName));
+        }
+
+        internal static bool EnsureFrameSetting(FrameSettingsField field)
+        {
+            foreach ((Camera camera, FrameSettings @default, IFrameSettingsHistoryContainer historyContainer) in SelectFrameSettingsStages(GetAllCameras()))
+            {
+                if (!historyContainer.frameSettingsHistory.debug.IsEnabled(field))
+                {
+                    FrameSettingsHelpBox(camera, field, @default, historyContainer);
+                    EditorGUILayout.Space();
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        
+        static IEnumerable<(Camera camera, T component)> SelectVolumeComponent<T>(IEnumerable<Camera> cameras) where T : VolumeComponent
+        {
+            // Wait for volume system to be initialized
+            if (!VolumeManager.instance.isInitialized)
+                yield break;
+
+            foreach (var camera in GetAllCameras())
+            {
+                if (!HDCamera.TryGet(camera, out var hdCamera))
+                    continue;
+
+                T component = hdCamera.volumeStack.GetComponent<T>();
+                if (component == null)
+                    continue;
+
+                yield return (camera, component);
+            }
+        }
+
+        internal static bool EnsureVolume<T>(Func<T, string> volumeValidator) where T : VolumeComponent
+        {
+            foreach ((Camera camera, T component) in SelectVolumeComponent<T>(GetAllCameras()))
+            {
+                var errorString = volumeValidator(component);
+                if (!string.IsNullOrEmpty(errorString))
+                {
+                    EditorGUILayout.HelpBox(errorString, MessageType.Warning);
+                    EditorGUILayout.Space();
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
-        /// Like EditorGUI.IndentLevelScope but this one will also indent the override checkboxes.
+        /// Gets the resolved default state for a volume component, which combines global and quality default profiles.
+        /// Use this to determine what values will be used for non-overridden parameters.
         /// </summary>
-        internal class IndentScope : GUI.Scope
+        /// <typeparam name="T">The type of volume component to retrieve</typeparam>
+        /// <returns>The volume component with resolved default state, or null if not initialized</returns>
+        internal static T GetVolumeComponentDefaultState<T>() where T : VolumeComponent
         {
-            int m_Offset;
+            if (!VolumeManager.instance.isInitialized)
+                return null;
 
-            public IndentScope(int offset = 16)
+            return VolumeManager.instance.GetVolumeComponentDefaultState(typeof(T)) as T;
+        }
+
+        /// <summary>
+        /// Gets the effective value of a volume parameter, considering override state and default fallback.
+        /// If the parameter is overridden, returns the local value. Otherwise, returns the value from
+        /// the default parameter (or the fallback if default is null).
+        /// </summary>
+        /// <typeparam name="T">The type of the parameter value</typeparam>
+        /// <param name="parameter">The volume parameter to get the value from</param>
+        /// <param name="defaultParameter">The default parameter to use when parameter is not overridden</param>
+        /// <param name="fallbackValue">Fallback value if default parameter is null</param>
+        /// <returns>The effective value considering override state and defaults</returns>
+        internal static T GetEffectiveParameterValue<T>(
+            VolumeParameter<T> parameter,
+            VolumeParameter<T> defaultParameter,
+            T fallbackValue)
+        {
+            if (parameter.overrideState)
+                return parameter.value;
+
+            return defaultParameter != null ? defaultParameter.value : fallbackValue;
+        }
+
+        /// <summary>
+        /// Finds which default volume profile (global or quality) is setting a parameter value.
+        /// Checks in precedence order: Quality profile overrides Global profile.
+        /// </summary>
+        /// <typeparam name="T">The type of volume component</typeparam>
+        /// <param name="parameterPredicate">Predicate which specifies the target</param>
+        /// <param name="sourceProfile">The volume profile that is setting the value, or null if not found</param>
+        /// <param name="sourceDescription">Human-readable description of the source (e.g., "Quality Profile in HDRenderPipelineAsset")</param>
+        /// <returns>True if a profile with the target parameter was found</returns>
+        internal static bool TryGetVolumeParameterSource<T>(
+            System.Func<T, bool> parameterPredicate,
+            out VolumeProfile sourceProfile,
+            out string sourceDescription) where T : VolumeComponent
+        {
+            sourceProfile = null;
+            sourceDescription = null;
+
+            if (!VolumeManager.instance.isInitialized)
+                return false;
+
+            // Check quality profile first (higher precedence)
+            if (VolumeManager.instance.qualityDefaultProfile != null &&
+                VolumeManager.instance.qualityDefaultProfile.TryGet<T>(out var qualityComponent) &&
+                qualityComponent.active && parameterPredicate(qualityComponent))
             {
-                m_Offset = offset;
-
-                // When using EditorGUI.indentLevel++, the clicking on the checkboxes does not work properly due to some issues on the C++ side.
-                // This scope is a work-around for this issue.
-                GUILayout.BeginHorizontal();
-                EditorGUILayout.Space(offset, false);
-                GUILayout.BeginVertical();
-                EditorGUIUtility.labelWidth -= m_Offset;
+                sourceProfile = VolumeManager.instance.qualityDefaultProfile;
+                var assetName = HDRenderPipeline.currentAsset != null ? HDRenderPipeline.currentAsset.name : "HDRP Asset";
+                sourceDescription = $"Quality Profile ({assetName})";
+                return true;
             }
 
-            protected override void CloseScope()
+            // Check global default profile (lower precedence)
+            if (VolumeManager.instance.globalDefaultProfile != null &&
+                VolumeManager.instance.globalDefaultProfile.TryGet<T>(out var globalComponent) &&
+                globalComponent.active && parameterPredicate(globalComponent))
             {
-                EditorGUIUtility.labelWidth += m_Offset;
-                GUILayout.EndVertical();
-                GUILayout.EndHorizontal();
+                sourceProfile = VolumeManager.instance.globalDefaultProfile;
+                sourceDescription = "Global Profile (Graphics Settings)";
+                return true;
             }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Shows a platform-specific performance warning help box for a given feature.
+        /// </summary>
+        /// <param name="featureName">The name of the feature (e.g., "Ray Tracing", "Film Grain")</param>
+        /// <param name="recommendation">Optional recommendation text. If null, uses default "is not recommended for this platform"</param>
+        internal static void ShowFeatureOptimisationWarning(string featureName, string recommendation = null)
+        {
+            string message = $"{featureName} is enabled for the active platform.\n";
+
+            if (!string.IsNullOrEmpty(recommendation))
+            {
+                message += recommendation;
+            }
+            else
+            {
+                message += HDRenderPipelineUI.Styles.featureNotRecommendedWarning;
+            }
+
+            EditorGUILayout.HelpBox(message, MessageType.Warning, wide: true);
+        }
+
+        /// <summary>
+        /// Shows a platform-specific performance warning help box for a given feature.
+        /// </summary>
+        /// <param name="featureName">The name of the feature (e.g., "Ray Tracing", "Film Grain")</param>
+        /// <param name="recommendation">Optional recommendation text. If null, uses default "is not recommended for this platform"</param>
+        internal static void ShowFeatureOptimisationWarning(string featureName, string sourceAssetName, Action onButtonClicked, string recommendation = null)
+        {
+            string message = $"{featureName} is enabled in {sourceAssetName} for the active platform.\n";
+
+            if (!string.IsNullOrEmpty(recommendation))
+            {
+                message += recommendation;
+            }
+            else
+            {
+                message += HDRenderPipelineUI.Styles.featureNotRecommendedWarning;
+            }
+
+            CoreEditorUtils.DrawFixMeBox(
+                message,
+                MessageType.Warning,
+                "Open",
+                onButtonClicked);
+        }
+
+        internal static void ShowFeatureParameterOptimisationWarning(string settingName, string settingValue, string recommendation = null)
+        {
+            EditorGUILayout.HelpBox(CreateParameterWarningMessage(settingName, settingValue, null, recommendation), MessageType.Warning, wide: true);
+        }
+
+        internal static void ShowFeatureParameterOptimisationWarning(string settingName, string settingValue, string sourceAssetName, Action onButtonClicked, string recommendation = null)
+        {
+            CoreEditorUtils.DrawFixMeBox(
+                CreateParameterWarningMessage(settingName, settingValue, sourceAssetName, recommendation),
+                MessageType.Warning,
+                "Open",
+                onButtonClicked);
+        }
+
+        internal static string CreateParameterWarningMessage(string settingName, string settingValue, string sourceAssetName = null, string recommendation = null)
+        {
+            string message = $"{settingName}: {settingValue} ";
+            if (sourceAssetName != null)
+            {
+                message += $"is set in {sourceAssetName}.";
+            }
+            else
+            {
+                message += $"is used for the active platform.";
+            }
+
+            if (!string.IsNullOrEmpty(recommendation))
+            {
+                message += '\n' + recommendation;
+            }
+            else
+            {
+                message += $"\nThis may impact performance and is not recommended for this platform.";
+            }
+
+            return message;
+        }
+
+        internal static bool IsInTestSuiteOrBatchMode()
+        {
+            string commandLineOptions = System.Environment.CommandLine;
+            bool inTestSuite = commandLineOptions.Contains("-testResults");
+            return inTestSuite || Application.isBatchMode;
         }
     }
 
-    internal static partial class SerializedPropertyExtension
+    // Due to a UI bug/limitation, we have to do it this way to support bold labels
+    internal class BoldLabelScope : GUI.Scope
     {
-        public static IEnumerable<string> EnumerateDisplayName(this SerializedProperty property)
+        FontStyle origFontStyle;
+
+        public BoldLabelScope()
         {
-            while (property.NextVisible(true))
-                yield return property.displayName;
+            origFontStyle = EditorStyles.label.fontStyle;
+            EditorStyles.label.fontStyle = FontStyle.Bold;
         }
 
-        public static bool IsTargetAlive(this SerializedProperty property)
-            => property != null && property.serializedObject.targetObject != null &&
-               !property.serializedObject.targetObject.Equals(null);
-
-        /// <summary>
-        /// Helper to get an enum value from a SerializedProperty.
-        /// This handle case where index do not correspond to enum value.
-        /// <example>
-        /// <code>
-        /// enum MyEnum
-        /// {
-        ///     A = 2,
-        ///     B = 4,
-        /// }
-        /// public class MyObject : MonoBehavior
-        /// {
-        ///     public MyEnum theEnum = MyEnum.A;
-        /// }
-        /// #if UNITY_EDITOR
-        /// [CustomEditor(typeof(MyObject))]
-        /// class MyObjectEditor : Editor
-        /// {
-        ///     public override void OnInspectorGUI()
-        ///     {
-        ///         Debug.Log($"By enumValueIndex: {(MyEnum)serializedObject.FindProperty("theEnum").enumValueIndex}");         //write the value (MyEnum)(0)
-        ///         Debug.Log($"By GetEnumValue: {(MyEnum)serializedObject.FindProperty("theEnum").GetEnumValue<MyEnum>()}");   //write the value MyEnum.A
-        ///     }
-        /// }
-        /// #endif
-        /// </code>
-        /// </example>
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T GetEnumValue<T>(this SerializedProperty property)
-            where T : Enum
-            => GetEnumValue_Internal<T>(property);
-
-        /// <summary>
-        /// Helper to get an enum name from a SerializedProperty
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static string GetEnumName<T>(this SerializedProperty property)
-            where T : Enum
-            => property.hasMultipleDifferentValues
-            ? "MultipleDifferentValues"
-            : property.enumNames[property.enumValueIndex];
-
-        /// <summary>
-        /// Helper to set an enum value to a SerializedProperty
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void SetEnumValue<T>(this SerializedProperty property, T value)
-            where T : Enum
-            // intValue actually is the value underlying beside the enum
-            => SetEnumValue_Internal(property, value);
-
-        /// <summary>
-        /// Get the value of a <see cref="SerializedProperty"/>.
-        ///
-        /// This function will be inlined by the compiler.
-        /// Caution: The case of Enum is not handled here.
-        /// </summary>
-        /// <typeparam name="T">
-        /// The type of the value to get.
-        ///
-        /// It is expected to be a supported type by the <see cref="SerializedProperty"/>.
-        /// </typeparam>
-        /// <param name="serializedProperty">The property to get.</param>
-        /// <returns>The value of the property.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T GetInline<T>(this SerializedProperty serializedProperty)
-            where T : struct
+        protected override void CloseScope()
         {
-            if (typeof(T) == typeof(Color))
-                return (T)(object)serializedProperty.colorValue;
-            if (typeof(T) == typeof(string))
-                return (T)(object)serializedProperty.stringValue;
-            if (typeof(T) == typeof(double))
-                return (T)(object)serializedProperty.doubleValue;
-            if (typeof(T) == typeof(float))
-                return (T)(object)serializedProperty.floatValue;
-            if (typeof(T) == typeof(long))
-                return (T)(object)serializedProperty.longValue;
-            if (typeof(T) == typeof(int))
-                return (T)(object)serializedProperty.intValue;
-            if (typeof(T) == typeof(bool))
-                return (T)(object)serializedProperty.boolValue;
-            if (typeof(T) == typeof(BoundsInt))
-                return (T)(object)serializedProperty.boundsIntValue;
-            if (typeof(T) == typeof(Bounds))
-                return (T)(object)serializedProperty.boundsValue;
-            if (typeof(T) == typeof(RectInt))
-                return (T)(object)serializedProperty.rectIntValue;
-            if (typeof(T) == typeof(Rect))
-                return (T)(object)serializedProperty.rectValue;
-            if (typeof(T) == typeof(Quaternion))
-                return (T)(object)serializedProperty.quaternionValue;
-            if (typeof(T) == typeof(Vector2Int))
-                return (T)(object)serializedProperty.vector2IntValue;
-            if (typeof(T) == typeof(Vector4))
-                return (T)(object)serializedProperty.vector4Value;
-            if (typeof(T) == typeof(Vector3))
-                return (T)(object)serializedProperty.vector3Value;
-            if (typeof(T) == typeof(Vector2))
-                return (T)(object)serializedProperty.vector2Value;
-            if (typeof(T).IsEnum)
-                return GetEnumValue_Internal<T>(serializedProperty);
-            throw new ArgumentOutOfRangeException($"<{typeof(T)}> is not a valid type for a serialized property.");
+            EditorStyles.label.fontStyle = origFontStyle;
         }
-
-        /// <summary>
-        /// Set the value of a <see cref="SerializedProperty"/>.
-        ///
-        /// This function will be inlined by the compiler.
-        /// Caution: The case of Enum is not handled here.
-        /// </summary>
-        /// <typeparam name="T">
-        /// The type of the value to set.
-        ///
-        /// It is expected to be a supported type by the <see cref="SerializedProperty"/>.
-        /// </typeparam>
-        /// <param name="serializedProperty">The property to set.</param>
-        /// <param name="value">The value to set.</param>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void SetInline<T>(this SerializedProperty serializedProperty, T value)
-            where T : struct
-        {
-            if (typeof(T) == typeof(Color))
-            {
-                serializedProperty.colorValue = (Color)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(string))
-            {
-                serializedProperty.stringValue = (string)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(double))
-            {
-                serializedProperty.doubleValue = (double)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(float))
-            {
-                serializedProperty.floatValue = (float)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(long))
-            {
-                serializedProperty.longValue = (long)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(int))
-            {
-                serializedProperty.intValue = (int)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(bool))
-            {
-                serializedProperty.boolValue = (bool)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(BoundsInt))
-            {
-                serializedProperty.boundsIntValue = (BoundsInt)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(Bounds))
-            {
-                serializedProperty.boundsValue = (Bounds)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(RectInt))
-            {
-                serializedProperty.rectIntValue = (RectInt)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(Rect))
-            {
-                serializedProperty.rectValue = (Rect)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(Quaternion))
-            {
-                serializedProperty.quaternionValue = (Quaternion)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(Vector2Int))
-            {
-                serializedProperty.vector2IntValue = (Vector2Int)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(Vector4))
-            {
-                serializedProperty.vector4Value = (Vector4)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(Vector3))
-            {
-                serializedProperty.vector3Value = (Vector3)(object)value;
-                return;
-            }
-            if (typeof(T) == typeof(Vector2))
-            {
-                serializedProperty.vector2Value = (Vector2)(object)value;
-                return;
-            }
-            if (typeof(T).IsEnum)
-            {
-                SetEnumValue_Internal(serializedProperty, value);
-                return;
-            }
-            throw new ArgumentOutOfRangeException($"<{typeof(T)}> is not a valid type for a serialized property.");
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static T GetEnumValue_Internal<T>(SerializedProperty property)
-            // intValue actually is the value underlying beside the enum
-            => (T)(object)property.intValue;
-
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void SetEnumValue_Internal<T>(SerializedProperty property, T value)
-            // intValue actually is the value underlying beside the enum
-            => property.intValue = (int)(object)value;
     }
 }

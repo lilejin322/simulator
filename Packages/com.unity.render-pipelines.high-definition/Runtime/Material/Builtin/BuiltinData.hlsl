@@ -56,7 +56,7 @@ void EncodeMotionVector(float2 motionVector, out float4 outBuffer)
 
 bool PixelSetAsNoMotionVectors(float4 inBuffer)
 {
-	return inBuffer.x > 1.0f;
+    return inBuffer.x > 1.0f;
 }
 
 void DecodeMotionVector(float4 inBuffer, out float2 motionVector)
@@ -97,18 +97,15 @@ void GetBuiltinDataDebug(uint paramId, BuiltinData builtinData, PositionInputs p
         break;
 #ifdef DEBUG_DISPLAY
     case DEBUGVIEW_BUILTIN_BUILTINDATA_RENDERING_LAYERS:
-        // Only 8 first rendering layers are currently in use (used by light layers)
-        // This mode shows only those layers
-
+        // HDRP supports up to 16 rendering layers
         uint stripeSize = 8;
-
         int lightLayers = builtinData.renderingLayers & _DebugLightLayersMask;
         uint layerId = 0, layerCount = countbits(lightLayers);
 
         result = float3(0, 0, 0);
-        for (uint i = 0; (i < 8) && (layerId < layerCount); i++)
+        for (uint i = 0; (i < 16) && (layerId < layerCount); i++)
         {
-            if (lightLayers & (1 << i))
+            if (lightLayers & (1U << i))
             {
                 if ((posInput.positionSS.y / stripeSize) % layerCount == layerId)
                     result = _DebugRenderingLayersColors[i].xyz;

@@ -5,10 +5,10 @@
 #pragma kernel TileLightListGen_DepthRT_SrcBigTile          LIGHTLISTGEN=TileLightListGen_DepthRT_SrcBigTile            ENABLE_DEPTH_TEXTURE_BACKPLANE                          USE_TWO_PASS_TILED_LIGHTING
 #pragma kernel TileLightListGen_DepthRT_MSAA_SrcBigTile     LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_SrcBigTile       ENABLE_DEPTH_TEXTURE_BACKPLANE      MSAA_ENABLED        USE_TWO_PASS_TILED_LIGHTING
 
-#pragma kernel TileLightListGen_DepthRT_Oblique                     LIGHTLISTGEN=TileLightListGen_DepthRT_Oblique						ENABLE_DEPTH_TEXTURE_BACKPLANE			USE_OBLIQUE_MODE
-#pragma kernel TileLightListGen_DepthRT_MSAA_Oblique                LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_Oblique					ENABLE_DEPTH_TEXTURE_BACKPLANE			MSAA_ENABLED			USE_OBLIQUE_MODE
-#pragma kernel TileLightListGen_DepthRT_SrcBigTile_Oblique          LIGHTLISTGEN=TileLightListGen_DepthRT_SrcBigTile_Oblique            ENABLE_DEPTH_TEXTURE_BACKPLANE          USE_TWO_PASS_TILED_LIGHTING				USE_OBLIQUE_MODE
-#pragma kernel TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique     LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique       ENABLE_DEPTH_TEXTURE_BACKPLANE			MSAA_ENABLED        USE_TWO_PASS_TILED_LIGHTING			USE_OBLIQUE_MODE
+#pragma kernel TileLightListGen_DepthRT_Oblique                     LIGHTLISTGEN=TileLightListGen_DepthRT_Oblique                       ENABLE_DEPTH_TEXTURE_BACKPLANE          USE_OBLIQUE_MODE
+#pragma kernel TileLightListGen_DepthRT_MSAA_Oblique                LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_Oblique                  ENABLE_DEPTH_TEXTURE_BACKPLANE          MSAA_ENABLED            USE_OBLIQUE_MODE
+#pragma kernel TileLightListGen_DepthRT_SrcBigTile_Oblique          LIGHTLISTGEN=TileLightListGen_DepthRT_SrcBigTile_Oblique            ENABLE_DEPTH_TEXTURE_BACKPLANE          USE_TWO_PASS_TILED_LIGHTING             USE_OBLIQUE_MODE
+#pragma kernel TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique     LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique       ENABLE_DEPTH_TEXTURE_BACKPLANE          MSAA_ENABLED        USE_TWO_PASS_TILED_LIGHTING         USE_OBLIQUE_MODE
 
 // #pragma enable_d3d11_debug_symbols
 
@@ -23,11 +23,11 @@
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightingConvexHullUtils.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightCullUtils.hlsl"
 
-#if !defined(SHADER_API_XBOXONE) && !defined(SHADER_API_PSSL) && !defined(SHADER_API_SWITCH) && !defined(SHADER_API_GAMECORE)
+#if !defined(SHADER_API_XBOXONE) && !defined(SHADER_API_PSSL) && !defined(SHADER_API_SWITCH) && !defined(SHADER_API_GAMECORE) && !defined(SHADER_API_SWITCH2)
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/SortingComputeUtils.hlsl"
 #endif
 
-#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
 //#define EXACT_EDGE_TESTS
 #define PERFORM_SPHERICAL_INTERSECTION_TESTS
@@ -45,9 +45,8 @@ StructuredBuffer<SFiniteLightBound> g_data : register( t3 );
 StructuredBuffer<uint> g_vBigTileLightList : register( t4 );        // don't support Buffer yet in unity
 #endif
 
-
 #ifdef PLATFORM_LANE_COUNT                                          // We can infer the size of a wave. This is currently not possible on non-consoles, so we have to fallback to a sensible default in those cases.
-#define NR_THREADS              PLATFORM_LANE_COUNT  
+#define NR_THREADS              PLATFORM_LANE_COUNT
 #else
 #define NR_THREADS              64                                  // default to 64 threads per group on other platforms..
 #endif
@@ -61,8 +60,10 @@ RWStructuredBuffer<float> g_logBaseBuffer : register( u3 );             // don't
 #endif
 
 
-#define MAX_NR_COARSE_ENTRIES       128
+#define MAX_NR_COARSE_ENTRIES LIGHT_CLUSTER_MAX_COARSE_ENTRIES
+#define MAX_NR_VISIBLE_LIGHTS 4096                                      // correspond to m_MaxLightsOnScreen in LightLoop.cs
 
+groupshared unsigned int ldsTilePassList[MAX_NR_VISIBLE_LIGHTS/32];
 groupshared unsigned int coarseList[MAX_NR_COARSE_ENTRIES];
 groupshared unsigned int clusterIdxs[MAX_NR_COARSE_ENTRIES/2];
 groupshared float4 lightPlanes[4*6]; // Each plane is defined by a float4. 6 planes per light, 4 lights (24 planes)
@@ -71,6 +72,11 @@ groupshared uint lightOffs;
 
 groupshared int categoryListCountScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
 groupshared int shiftIndexScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
+
+uint PackClusterLayeredOffset(uint offset, uint count)
+{
+    return (offset & LIGHT_CLUSTER_PACKING_OFFSET_MASK) | (min(count, LIGHT_CLUSTER_PACKING_COUNT_MASK) << LIGHT_CLUSTER_PACKING_OFFSET_BITS);
+}
 
 void ZeroCategoryListCountAndShiftIndex(uint threadIdx)
 {
@@ -119,8 +125,8 @@ float GetLinearDepth(float2 pixXY, float zDptBufSpace, uint eyeIndex)    // 0 is
     float4x4 g_mInvScrProjection = g_mInvScrProjectionArr[eyeIndex];
 
 #ifdef USE_OBLIQUE_MODE
-	float2 res2 = mul(g_mInvScrProjection, float4(pixXY, zDptBufSpace, 1.0)).zw;
-	return res2.x / res2.y;
+    float2 res2 = mul(g_mInvScrProjection, float4(pixXY, zDptBufSpace, 1.0)).zw;
+    return res2.x / res2.y;
 #else
     // for perspective projection m22 is zero and m23 is +1/-1 (depends on left/right hand proj)
     // however this function must also work for orthographic projection so we keep it like this.
@@ -221,6 +227,14 @@ bool CheckIntersectionBasic(int l, int k)
     return ((val>>0)&0xff)<=((uint) k) && ((uint) k)<=((val>>8)&0xff);
 }
 
+#ifdef USE_TWO_PASS_TILED_LIGHTING
+uint FetchBigTileLightIndex(uint lightStart, uint lightOffset)
+{
+    const uint lightOffsetPlusOne = lightOffset + 1; // Add +1 as first slot is reserved to store number of light
+    // Light index are store on 16bit
+    return (g_vBigTileLightList[MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * lightStart / 2 + (lightOffsetPlusOne >> 1)] >> ((lightOffsetPlusOne & 1) * 16)) & 0xffff;
+}
+#endif
 
 [numthreads(NR_THREADS, 1, 1)]
 void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
@@ -229,6 +243,15 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
     uint2 tileIDX = u3GroupID.xy;
     uint t=threadID;
+    int i;
+
+    const bool lightSortRequired = g_iNrVisibLights > MAX_NR_COARSE_ENTRIES;  // Uniform runtime branch
+    if (lightSortRequired)
+    {
+        UNITY_UNROLLX((MAX_NR_VISIBLE_LIGHTS/32) / NR_THREADS)
+        for(i=t; i<MAX_NR_VISIBLE_LIGHTS/32; i+=NR_THREADS)
+            ldsTilePassList[i]=0;
+    }
 
     const uint log2TileSize = firstbithigh(TILE_SIZE_CLUSTERED);
     uint nrTilesX = ((uint)g_screenSize.x +(TILE_SIZE_CLUSTERED-1))>>log2TileSize;
@@ -265,23 +288,19 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
         for(int i=0; i<g_iNumSamplesMSAA; i++)
         {
         const float fDpth = FetchDepthMSAA(uPixCrd, i);
-        #if defined(SHADER_API_METAL) // GetSamplePosition isn't supported on Metal yet in Unity. TODO: remove when support is added
-        const float2 fracSampleCoord = float2(0.0, 0.0);
-        #else
         const float2 fracSampleCoord = g_depth_tex.GetSamplePosition(i).xy;     // this is optimized away when USE_OBLIQUE_MODE is NOT set.
-        #endif
 #else
         const float fDpth = FetchDepth(uPixCrd);
-		const float2 fracSampleCoord = float2(0.5,0.5);
+        const float2 fracSampleCoord = float2(0.5,0.5);
 #endif
 
         if(fDpth<VIEWPORT_SCALE_Z)      // if not skydome
         {
-			float linZ = GetLinearDepth(uPixCrd+fracSampleCoord, fDpth, eyeIndex);
+            float linZ = GetLinearDepth(uPixCrd+fracSampleCoord, fDpth, eyeIndex);
 #if USE_LEFT_HAND_CAMERA_SPACE
-			float linDistZ = linZ;
+            float linDistZ = linZ;
 #else
-			float linDistZ = -linZ;
+            float linDistZ = -linZ;
 #endif
 
             linMaDist = max(linDistZ, linMaDist);
@@ -312,13 +331,13 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
     int NrBigTilesX = (nrTilesX + ((1<<log2BigTileToClustTileRatio)-1)) >> log2BigTileToClustTileRatio;
     int NrBigTilesY = (nrTilesY + ((1<<log2BigTileToClustTileRatio)-1)) >> log2BigTileToClustTileRatio;
-    const int bigTileBase = eyeIndex * NrBigTilesX * NrBigTilesY;
-    const int bigTileIdx = bigTileBase + ((tileIDX.y>>log2BigTileToClustTileRatio)*NrBigTilesX) + (tileIDX.x>>log2BigTileToClustTileRatio);     // map the idx to 64x64 tiles
+    const uint bigTileBase = eyeIndex * NrBigTilesX * NrBigTilesY;
+    const uint bigTileIdx = bigTileBase + ((tileIDX.y>>log2BigTileToClustTileRatio)*NrBigTilesX) + (tileIDX.x>>log2BigTileToClustTileRatio);     // map the idx to 64x64 tiles
 
-    int nrBigTileLights = g_vBigTileLightList[MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE*bigTileIdx+0];
+    int nrBigTileLights = g_vBigTileLightList[MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * bigTileIdx / 2 + 0] & 0xFFFF;
     for(int l0=(int) t; l0<(int) nrBigTileLights; l0 += NR_THREADS)
     {
-        int l = g_vBigTileLightList[MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE*bigTileIdx+l0+1];
+        int l = FetchBigTileLightIndex(bigTileIdx, l0);
 #else
     for(int l=(int) t; l<(int) g_iNrVisibLights; l += NR_THREADS)
     {
@@ -331,8 +350,34 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
         {
             unsigned int uInc = 1;
             unsigned int uIndex;
+            unsigned int ul = l;
             InterlockedAdd(lightOffs, uInc, uIndex);
-            if(uIndex<MAX_NR_COARSE_ENTRIES) coarseList[uIndex] = l;        // add to light list
+            if (lightSortRequired)
+                InterlockedOr(ldsTilePassList[ul >> 5], 1u << (ul & (32 - 1)));     // ldsTilePassList[ul/32] |= 1u << (ul % 32);
+            else
+                if(uIndex<MAX_NR_COARSE_ENTRIES) coarseList[uIndex] = l;        // add to light list
+        }
+    }
+
+    if (lightSortRequired)
+    {
+#if NR_THREADS > PLATFORM_LANE_COUNT
+        GroupMemoryBarrierWithGroupSync();
+#endif
+        // Ascending sort to prevent unpredictable light list when the number of visible lights is greater than the coarse entries.
+        if(t==0)
+        {
+            int c=0;
+            for (int ii = 0; ii < MAX_NR_VISIBLE_LIGHTS/32 && c < MAX_NR_COARSE_ENTRIES; ii++)
+            {
+                unsigned int mask = ldsTilePassList[ii];
+                while (mask != 0u && c < MAX_NR_COARSE_ENTRIES)
+                {
+                    unsigned int l = firstbitlow(mask);
+                    mask &= ~(1u << l);
+                    coarseList[c++] = ii * 32 + l;
+                }
+            }
         }
     }
 
@@ -391,7 +436,7 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     //////////////////////////////////////////////////////////
 
     uint start = 0;
-    int i=(int) t;
+    i=(int) t;
     int iSpaceAvail = 0;
     int iSum = 0;
     if(i<nrClusters)
@@ -415,7 +460,6 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
     WriteShiftIndex(t, LIGHTCATEGORY_ENV, _EnvLightIndexShift);
     WriteShiftIndex(t, LIGHTCATEGORY_DECAL, _DecalIndexShift);
-    WriteShiftIndex(t, LIGHTCATEGORY_DENSITY_VOLUME, _DensityVolumeIndexShift);
 
     uint offs = start;
     for(int ll=0; ll<iNrCoarseLights; ll+=4)
@@ -449,12 +493,12 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     offs = GenerateLayeredOffsetBufferIndex(0, tileIDX, i, nrTilesX, nrTilesY, nrClusters, eyeIndex);
     for(int category=0; category<LIGHTCATEGORY_COUNT; category++)
     {
-        int numLights = min(ReadCategoryListCount(t, category),31);        // only allow 5 bits
+        int numLights = ReadCategoryListCount(t, category);
         if(i<nrClusters)
         {
-            g_LayeredOffset[offs] = (start+localOffs) | (((uint) numLights)<<27);
+            g_LayeredOffset[offs] = PackClusterLayeredOffset((start+localOffs), (uint)numLights);
             offs += (nrClusters*nrTilesX*nrTilesY);
-            localOffs += ReadCategoryListCount(t, category);       // use unclamped count for localOffs
+            localOffs += numLights;// use unclamped count for localOffs
         }
     }
 

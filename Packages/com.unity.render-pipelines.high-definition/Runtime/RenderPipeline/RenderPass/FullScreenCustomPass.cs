@@ -14,17 +14,17 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Material used for the fullscreen pass, it's shader must have been created with.
         /// </summary>
-        public Material         fullscreenPassMaterial;
+        public Material fullscreenPassMaterial;
         [SerializeField]
-        int                     materialPassIndex = 0;
+        int materialPassIndex = 0;
         /// <summary>
         /// Name of the pass to use in the fullscreen material.
         /// </summary>
-        public string           materialPassName = "Custom Pass 0";
+        public string materialPassName = "Custom Pass 0";
         /// <summary>
         /// Set to true if your shader will sample in the camera color buffer.
         /// </summary>
-        public bool             fetchColorBuffer;
+        public bool fetchColorBuffer;
 
         int fadeValueId;
 
@@ -49,17 +49,22 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="ctx">The context of the custom pass. Contains command buffer, render context, buffer, etc.</param>
         protected override void Execute(CustomPassContext ctx)
         {
-            if (fullscreenPassMaterial != null)
+            if (fullscreenPassMaterial != null && fullscreenPassMaterial.passCount > 0)
             {
                 if (fetchColorBuffer)
                 {
                     ResolveMSAAColorBuffer(ctx.cmd, ctx.hdCamera);
-                    // reset the render target to the UI 
+                    // reset the render target to the UI
                     SetRenderTargetAuto(ctx.cmd);
                 }
 
+                // In case the pass name is not found, we fallback on the first one instead of drawing all of them (default behavior with pass id = -1)
+                int passIndex = fullscreenPassMaterial.FindPass(materialPassName);
+                if (passIndex == -1)
+                    passIndex = 0;
+
                 fullscreenPassMaterial.SetFloat(fadeValueId, fadeValue);
-                CoreUtils.DrawFullScreen(ctx.cmd, fullscreenPassMaterial, shaderPassId: fullscreenPassMaterial.FindPass(materialPassName));
+                CoreUtils.DrawFullScreen(ctx.cmd, fullscreenPassMaterial, shaderPassId: passIndex);
             }
         }
 

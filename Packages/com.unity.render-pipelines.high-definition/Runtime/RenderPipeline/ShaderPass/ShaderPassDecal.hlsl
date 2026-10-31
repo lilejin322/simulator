@@ -2,6 +2,7 @@
 #error SHADERPASS_is_not_correctly_define
 #endif
 
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/UnityInstancing.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/VertMesh.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Decal/DecalPrepassBuffer.hlsl"
 #if (SHADERPASS == SHADERPASS_DBUFFER_MESH)
@@ -11,14 +12,18 @@
 void MeshDecalsPositionZBias(inout VaryingsToPS input)
 {
 #if UNITY_REVERSED_Z
-	input.vmesh.positionCS.z -= _DecalMeshDepthBias;
+    input.vmesh.positionCS.z -= _DecalMeshDepthBias;
 #else
-	input.vmesh.positionCS.z += _DecalMeshDepthBias;
+    input.vmesh.positionCS.z += _DecalMeshDepthBias;
 #endif
 }
 
 PackedVaryingsType Vert(AttributesMesh inputMesh)
 {
+    // Usually the instance ID is set up in the call to VertMesh
+    // but as we are reading per instance data here we need to set it up early
+    UNITY_SETUP_INSTANCE_ID(inputMesh);
+
     VaryingsType varyingsType;
 #if (SHADERPASS == SHADERPASS_DBUFFER_MESH)
 
@@ -52,7 +57,7 @@ void Frag(  PackedVaryingsToPS packedInput,
 )
 {
 #ifdef SCENEPICKINGPASS
-    outColor = _SelectionID;
+    outColor = unity_SelectionID;
 #else
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(packedInput);
     FragInputs input = UnpackVaryingsToFragInputs(packedInput);
@@ -60,9 +65,14 @@ void Frag(  PackedVaryingsToPS packedInput,
     float clipValue = 1.0;
     float angleFadeFactor = 1.0;
 
-#if (SHADERPASS == SHADERPASS_DBUFFER_PROJECTOR) || (SHADERPASS == SHADERPASS_FORWARD_EMISSIVE_PROJECTOR)    
+#if (SHADERPASS == SHADERPASS_DBUFFER_PROJECTOR) || (SHADERPASS == SHADERPASS_FORWARD_EMISSIVE_PROJECTOR)
 
-	float depth = LoadCameraDepth(input.positionSS.xy);
+    float depth = LoadCameraDepth(input.positionSS.xy);
+#if (SHADERPASS == SHADERPASS_FORWARD_EMISSIVE_PROJECTOR) && UNITY_REVERSED_Z
+    // For the sky adjust the depth so that the following LOD calculation (GetSurfaceData() in DecalData.hlsl) of adjacent
+    // non-sky pixels using depth derivatives results in LOD0 sampling
+    depth = IsSky(depth) ? UNITY_NEAR_CLIP_VALUE : depth;
+#endif
     PositionInputs posInput = GetPositionInput(input.positionSS.xy, _ScreenSize.zw, depth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V);
 
     // Decal layer mask accepted by the receiving material
@@ -76,7 +86,7 @@ void Frag(  PackedVaryingsToPS packedInput,
 
         DecodeFromDecalPrepass(posInput.positionSS, material);
 
-        if ((decalLayerMask & material.decalLayerMask) == 0)
+        if ((decalLayerMask & material.renderingLayerMask) == 0)
             clipValue -= 2.0;
     }
 
@@ -120,12 +130,10 @@ void Frag(  PackedVaryingsToPS packedInput,
         float4x4 normalToWorld = UNITY_ACCESS_INSTANCED_PROP(Decal, _NormalToWorld);
         float2 angleFade = float2(normalToWorld[1][3], normalToWorld[2][3]);
 
-        if (angleFade.y < 0.0f) // if angle fade is enabled
+        if (angleFade.x > 0.0f) // if angle fade is enabled
         {
             float3 decalNormal = float3(normalToWorld[0].z, normalToWorld[1].z, normalToWorld[2].z);
-            float dotAngle = dot(material.geomNormalWS, decalNormal);
-            // See equation in DecalSystem.cs - simplified to a madd mul add here
-            angleFadeFactor = saturate(angleFade.x + angleFade.y * (dotAngle * (dotAngle - 2.0)));
+            angleFadeFactor = DecodeAngleFade(dot(material.geomNormalWS, decalNormal), angleFade);
         }
     }
 

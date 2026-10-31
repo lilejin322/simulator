@@ -18,9 +18,9 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             // Ordered by frame time in HDRP
             ///<summary>Object Depth pre-pass, only the depth of the object will be rendered.</summary>
-            DepthPrepass    = 1,
+            DepthPrepass = 1,
             ///<summary>Forward pass, render the object color.</summary>
-            Forward         = 0,
+            Forward = 0,
         }
 
         // Used only for the UI to keep track of the toggle state
@@ -39,7 +39,25 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sorting flags of the objects to render.
         /// </summary>
-        public SortingCriteria sortingCriteria = SortingCriteria.CommonOpaque;
+        public SortingCriteria sortingCriteria = HDUtils.k_OpaqueSortingCriteria;
+
+        /// <summary>
+        /// Select which type of override to apply on the DrawRenderers pass.
+        /// </summary>
+        public enum OverrideMaterialMode
+        {
+            /// <summary> Disable the material override </summary>
+            None,
+            /// <summary> Override the material for all renderers </summary>
+            Material,
+            /// <summary> Override the shader for all renderers. This option keeps the material properties of the renderer and can be used like a replacement shader. </summary>
+            Shader
+        };
+
+        /// <summary>
+        /// Controls how the material on each renderer will be replaced. Material mode uses overrideMaterial. Shader mode uses overrideShader.
+        /// </summary>
+        public OverrideMaterialMode overrideMode = OverrideMaterialMode.Material; //default to Material as this was previously the only option
 
         // Override material
         /// <summary>
@@ -52,6 +70,18 @@ namespace UnityEngine.Rendering.HighDefinition
         /// Select which pass will be used to render objects when using an override material.
         /// </summary>
         public string overrideMaterialPassName = "Forward";
+
+        // Override shader
+        /// <summary>
+        /// Replaces the shader of selected renderers while using the current material properties.
+        /// </summary>
+        public Shader overrideShader = null;
+        [SerializeField]
+        int overrideShaderPassIndex = 0;
+        ///<summary>
+        /// Select whih pass will be used to render objects when using an override material.
+        /// </summary>
+        public string overrideShaderPassName = "Forward";
 
         /// <summary>
         /// When true, overrides the depth state of the objects.
@@ -67,17 +97,64 @@ namespace UnityEngine.Rendering.HighDefinition
         public bool depthWrite = true;
 
         /// <summary>
+        /// Override the stencil state of the objects.
+        /// </summary>
+        public bool overrideStencil = false;
+
+        /// <summary>
+        /// Stencil reference value. Be careful when using this value to write in the stencil buffer to not overwrite HDRP stencil bits.
+        /// </summary>
+        public int stencilReferenceValue = (int)UserStencilUsage.UserBit0;
+
+        /// <summary>
+        /// Write mask of the stencil.
+        /// </summary>
+        public int stencilWriteMask = (int)(UserStencilUsage.AllUserBits);
+
+        /// <summary>
+        /// Read mask of the stencil
+        /// </summary>
+        public int stencilReadMask = (int)(UserStencilUsage.AllUserBits);
+
+        /// <summary>
+        /// Comparison operation between the stencil buffer and the reference value.
+        /// </summary>
+        public CompareFunction stencilCompareFunction = CompareFunction.Always;
+
+        /// <summary>
+        /// Operation to execute if the stencil test passes.
+        /// </summary>
+        public StencilOp stencilPassOperation;
+
+        /// <summary>
+        /// Operation to execute if the stencil test fails.
+        /// </summary>
+        public StencilOp stencilFailOperation;
+
+        /// <summary>
+        /// Operation to execute if the depth test fails.
+        /// </summary>
+        public StencilOp stencilDepthFailOperation;
+
+        /// <summary>
         /// Set the shader pass to use when the override material is null
         /// </summary>
         public ShaderPass shaderPass = ShaderPass.Forward;
 
+        /// <summary>
+        /// Apply variable rate shading using the shading rate image.
+        /// </summary>
+        public bool variableRateShading = false;
+
+        /// <summary>
+        /// True if you want your custom pass to enable and set variable rate shading (VRS) texture. False for regular passes.
+        /// </summary>
+        protected override bool enableVariableRateShading => variableRateShading;
+
         int fadeValueId;
 
-        static ShaderTagId[] forwardShaderTags;
-        static ShaderTagId[] depthShaderTags;
-
-        // Cache the shaderTagIds so we don't allocate a new array each frame
-        ShaderTagId[]   cachedShaderTagIDs;
+        [NonSerialized] ShaderTagId[] m_ForwardShaderTags;
+        [NonSerialized] ShaderTagId[] m_DepthShaderTags;
 
         /// <summary>
         /// Called before the first execution of the pass occurs.
@@ -92,15 +169,19 @@ namespace UnityEngine.Rendering.HighDefinition
             // In case there was a pass index assigned, we retrieve the name of this pass
             if (String.IsNullOrEmpty(overrideMaterialPassName) && overrideMaterial != null)
                 overrideMaterialPassName = overrideMaterial.GetPassName(overrideMaterialPassIndex);
+            if (String.IsNullOrEmpty(overrideShaderPassName) && overrideShader != null)
+                overrideShaderPassName = new Material(overrideShader).GetPassName(overrideShaderPassIndex);
 
-            forwardShaderTags = new ShaderTagId[] {
+            m_ForwardShaderTags = new ShaderTagId[]
+            {
                 HDShaderPassNames.s_ForwardName,            // HD Lit shader
                 HDShaderPassNames.s_ForwardOnlyName,        // HD Unlit shader
                 HDShaderPassNames.s_SRPDefaultUnlitName,    // Cross SRP Unlit shader
                 HDShaderPassNames.s_EmptyName,              // Add an empty slot for the override material
             };
 
-            depthShaderTags = new ShaderTagId[] {
+            m_DepthShaderTags = new ShaderTagId[]
+            {
                 HDShaderPassNames.s_DepthForwardOnlyName,
                 HDShaderPassNames.s_DepthOnlyName,
                 HDShaderPassNames.s_EmptyName,              // Add an empty slot for the override material
@@ -121,9 +202,9 @@ namespace UnityEngine.Rendering.HighDefinition
         ShaderTagId[] GetShaderTagIds()
         {
             if (shaderPass == ShaderPass.DepthPrepass)
-                return depthShaderTags;
+                return m_DepthShaderTags;
             else
-                return forwardShaderTags;
+                return m_ForwardShaderTags;
         }
 
         /// <summary>
@@ -147,28 +228,37 @@ namespace UnityEngine.Rendering.HighDefinition
 
             var mask = overrideDepthState ? RenderStateMask.Depth : 0;
             mask |= overrideDepthState && !depthWrite ? RenderStateMask.Stencil : 0;
+            if (overrideStencil)
+                mask |= RenderStateMask.Stencil;
             var stateBlock = new RenderStateBlock(mask)
             {
                 depthState = new DepthState(depthWrite, depthCompareFunction),
                 // We disable the stencil when the depth is overwritten but we don't write to it, to prevent writing to the stencil.
-                stencilState = new StencilState(false),
+                stencilState = new StencilState(overrideStencil, (byte)stencilReadMask, (byte)stencilWriteMask, stencilCompareFunction, stencilPassOperation, stencilFailOperation, stencilDepthFailOperation),
+                stencilReference = overrideStencil ? stencilReferenceValue : 0,
             };
 
-            PerObjectData renderConfig = ctx.hdCamera.frameSettings.IsEnabled(FrameSettingsField.Shadowmask) ? HDUtils.GetBakedLightingWithShadowMaskRenderConfig() : HDUtils.GetBakedLightingRenderConfig();
+            PerObjectData renderConfig = HDUtils.GetRendererConfiguration(ctx.hdCamera.frameSettings.IsEnabled(FrameSettingsField.AdaptiveProbeVolume), ctx.hdCamera.frameSettings.IsEnabled(FrameSettingsField.Shadowmask));
+            var overrideShaderMaterial = (overrideShader != null) ? new Material(overrideShader) : null;
 
-            var result = new RendererListDesc(shaderPasses, ctx.cullingResults, ctx.hdCamera.camera)
+            var result = new RendererUtils.RendererListDesc(shaderPasses, ctx.cullingResults, ctx.hdCamera.camera)
             {
                 rendererConfiguration = renderConfig,
                 renderQueueRange = GetRenderQueueRange(renderQueueType),
                 sortingCriteria = sortingCriteria,
                 excludeObjectMotionVectors = false,
-                overrideMaterial = overrideMaterial,
+                overrideShader = overrideMode == OverrideMaterialMode.Shader ? overrideShader : null,
+                overrideMaterial = overrideMode == OverrideMaterialMode.Material ? overrideMaterial : null,
                 overrideMaterialPassIndex = (overrideMaterial != null) ? overrideMaterial.FindPass(overrideMaterialPassName) : 0,
+                overrideShaderPassIndex = (overrideShader != null) ? overrideShaderMaterial.FindPass(overrideShaderPassName) : 0,
                 stateBlock = stateBlock,
                 layerMask = layerMask,
             };
 
-            CoreUtils.DrawRendererList(ctx.renderContext, ctx.cmd, RendererList.Create(result));
+            Object.DestroyImmediate(overrideShaderMaterial);
+            var rendererList = ctx.renderContext.CreateRendererList(result);
+            bool opaque = renderQueueType == RenderQueueType.AllOpaque || renderQueueType == RenderQueueType.OpaqueAlphaTest || renderQueueType == RenderQueueType.OpaqueNoAlphaTest;
+            HDRenderPipeline.RenderForwardRendererList(ctx.hdCamera.frameSettings, rendererList, opaque, ctx.cmd);
         }
 
         /// <summary>

@@ -1,14 +1,13 @@
 using System.Collections.Generic;
 using System.Linq;
-using UnityEditor.VFX.Block;
 using UnityEngine;
 
-namespace UnityEditor.VFX
+namespace UnityEditor.VFX.HDRP
 {
-    [VFXInfo]
+    [VFXInfo(name = "Output Particle|HDRP Lit|Mesh", category = "#2Output Basic")]
     class VFXLitMeshOutput : VFXAbstractParticleHDRPLitOutput, IVFXMultiMeshOutput
     {
-        public override string name { get { return "Output Particle Lit Mesh"; } }
+        public override string name => "Output Particle".AppendLabel("HDRP Lit") + "\nMesh";
         public override string codeGeneratorTemplate { get { return RenderPipeTemplate("VFXParticleLitMesh"); } }
         public override VFXTaskType taskType { get { return VFXTaskType.ParticleMeshOutput; } }
         public override bool supportsUV { get { return GetOrRefreshShaderGraphObject() == null; } }
@@ -33,39 +32,15 @@ namespace UnityEditor.VFX
                         features |= VFXOutputUpdate.Features.MultiMesh;
                     if (lod)
                         features |= VFXOutputUpdate.Features.LOD;
-                    if (HasSorting() && VFXOutputUpdate.HasFeature(features, VFXOutputUpdate.Features.IndirectDraw))
-                        features |= VFXOutputUpdate.Features.Sort;
+                    if (HasSorting() && VFXOutputUpdate.HasFeature(features, VFXOutputUpdate.Features.IndirectDraw) || needsOwnSort)
+                    {
+                        if (VFXSortingUtility.IsPerCamera(sortMode))
+                            features |= VFXOutputUpdate.Features.CameraSort;
+                        else
+                            features |= VFXOutputUpdate.Features.Sort;
+                    }
                 }
                 return features;
-            }
-        }
-
-        public override IEnumerable<VFXAttributeInfo> attributes
-        {
-            get
-            {
-                yield return new VFXAttributeInfo(VFXAttribute.Position, VFXAttributeMode.Read);
-                if (colorMode != ColorMode.None)
-                    yield return new VFXAttributeInfo(VFXAttribute.Color, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.Alpha, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.Alive, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AxisZ, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.AngleZ, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.PivotZ, VFXAttributeMode.Read);
-
-                yield return new VFXAttributeInfo(VFXAttribute.Size, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleX, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleY, VFXAttributeMode.Read);
-                yield return new VFXAttributeInfo(VFXAttribute.ScaleZ, VFXAttributeMode.Read);
-
-                if (usesFlipbook)
-                    yield return new VFXAttributeInfo(VFXAttribute.TexIndex, VFXAttributeMode.Read);
             }
         }
 
@@ -88,14 +63,29 @@ namespace UnityEditor.VFX
                 foreach (var s in base.filteredOutSettings)
                     yield return s;
 
+                yield return nameof(enableRayTracing);
+
                 // TODO Add a experimental bool to setting attribute
                 if (!VFXViewPreference.displayExperimentalOperator)
                 {
-                    yield return "MeshCount";
-                    yield return "lod";
+                    yield return nameof(MeshCount);
+                    yield return nameof(lod);
                 }
             }
         }
+
+        protected override IEnumerable<string> untransferableSettings
+        {
+            get
+            {
+                foreach (var setting in base.untransferableSettings)
+                {
+                    yield return setting;
+                }
+                yield return nameof(enableRayTracing);
+            }
+        }
+
 
         public override VFXExpressionMapper GetExpressionMapper(VFXDeviceTarget target)
         {
@@ -116,6 +106,16 @@ namespace UnityEditor.VFX
             }
 
             return mapper;
+        }
+
+        internal override void GenerateErrors(VFXErrorReporter report)
+        {
+            base.GenerateErrors(report);
+            var dataParticle = GetData() as VFXDataParticle;
+            if (dataParticle != null && dataParticle.boundsMode != BoundsSettingMode.Manual)
+                report.RegisterError("WarningBoundsComputation", VFXErrorType.Warning, $"Bounds computation have no sense of what the scale of the output mesh is," +
+                    $" so the resulted computed bounds can be too small or big" +
+                    $" Please use padding to mitigate this discrepancy.", this);
         }
     }
 }

@@ -14,10 +14,24 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
 {
     float2 unlitColorMapUv = TRANSFORM_TEX(input.texCoord0.xy, _UnlitColorMap);
     surfaceData.color = SAMPLE_TEXTURE2D(_UnlitColorMap, sampler_UnlitColorMap, unlitColorMapUv).rgb * _UnlitColor.rgb;
-    float alpha = SAMPLE_TEXTURE2D(_UnlitColorMap, sampler_UnlitColorMap, unlitColorMapUv).a * _UnlitColor.a;
+
+    float alpha = 1.0f;
+#ifdef DEBUG_DISPLAY
+    if (_DebugMipMapMode == DEBUGMIPMAPMODE_NONE)
+#endif
+    {
+        alpha = SAMPLE_TEXTURE2D(_UnlitColorMap, sampler_UnlitColorMap, unlitColorMapUv).a;
+        alpha = lerp(_AlphaRemapMin, _AlphaRemapMax, alpha);
+        alpha *= _UnlitColor.a;
+    }
 
     // The shader graph can require to export the geometry normal. We thus need to initialize this variable
     surfaceData.normalWS = 0.0;
+
+#if defined(_ENABLE_SHADOW_MATTE) && (SHADERPASS == SHADERPASS_PATH_TRACING)
+    // Also initialize shadow tint to avoid warning (although it won't be used in that context)
+    surfaceData.shadowTint = 0.0;
+#endif
 
 #ifdef _ALPHATEST_ON
     GENERIC_ALPHA_TEST(alpha, _AlphaCutoff);
@@ -26,7 +40,7 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     // Builtin Data
     ZERO_BUILTIN_INITIALIZE(builtinData); // No call to InitBuiltinData as we don't have any lighting
     builtinData.opacity = alpha;
-    
+
 #ifdef _ALPHATEST_ON
     // Used for sharpening by alpha to mask
     builtinData.alphaClipTreshold = _AlphaCutoff;
@@ -36,7 +50,7 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     // Light Layers are currently not used for the Unlit shader (because it is not lit)
     // But Unlit objects do cast shadows according to their rendering layer mask, which is what we want to
     // display in the light layers visualization mode, therefore we need the renderingLayers
-    builtinData.renderingLayers = GetMeshRenderingLightLayer();
+    builtinData.renderingLayers = GetMeshRenderingLayerMask();
 #endif
 
 #ifdef _EMISSIVE_COLOR_MAP
@@ -61,16 +75,16 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     builtinData.emissiveColor = lerp(emissiveRcpExposure, builtinData.emissiveColor, _EmissiveExposureWeight);
 
 #if (SHADERPASS == SHADERPASS_DISTORTION) || defined(DEBUG_DISPLAY)
-    float3 distortion = SAMPLE_TEXTURE2D(_DistortionVectorMap, sampler_DistortionVectorMap, input.texCoord0.xy).rgb;
+    float3 distortion = SAMPLE_TEXTURE2D(_DistortionVectorMap, sampler_DistortionVectorMap, TRANSFORM_TEX(input.texCoord0.xy, _DistortionVectorMap)).rgb;
     distortion.rg = distortion.rg * _DistortionVectorScale.xx + _DistortionVectorBias.xx;
     builtinData.distortion = distortion.rg * _DistortionScale;
     builtinData.distortionBlur = clamp(distortion.b * _DistortionBlurScale, 0.0, 1.0) * (_DistortionBlurRemapMax - _DistortionBlurRemapMin) + _DistortionBlurRemapMin;
 #endif
 
-#if defined(DEBUG_DISPLAY) && !defined(SHADER_STAGE_RAY_TRACING)
+#if defined(DEBUG_DISPLAY) && !defined(SHADER_STAGE_RAY_TRACING) && (SHADERPASS != SHADERPASS_LIGHT_TRANSPORT)
     if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
     {
-        surfaceData.color = GetTextureDataDebug(_DebugMipMapMode, unlitColorMapUv, _UnlitColorMap, _UnlitColorMap_TexelSize, _UnlitColorMap_MipInfo, surfaceData.color);
+        surfaceData.color = GET_TEXTURE_STREAMING_DEBUG(posInput.positionSS, input.texCoord0);
     }
 #endif
 

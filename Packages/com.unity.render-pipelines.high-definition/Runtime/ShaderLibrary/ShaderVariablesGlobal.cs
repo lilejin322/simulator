@@ -1,3 +1,5 @@
+using UnityEngine.Experimental.Rendering;
+
 namespace UnityEngine.Rendering.HighDefinition
 {
     // Global Constant Buffers - b registers. Unity supports a maximum of 16 global constant buffers.
@@ -8,6 +10,8 @@ namespace UnityEngine.Rendering.HighDefinition
         PBRSky = 2,
         RayTracing = 3,
         RayTracingLightLoop = 4,
+        WorldEnvLightReflectionData = 5,
+        APV = APVConstantBufferRegister.GlobalRegister,
     }
 
     // We need to keep the number of different constant buffers low.
@@ -29,11 +33,7 @@ namespace UnityEngine.Rendering.HighDefinition
     [GenerateHLSL(needAccessors = false, generateCBuffer = true, constantRegister = (int)ConstantRegister.Global)]
     unsafe struct ShaderVariablesGlobal
     {
-        public const int RenderingLightLayersMask       = 0x000000FF;
-        public const int RenderingLightLayersMaskShift  = 0;
-        public const int RenderingDecalLayersMask       = 0x0000FF00;
-        public const int RenderingDecalLayersMaskShift  = 8;
-        public const int DefaultRenderingLayerMask      = 0x0101;       
+        public const int RenderingLayersMask = (int)RenderingLayerMask.Everything;
 
         // TODO: put commonly used vars together (below), and then sort them by the frequency of use (descending).
         // Note: a matrix is 4 * 4 * 4 = 64 bytes (1x cache line), so no need to sort those.
@@ -43,6 +43,7 @@ namespace UnityEngine.Rendering.HighDefinition
         // ================================
         // TODO: all affine matrices should be 3x4.
         public Matrix4x4 _ViewMatrix;
+        public Matrix4x4 _CameraViewMatrix;
         public Matrix4x4 _InvViewMatrix;
         public Matrix4x4 _ProjMatrix;
         public Matrix4x4 _InvProjMatrix;
@@ -50,6 +51,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public Matrix4x4 _CameraViewProjMatrix;
         public Matrix4x4 _InvViewProjMatrix;
         public Matrix4x4 _NonJitteredViewProjMatrix;
+        public Matrix4x4 _NonJitteredInvViewProjMatrix;
         public Matrix4x4 _PrevViewProjMatrix; // non-jittered
         public Matrix4x4 _PrevInvViewProjMatrix; // non-jittered
 
@@ -58,10 +60,15 @@ namespace UnityEngine.Rendering.HighDefinition
         public Vector4 _PrevCamPosRWS_Internal;
 #endif
         public Vector4 _ScreenSize;                 // { w, h, 1 / w, 1 / h }
+        public Vector4 _PostProcessScreenSize;      // { w, h, 1.0 / w, 1.0 / h }
 
-        // Those two uniforms are specific to the RTHandle system
-        public Vector4 _RTHandleScale;        // { w / RTHandle.maxWidth, h / RTHandle.maxHeight } : xy = currFrame, zw = prevFrame
-        public Vector4 _RTHandleScaleHistory; // Same as above but the RTHandle handle size is that of the history buffer
+        // Those four uniforms are specific to the RTHandle system
+        public Vector4 _RTHandleScale;                      // { w / RTHandle.maxWidth, h / RTHandle.maxHeight } : xy = currFrame, zw = prevFrame
+        public Vector4 _RTHandleScaleHistory;               // Same as above but the RTHandle handle size is that of the history buffer
+        public Vector4 _RTHandlePostProcessScale;           // { postProcessWidth / RTHandle.maxWidth, postProcessWidth / RTHandle.maxHeight } : xy = currFrame, zw = prevFrame
+        public Vector4 _RTHandlePostProcessScaleHistory;    // Same as above but the RTHandle handle size for post process is that of the history buffer
+
+        public Vector4 _DynamicResolutionFullscreenScale;   // Represent the scale between dynamic resolution and the final camera viewport resolution
 
         // Values used to linearize the Z buffer (http://www.humus.name/temp/Linearize%20depth.txt)
         // x = 1 - f/n
@@ -81,6 +88,11 @@ namespace UnityEngine.Rendering.HighDefinition
         // w = 1/far plane
         public Vector4 _ProjectionParams;
 
+        // Parameters used to linearize the Z buffer
+        // Correctly handles oblique projection matrices
+        // https://jcgt.org/published/0005/04/03/paper.pdf
+        public Vector4 _InvProjParams;
+
         // x = orthographic camera's width
         // y = orthographic camera's height
         // z = unused
@@ -99,7 +111,7 @@ namespace UnityEngine.Rendering.HighDefinition
         [HLSLArray(6, typeof(Vector4))]
         public fixed float _ShadowFrustumPlanes[6 * 4];     // { (a, b, c) = N, d = -dot(N, P) } [L, R, T, B, N, F]
 
-        // TAA Frame Index ranges from 0 to 7.
+        // TAA Frame Index ranges from 0 to 1023.
         public Vector4 _TaaFrameInfo;               // { taaSharpenStrength, unused, taaFrameIndex, taaEnabled ? 1 : 0 }
 
         // Current jitter strength (0 if TAA is disabled)
@@ -115,38 +127,37 @@ namespace UnityEngine.Rendering.HighDefinition
         public Vector4 _LastTimeParameters;         // { t, sin(t), cos(t) }
 
         // Volumetric lighting / Fog.
-        public int      _FogEnabled;
-        public int      _PBRFogEnabled;
-        public int      _EnableVolumetricFog;
-        public float    _MaxFogDistance;
-        public Vector4  _FogColor; // color in rgb
-        public float    _FogColorMode;
-        public float    _Pad0;
-        public float    _Pad1;
-        public float    _Pad2;
-        public Vector4  _MipFogParameters;
-        public Vector4  _HeightFogBaseScattering;
-        public float    _HeightFogBaseExtinction;
-        public float    _HeightFogBaseHeight;
-        public float    _GlobalFogAnisotropy;
-        public int      _VolumetricFilteringEnabled;
-        public Vector2  _HeightFogExponents; // { 1/H, H }
-        public float    _Pad4;
-        public float    _Pad5;
+        public Vector4 _PlanetCenterRadius;
+        public Vector4 _PlanetUpAltitude;
+        public int _FogEnabled;
+        public int _PBRFogEnabled;
+        public int _EnableVolumetricFog;
+        public float _MaxFogDistance;
+        public Vector4 _FogColor; // color in rgb
+        public float _FogColorMode;
+        public float _GlobalMipBias;
+        public float _GlobalMipBiasPow2;
+        public uint _RayTracingCheckerIndex;
+        public Vector4 _MipFogParameters;
+        public Vector4 _HeightFogBaseScattering;
+        public float _HeightFogBaseExtinction;
+        public float _HeightFogBaseHeight;
+        public float _GlobalFogAnisotropy;
+        public int _VolumetricFilteringEnabled;
+        public Vector2 _HeightFogExponents; // { 1/H, H }
+        public int _FogDirectionalOnly;
+        public float _FogGIDimmer;
 
         // VBuffer
-        public Vector4  _VBufferViewportSize;           // { w, h, 1/w, 1/h }
-        public Vector4  _VBufferLightingViewportScale;  // Necessary us to work with sub-allocation (resource aliasing) in the RTHandle system
-        public Vector4  _VBufferLightingViewportLimit;  // Necessary us to work with sub-allocation (resource aliasing) in the RTHandle system
-        public Vector4  _VBufferDistanceEncodingParams; // See the call site for description
-        public Vector4  _VBufferDistanceDecodingParams; // See the call site for description
-        public uint     _VBufferSliceCount;
-        public float    _VBufferRcpSliceCount;
-        public float    _VBufferRcpInstancedViewCount;  // Used to remap VBuffer coordinates for XR
-        public float    _VBufferLastSliceDist;          // The distance to the middle of the last slice
-
-        // Light Loop
-        public const int s_MaxEnv2DLight = 32;
+        public Vector4 _VBufferViewportSize;           // { w, h, 1/w, 1/h }
+        public Vector4 _VBufferLightingViewportScale;  // Necessary us to work with sub-allocation (resource aliasing) in the RTHandle system
+        public Vector4 _VBufferLightingViewportLimit;  // Necessary us to work with sub-allocation (resource aliasing) in the RTHandle system
+        public Vector4 _VBufferDistanceEncodingParams; // See the call site for description
+        public Vector4 _VBufferDistanceDecodingParams; // See the call site for description
+        public uint _VBufferSliceCount;
+        public float _VBufferRcpSliceCount;
+        public float _VBufferRcpInstancedViewCount;  // Used to remap VBuffer coordinates for XR
+        public float _VBufferLastSliceDist;          // The distance to the middle of the last slice
 
         public Vector4 _ShadowAtlasSize;
         public Vector4 _CascadeShadowAtlasSize;
@@ -154,32 +165,55 @@ namespace UnityEngine.Rendering.HighDefinition
         public Vector4 _CachedShadowAtlasSize;
         public Vector4 _CachedAreaShadowAtlasSize;
 
-        [HLSLArray(s_MaxEnv2DLight, typeof(Matrix4x4))]
-        public fixed float _Env2DCaptureVP[s_MaxEnv2DLight * 4 * 4];
-        [HLSLArray(s_MaxEnv2DLight, typeof(Vector4))]
-        public fixed float _Env2DCaptureForward[s_MaxEnv2DLight * 4];
-        [HLSLArray(s_MaxEnv2DLight, typeof(Vector4))]
-        public fixed float _Env2DAtlasScaleOffset[s_MaxEnv2DLight * 4];
+        // Water
+        public Vector4 _BoundsSS;
+        public float _UpDirectionX;
+        public float _UpDirectionY;
+        public float _BufferStride;
+        public int _EnableWater;
 
-        public uint     _DirectionalLightCount;
-        public uint     _PunctualLightCount;
-        public uint     _AreaLightCount;
-        public uint     _EnvLightCount;
+        public Vector4 _WaterAmbientProbe;
+        public Vector4 _UnderWaterScatteringExtinction;
+        public Vector4 _UnderWaterUpHeight;
+        public int _UnderWaterSurfaceIndex;
+        public float _UnderWaterCausticsIntensity;
+        public float _UnderWaterCausticsPlaneBlendDistance;
+        public float _UnderWaterCausticsTilingFactor;
+        public Matrix4x4 _UnderWaterSurfaceTransform_Inverse;
+        public float _UnderWaterCausticsMaxLOD;
+        public float _UnderWaterCausticsShadowIntensity;
+        public float _UnderWaterCausticsRegionSize;
+        public int _CustomOutputForCustomPass;
 
-        public int      _EnvLightSkyEnabled;
-        public uint     _CascadeShadowCount;
-        public int      _DirectionalShadowIndex;
-        public uint     _EnableLightLayers;
+        public int _PreRefractionPass;
+        public int _SpecularFade;
+        public uint _EnableRenderingLayers;
+        public int _ReflectionsMode;
 
-        public uint     _EnableSkyReflection;
-        public uint     _EnableSSRefraction;
-        public float    _SSRefractionInvScreenWeightDistance; // Distance for screen space smoothstep with fallback
-        public float    _ColorPyramidLodCount;
+        public uint _DirectionalLightCount;
+        public uint _PunctualLightCount;
+        public uint _AreaLightCount;
+        public uint _EnvLightCount;
 
-        public float    _DirectionalTransmissionMultiplier;
-        public float    _ProbeExposureScale;
-        public float    _ContactShadowOpacity;
-        public float    _ReplaceDiffuseForIndirect;
+        public uint _WorldDirectionalLightCount;
+        public uint _WorldPunctualLightCount;
+        public uint _WorldAreaLightCount;
+        public uint _WorldEnvLightCount;
+
+        public int _EnvLightSkyEnabled;
+        public uint _CascadeShadowCount;
+        public int _DirectionalShadowIndex;
+        public uint _EnableLightLayers;
+
+        public uint _EnableSkyReflection;
+        public uint _EnableSSRefraction;
+        public float _SSRefractionInvScreenWeightDistance; // Distance for screen space smoothstep with fallback
+        public float _ColorPyramidLodCount;
+
+        public float _DirectionalTransmissionMultiplier;
+        public float _ProbeExposureScale;
+        public float _ContactShadowOpacity;
+        public float _ReplaceDiffuseForIndirect;
 
         public Vector4 _AmbientOcclusionParam; // xyz occlusion color, w directLightStrenght
 
@@ -193,25 +227,26 @@ namespace UnityEngine.Rendering.HighDefinition
         public uint _ProbeVolumeCount;
         public float _SlopeScaleDepthBias;
 
-        public Vector4  _CookieAtlasSize;
-        public Vector4  _CookieAtlasData;
-        public Vector4  _PlanarAtlasData;
+        public Vector4 _CookieAtlasSize;
+        public Vector4 _CookieAtlasData;
+        public Vector4 _ReflectionAtlasCubeData;
+        public Vector4 _ReflectionAtlasPlanarData;
 
         // Tile/Cluster
-        public uint     _NumTileFtplX;
-        public uint     _NumTileFtplY;
-        public float    g_fClustScale;
-        public float    g_fClustBase;
+        public uint _NumTileFtplX;
+        public uint _NumTileFtplY;
+        public float g_fClustScale;
+        public float g_fClustBase;
 
-        public float    g_fNearPlane;
-        public float    g_fFarPlane;
-        public int      g_iLog2NumClusters; // We need to always define these to keep constant buffer layouts compatible
-        public uint     g_isLogBaseBufferEnabled;
+        public float g_fNearPlane;
+        public float g_fFarPlane;
+        public int g_iLog2NumClusters; // We need to always define these to keep constant buffer layouts compatible
+        public uint g_isLogBaseBufferEnabled;
 
-        public uint     _NumTileClusteredX;
-        public uint     _NumTileClusteredY;
-        public int      _EnvSliceSize;
-        public float    _Pad7;
+        public uint _NumTileClusteredX;
+        public uint _NumTileClusteredY;
+        public int _EnvSliceSize;
+        public uint _EnableDecalLayers;
 
         // Subsurface scattering
         // Use float4 to avoid any packing issue between compute and pixel shaders
@@ -221,6 +256,10 @@ namespace UnityEngine.Rendering.HighDefinition
         public fixed float _TransmissionTintsAndFresnel0[DiffusionProfileConstants.DIFFUSION_PROFILE_COUNT * 4];  // RGB = 1/4 * color, A = fresnel0
         [HLSLArray(DiffusionProfileConstants.DIFFUSION_PROFILE_COUNT, typeof(Vector4))]
         public fixed float _WorldScalesAndFilterRadiiAndThicknessRemaps[DiffusionProfileConstants.DIFFUSION_PROFILE_COUNT * 4]; // X = meters per world unit, Y = filter radius (in mm), Z = remap start, W = end - start
+        [HLSLArray(DiffusionProfileConstants.DIFFUSION_PROFILE_COUNT, typeof(Vector4))]
+        public fixed float _DualLobeAndDiffusePower[DiffusionProfileConstants.DIFFUSION_PROFILE_COUNT * 4]; // RGB = dual lobe, A = diffuse power
+        [HLSLArray(DiffusionProfileConstants.DIFFUSION_PROFILE_COUNT, typeof(Vector4))]
+        public fixed float _BorderAttenuationColor[DiffusionProfileConstants.DIFFUSION_PROFILE_COUNT * 4]; // RGB = dual lobe, A = diffuse power
         // Because of constant buffer limitation, arrays can only hold 4 components elements (otherwise we get alignment issues)
         // We could pack the 16 values inside 4 uint4 but then the generated code is inefficient and generates a lots of swizzle operations instead of a single load.
         // That's why we have 16 uint and only use the first component of each element.
@@ -233,42 +272,43 @@ namespace UnityEngine.Rendering.HighDefinition
         public uint _DiffusionProfileCount;
 
         // Decals
-        public Vector2  _DecalAtlasResolution;
-        public uint     _EnableDecals;
-        public uint     _DecalCount;
+        public Vector2 _DecalAtlasResolution;
+        public uint _EnableDecals;
+        public uint _DecalCount;
 
+        public float _OffScreenDownsampleFactor;
         public uint _OffScreenRendering;
-        public uint _OffScreenDownsampleFactor;
         public uint _XRViewCount;
-        public int  _FrameCount;
+        public int _FrameCount;
 
         public Vector4 _CoarseStencilBufferSize;
 
-        public int      _IndirectDiffuseMode; // Match IndirectDiffuseMode enum in LightLoop.cs
-        public int      _EnableRayTracedReflections;
-        public int      _RaytracingFrameIndex;  // Index of the current frame [0, 7]
-        public uint     _EnableRecursiveRayTracing;
+        public int _IndirectDiffuseMode;
+        public int _EnableRayTracedReflections;
+        public int _RaytracingFrameIndex;  // Index of the current frame [0, 7]
+        public uint _EnableRecursiveRayTracing;
 
-        // Probe Volumes
-        public Vector4  _ProbeVolumeAtlasResolutionAndSliceCount;
-        public Vector4  _ProbeVolumeAtlasResolutionAndSliceCountInverse;
-        public Vector4  _ProbeVolumeAtlasOctahedralDepthResolutionAndInverse;
-
-        public int      _ProbeVolumeLeakMitigationMode;
-        public float    _ProbeVolumeBilateralFilterWeightMin;
-        public float    _ProbeVolumeBilateralFilterWeight;
-        public uint     _EnableDecalLayers;
-
-        [HLSLArray(7, typeof(Vector4))]
-        public fixed float _ProbeVolumeAmbientProbeFallbackPackedCoeffs[7 * 4]; // 3 bands of SH, packed for storing global ambient probe lighting as fallback to probe volumes.
-
-        public int      _TransparentCameraOnlyMotionVectors;
-
+        public int _TransparentCameraOnlyMotionVectors;
         // Can be set to 0 to globally "disable" tessellation
         // Because the DepthPrepass doesn't have a DEBUG_DISPLAY variant, it is the only way to disable it for debug modes
-        public float    _GlobalTessellationFactorMultiplier;
+        public float _GlobalTessellationFactorMultiplier;
+        public float _SpecularOcclusionBlend;
+        public float _DeExposureMultiplier;
 
-        public float    _SpecularOcclusionBlend;
-        public float    _Pad9;
+        // See ScreenCoordOverride.hlsl for details.
+        public Vector4 _ScreenSizeOverride;
+        public Vector4 _ScreenCoordScaleBias;
+
+        public Vector2 _VolumetricCloudsShadowScale;
+        public uint _EnableComputeThickness;
+        public float _VolumetricCloudsFallBackValue;
+        public Vector4 _VolumetricCloudsShadowOriginToggle;
+        public Vector4 _ColorPyramidUvScaleAndLimitCurrentFrame;
+        public Vector4 _ColorPyramidUvScaleAndLimitPrevFrame;
+
+        public uint _ContactShadowDirectionalOnly;
+        public uint _ContactShadowHalfResolution;
+        public uint _GlobalPadding0;
+        public uint _GlobalPadding1;
     }
 }

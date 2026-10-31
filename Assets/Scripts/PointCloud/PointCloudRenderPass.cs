@@ -80,7 +80,9 @@ namespace Simulator.PointCloud
             if (!doLitPass)
                 return;
 
-            var lightLayers = data.camera.frameSettings.IsEnabled(FrameSettingsField.LightLayers);
+            // HDRP writes rendering layers to the fifth GBuffer target in both cases
+            var lightLayers = data.camera.frameSettings.IsEnabled(FrameSettingsField.LightLayers) ||
+                              data.camera.frameSettings.IsEnabled(FrameSettingsField.RenderingLayerMaskBuffer);
             RenderTargetIdentifier[] rtiCache;
 
             if (lightLayers)
@@ -107,15 +109,15 @@ namespace Simulator.PointCloud
                 rtiCache = rtiCache4;
             }
 
-            RenderPipeline.ForceRenderSky(data.camera, data.context.cmd, data.customPassColorBuffer, data.customPassDepthBuffer);
+            RenderPipeline.ForceRenderSky(data.camera, data.cmd, data.customPassColorBuffer, data.customPassDepthBuffer);
 
             foreach (var pcr in pointCloudRenderers)
             {
                 if (!pcr.SupportsLighting)
                     continue;
 
-                PointCloudManager.Resources.UpdateSHCoefficients(data.context.cmd, pcr.transform.position);
-                pcr.Render(data.context.cmd, data.camera, rtiCache, data.depthBuffer, data.customPassColorBuffer);
+                PointCloudManager.Resources.UpdateSHCoefficients(data.cmd, pcr.transform.position);
+                pcr.Render(data.cmd, data.camera, rtiCache, data.depthBuffer, data.customPassColorBuffer);
             }
         }
 

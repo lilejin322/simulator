@@ -87,6 +87,11 @@ namespace Simulator.Sensors
         const int MaxJpegSize = 4 * 1024 * 1024; // 4MB
 
         private float NextCaptureTime;
+
+        // The sky/ambient probe may not be ready on a newly loaded scene's first render.
+        // Initialize the sensor's exposure over a few frames, then retain normal adaptation.
+        // AddAgent only initializes the spectator camera, which is disabled in batch mode.
+        private int exposureWarmupFrames;
         private float PreviousCaptureTime = -1f;
         protected Camera sensorCamera;
         protected HDAdditionalCameraData hdAdditionalCameraData;
@@ -161,6 +166,7 @@ namespace Simulator.Sensors
 
         protected override void Initialize()
         {
+            exposureWarmupFrames = 4;
             SensorCamera.enabled = false;
             HDAdditionalCameraData.hasPersistentHistory = true;
             ReadbackPool = new GpuReadbackPool<GpuReadbackData<byte>, byte>();
@@ -205,6 +211,11 @@ namespace Simulator.Sensors
             }
 
             CheckTexture();
+            if (exposureWarmupFrames > 0 && !HDAdditionalCameraData.hasCustomRender)
+            {
+                HDCamera.GetOrCreate(SensorCamera).RequestExposureAdaptationLock();
+                exposureWarmupFrames--;
+            }
             CheckCapture();
 
             if (CameraInfoPublish != null)

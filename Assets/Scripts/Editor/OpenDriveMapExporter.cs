@@ -323,7 +323,7 @@ namespace Simulator.Editor
             var refLineData = neighborLaneSectionLanesData[0].leftLineData;
             if (refLineData == null)
             {
-                Debug.LogError($"Lane: {neighborLaneSectionLanesData[0].go.name} has no left boundary line, its object instance ID is {neighborLaneSectionLanesData[0].go.GetInstanceID()}");
+                Debug.LogError($"Lane: {neighborLaneSectionLanesData[0].go.name} has no left boundary line, its object instance ID is {neighborLaneSectionLanesData[0].go.GetEntityId()}");
             }
 
             positions = refLineData.mapWorldPositions;
@@ -579,7 +579,7 @@ namespace Simulator.Editor
 
                     // for (int i = 0; i < consideredLanesData.Count; i++)
                     // {
-                    //     var msg = $"Instance ID: {consideredLanesData[i].go.GetInstanceID()} original name {consideredLanesData[i].go.name}";
+                    //     var msg = $"Instance ID: {consideredLanesData[i].go.GetEntityId()} original name {consideredLanesData[i].go.name}";
                     //     msg += $" road Id {roadId} lane Id {LaneData2LaneId[consideredLanesData[i]]} ";
                     //     Debug.Log(msg, consideredLanesData[i].go);
                     // }

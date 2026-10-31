@@ -1,29 +1,17 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Assertions;
 using UnityEngine.Rendering.HighDefinition;
-using UnityEditor.Rendering;
+using UnityEngine.Rendering;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
-    [CustomEditorForRenderPipeline(typeof(ReflectionProbe), typeof(HDRenderPipelineAsset))]
+    [CustomEditor(typeof(ReflectionProbe))]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
     [CanEditMultipleObjects]
     sealed partial class HDReflectionProbeEditor : HDProbeEditor<HDProbeSettingsProvider, SerializedHDReflectionProbe>
     {
         #region Context Menu
-        [MenuItem("CONTEXT/ReflectionProbe/Remove Component", false, 0)]
-        static void RemoveReflectionProbe(MenuCommand menuCommand)
-        {
-            GameObject go = ((ReflectionProbe)menuCommand.context).gameObject;
-
-            Assert.IsNotNull(go);
-
-            Undo.SetCurrentGroupName("Remove HD Reflection Probe");
-            Undo.DestroyObjectImmediate(go.GetComponent<ReflectionProbe>());
-            Undo.DestroyObjectImmediate(go.GetComponent<HDAdditionalReflectionData>());
-        }
-
         [MenuItem("CONTEXT/ReflectionProbe/Reset", false, 0)]
         static void ResetReflectionProbe(MenuCommand menuCommand)
         {
@@ -44,6 +32,14 @@ namespace UnityEditor.Rendering.HighDefinition
             // Note: we can't call this code inside the HDAdditionalReflectionData, thus why we don't wrap it in Reset() function
             EditorUtility.CopySerialized(HDUtils.s_DefaultHDAdditionalReflectionData, reflectionProbeAdditionalData);
         }
+
+        [MenuItem("CONTEXT/ReflectionProbe/Open Preferences > Graphics...", false, 100)]
+        [MenuItem("CONTEXT/PlanarReflectionProbe/Open Preferences > Graphics...", false, 700)]
+        static void ShowAllAdditionalProperties(MenuCommand menuCommand)
+        {
+            CoreRenderPipelinePreferences.Open();
+        }
+
         #endregion
 
         protected override void OnEnable()
@@ -70,7 +66,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
         ProbeSettingsOverride HDProbeUI.IProbeUISettingsProvider.displayedCaptureSettings => new ProbeSettingsOverride
         {
-            probe = ProbeSettingsFields.proxyCapturePositionProxySpace,
+            probe = ProbeSettingsFields.proxyCapturePositionProxySpace | ProbeSettingsFields.cubeResolution,
             camera = new CameraSettingsOverride
             {
                 camera = (CameraSettingsFields)(-1) & ~(
@@ -92,6 +88,7 @@ namespace UnityEditor.Rendering.HighDefinition
         ProbeSettingsOverride HDProbeUI.IProbeUISettingsProvider.displayedCustomSettings => new ProbeSettingsOverride
         {
             probe = ProbeSettingsFields.lightingLightLayer
+                | ProbeSettingsFields.importance
                 | ProbeSettingsFields.lightingMultiplier
                 | ProbeSettingsFields.lightingWeight
                 | ProbeSettingsFields.lightingFadeDistance,
@@ -102,21 +99,5 @@ namespace UnityEditor.Rendering.HighDefinition
         };
 
         Type HDProbeUI.IProbeUISettingsProvider.customTextureType => typeof(Cubemap);
-        static readonly HDProbeUI.ToolBar[] k_ToolBars =
-        {
-            HDProbeUI.ToolBar.InfluenceShape | HDProbeUI.ToolBar.NormalBlend | HDProbeUI.ToolBar.Blend,
-            HDProbeUI.ToolBar.CapturePosition,
-            HDProbeUI.ToolBar.ShowChromeGizmo
-        };
-        HDProbeUI.ToolBar[] HDProbeUI.IProbeUISettingsProvider.toolbars => k_ToolBars;
-
-        static Dictionary<KeyCode, HDProbeUI.ToolBar> k_ToolbarShortCutKey = new Dictionary<KeyCode, HDProbeUI.ToolBar>
-        {
-            { KeyCode.Alpha1, HDProbeUI.ToolBar.InfluenceShape },
-            { KeyCode.Alpha2, HDProbeUI.ToolBar.Blend },
-            { KeyCode.Alpha3, HDProbeUI.ToolBar.NormalBlend },
-            { KeyCode.Alpha4, HDProbeUI.ToolBar.CapturePosition }
-        };
-        Dictionary<KeyCode, HDProbeUI.ToolBar> HDProbeUI.IProbeUISettingsProvider.shortcuts => k_ToolbarShortCutKey;
     }
 }

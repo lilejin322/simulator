@@ -7,16 +7,16 @@ namespace UnityEngine.Rendering.HighDefinition
         [GenerateHLSL(PackingRules.Exact)]
         public enum MaterialFeatureFlags
         {
-            StackLitStandard                = 1 << 0,
-            StackLitDualSpecularLobe        = 1 << 1,
-            StackLitAnisotropy              = 1 << 2,
-            StackLitCoat                    = 1 << 3,
-            StackLitIridescence             = 1 << 4,
-            StackLitSubsurfaceScattering    = 1 << 5,
-            StackLitTransmission            = 1 << 6,
-            StackLitCoatNormalMap           = 1 << 7,
-            StackLitSpecularColor           = 1 << 8,
-            StackLitHazyGloss               = 1 << 9,
+            StackLitStandard = 1 << 0,
+            StackLitDualSpecularLobe = 1 << 1,
+            StackLitAnisotropy = 1 << 2,
+            StackLitCoat = 1 << 3,
+            StackLitIridescence = 1 << 4,
+            StackLitSubsurfaceScattering = 1 << 5,
+            StackLitTransmission = 1 << 6,
+            StackLitCoatNormalMap = 1 << 7,
+            StackLitSpecularColor = 1 << 8,
+            StackLitHazyGloss = 1 << 9,
         };
 
         // We will use keywords no need for [GenerateHLSL] as we don't test in HLSL such a value
@@ -35,6 +35,7 @@ namespace UnityEngine.Rendering.HighDefinition
             // Computer Graphics Forum, Wiley, 2018, 37, <10.1111/cgf.13475>. <hal-01818666v2>
             // https://hal.inria.fr/hal-01818666v2
             // Submitted on 6 Jul 2018
+            FromDiffusionProfile = 2,
         };
 
         //-----------------------------------------------------------------------------
@@ -65,21 +66,24 @@ namespace UnityEngine.Rendering.HighDefinition
             [SurfaceDataAttributes("Dielectric IOR")]
             public float dielectricIor;
 
+            [SurfaceDataAttributes("Use Profile IOR")]
+            public bool useProfileIor;
+
             [MaterialSharedPropertyMapping(MaterialSharedProperty.Specular)]
             [SurfaceDataAttributes("Specular Color", false, true)]
             public Vector3 specularColor;
 
             [MaterialSharedPropertyMapping(MaterialSharedProperty.Normal)]
-            [SurfaceDataAttributes(new string[] {"Normal", "Normal View Space"}, true, checkIsNormalized = true)]
+            [SurfaceDataAttributes(new string[] { "Normal", "Normal View Space" }, true, checkIsNormalized = true)]
             public Vector3 normalWS;
 
-            [SurfaceDataAttributes(new string[] {"Geometric Normal", "Geometric Normal View Space"}, true, checkIsNormalized = true)]
+            [SurfaceDataAttributes(new string[] { "Geometric Normal", "Geometric Normal View Space" }, true, checkIsNormalized = true)]
             public Vector3 geomNormalWS;
 
-            [SurfaceDataAttributes(new string[] {"Coat Normal", "Coat Normal View Space"}, true, checkIsNormalized = true)]
+            [SurfaceDataAttributes(new string[] { "Coat Normal", "Coat Normal View Space" }, true, checkIsNormalized = true)]
             public Vector3 coatNormalWS;
 
-            [SurfaceDataAttributes(new string[] {"Bent Normal", "Bent Normal View Space"}, true, checkIsNormalized = true)]
+            [SurfaceDataAttributes(new string[] { "Bent Normal", "Bent Normal View Space" }, true, checkIsNormalized = true)]
             public Vector3 bentNormalWS;
 
             [MaterialSharedPropertyMapping(MaterialSharedProperty.Smoothness)]
@@ -168,6 +172,8 @@ namespace UnityEngine.Rendering.HighDefinition
             public uint diffusionProfileHash;
             [SurfaceDataAttributes("Subsurface Mask")]
             public float subsurfaceMask;
+            [SurfaceDataAttributes("Transmission Mask")]
+            public Vector3 transmissionMask;
 
             // Transmission
             // + Diffusion Profile
@@ -207,13 +213,13 @@ namespace UnityEngine.Rendering.HighDefinition
             [SurfaceDataAttributes(new string[] { "Normal WS", "Normal View Space" }, true, checkIsNormalized = true)]
             public Vector3 normalWS;
 
-            [SurfaceDataAttributes(new string[] {"Geometric Normal", "Geometric Normal View Space"}, true, checkIsNormalized = true)]
+            [SurfaceDataAttributes(new string[] { "Geometric Normal", "Geometric Normal View Space" }, true, checkIsNormalized = true)]
             public Vector3 geomNormalWS;
 
-            [SurfaceDataAttributes(new string[] {"Coat Normal", "Coat Normal View Space"}, true, checkIsNormalized = true)]
+            [SurfaceDataAttributes(new string[] { "Coat Normal", "Coat Normal View Space" }, true, checkIsNormalized = true)]
             public Vector3 coatNormalWS;
 
-            [SurfaceDataAttributes(new string[] {"Bent Normal", "Bent Normal View Space"}, true, checkIsNormalized = true)]
+            [SurfaceDataAttributes(new string[] { "Bent Normal", "Bent Normal View Space" }, true, checkIsNormalized = true)]
             public Vector3 bentNormalWS;
 
             public float perceptualRoughnessA;
@@ -221,6 +227,8 @@ namespace UnityEngine.Rendering.HighDefinition
             // Dual specular lobe
             public float perceptualRoughnessB;
             public float lobeMix;
+
+            public float diffusePower;
 
             // Anisotropic
             [SurfaceDataAttributes("", true)]
@@ -273,9 +281,9 @@ namespace UnityEngine.Rendering.HighDefinition
         // Init precomputed textures
         //-----------------------------------------------------------------------------
 
-        public StackLit() {}
+        public StackLit() { }
 
-        public override void Build(HDRenderPipelineAsset hdAsset, RenderPipelineResources defaultResources)
+        public override void Build(HDRenderPipeline _)
         {
             PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
             LTCAreaLight.instance.Build();

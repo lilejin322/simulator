@@ -1,22 +1,27 @@
-using UnityEditor.Rendering;
-using UnityEngine;
-using UnityEngine.Rendering.HighDefinition;
 using System;
+using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
     [CanEditMultipleObjects]
-    [CustomEditorForRenderPipeline(typeof(Light), typeof(HDRenderPipelineAsset))]
+    [CustomEditor(typeof(Light))]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
     sealed partial class HDLightEditor : LightEditor
     {
-        public SerializedHDLight m_SerializedHDLight;
+        public SerializedHDLight m_SerializedHDLight { get; set; }
 
         HDAdditionalLightData[] m_AdditionalLightDatas;
 
         HDAdditionalLightData targetAdditionalData
             => m_AdditionalLightDatas[ReferenceTargetIndex(this)];
+
+        public HDAdditionalLightData GetAdditionalDataForTargetIndex(int i)
+            => m_AdditionalLightDatas[i];
 
         static Func<Editor, int> ReferenceTargetIndex;
 
@@ -41,12 +46,15 @@ namespace UnityEditor.Rendering.HighDefinition
 
             // Update emissive mesh and light intensity when undo/redo
             Undo.undoRedoPerformed += OnUndoRedo;
+
+            HDLightUI.RegisterEditor(this);
         }
 
         void OnDisable()
         {
             // Update emissive mesh and light intensity when undo/redo
             Undo.undoRedoPerformed -= OnUndoRedo;
+            HDLightUI.UnregisterEditor(this);
         }
 
         void OnUndoRedo()
@@ -57,7 +65,13 @@ namespace UnityEditor.Rendering.HighDefinition
                 m_SerializedHDLight.serializedObject.Update();
                 foreach (var hdLightData in m_AdditionalLightDatas)
                     if (hdLightData != null)
+                    {
+                        if (hdLightData.lightIdxForCachedShadows >= 0) // If it is within the cached system we need to evict it.
+                            HDShadowManager.cachedShadowManager.EvictLight(hdLightData, hdLightData.legacyLight.type);
+
                         hdLightData.UpdateAreaLightEmissiveMesh();
+                        hdLightData.UpdateRenderEntity();
+                    }
             }
 
             // if Type or ShowEmissive Mesh undone, we must fetxh again the emissive meshes
@@ -67,20 +81,31 @@ namespace UnityEditor.Rendering.HighDefinition
         public override void OnInspectorGUI()
         {
             m_SerializedHDLight.Update();
-
             // Add space before the first collapsible area
             EditorGUILayout.Space();
 
             ApplyAdditionalComponentsVisibility(true);
 
             EditorGUI.BeginChangeCheck();
-            HDLightUI.Inspector.Draw(m_SerializedHDLight, this);
+
+            if (HDEditorUtils.IsPresetEditor(this))
+            {
+                HDLightUI.PresetInspector.Draw(m_SerializedHDLight, this);
+            }
+            else
+            {
+                using (new EditorGUILayout.VerticalScope())
+                    HDLightUI.Inspector.Draw(m_SerializedHDLight, this);
+            }
             if (EditorGUI.EndChangeCheck())
             {
                 m_SerializedHDLight.Apply();
 
                 foreach (var hdLightData in m_AdditionalLightDatas)
+                {
                     hdLightData.UpdateAllLightValues();
+                    hdLightData.UpdateRenderEntity();
+                }
             }
 
             if (m_SerializedHDLight.needUpdateAreaLightEmissiveMeshComponents)
@@ -109,16 +134,66 @@ namespace UnityEditor.Rendering.HighDefinition
 
         protected override void OnSceneGUI()
         {
+            if (targetAdditionalData == null)
+                return;
+
             // Each handles manipulate only one light
             // Thus do not rely on serialized properties
-            HDLightType lightType = targetAdditionalData.type;
+            LightType lightType = targetAdditionalData.legacyLight.type;
 
-            if (lightType == HDLightType.Directional
-                || lightType == HDLightType.Point
-                || lightType == HDLightType.Area && targetAdditionalData.areaLightShape == AreaLightShape.Disc)
+            if (lightType == LightType.Directional || lightType == LightType.Point)
+            {
                 base.OnSceneGUI();
+            }
+            else if (lightType == LightType.Disc)
+            {
+                base.OnSceneGUI();
+            }
             else
                 HDLightUI.DrawHandles(targetAdditionalData, this);
+
+            if (lightType == LightType.Directional)
+            {
+                var hdriSkies = GetHDRISkys();
+                foreach (var sky in hdriSkies)
+                {
+                    if (sky.lockSun.value)
+                    {
+                        Vector3 currentRot = targetAdditionalData.legacyLight.transform.rotation.eulerAngles;
+                        if (Math.Abs(sky.rotation.value - currentRot.y) > 0.01f)
+                        {
+                            sky.sunInitialRotation.value = 0f - currentRot.y;
+                            sky.rotation.value = currentRot.y;
+                            EditorUtility.SetDirty(sky);
+                        }
+                    }
+                }
+            }
+        }
+
+        List<HDRISky> GetHDRISkys()
+        {
+            LayerMask volumesMask = LayerMask.NameToLayer("Everything");
+            var volumes = VolumeManager.instance.GetVolumes(volumesMask);
+
+            List<HDRISky> skies = new List<HDRISky>();
+            foreach (var volume in volumes)
+            {
+                var profile = volume.HasInstantiatedProfile() ? volume.profile : volume.sharedProfile;
+                if (profile == null)
+                    continue;
+
+                foreach (var component in profile.components)
+                {
+                    HDRISky sky = component as HDRISky;
+                    if (sky != null)
+                    {
+                        skies.Add(sky);
+                    }
+                }
+            }
+
+            return skies;
         }
 
         internal Color legacyLightColor

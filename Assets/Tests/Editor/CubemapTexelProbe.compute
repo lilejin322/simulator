@@ -1,0 +1,44 @@
+// Test kernel: samples a cubemap at given directions as they are and moved to their texel center.
+#pragma kernel Probe
+
+#include "Assets/Shaders/CubemapTexelCenter.hlsl"
+
+TextureCube<float4> _Cube;
+SamplerState sampler_PointClamp;
+StructuredBuffer<float3> _Directions;
+RWStructuredBuffer<float4> _Raw;
+RWStructuredBuffer<float4> _Centered;
+int _Count;
+float _FaceSize;
+
+[numthreads(64, 1, 1)]
+void Probe(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Count)
+        return;
+    float3 direction = _Directions[id.x];
+    _Raw[id.x] = _Cube.SampleLevel(sampler_PointClamp, direction, 0);
+    _Centered[id.x] = _Cube.SampleLevel(sampler_PointClamp, CubemapTexelCenter(direction, _FaceSize), 0);
+}
+
+// Diagnostic: the LiDAR kernels' direction math for a beam at 0 degrees elevation, raw and centered
+#pragma kernel HorizontalBeam
+RWStructuredBuffer<float4> _BeamRaw;
+RWStructuredBuffer<float4> _BeamCentered;
+RWStructuredBuffer<float> _BeamY;
+
+[numthreads(64, 1, 1)]
+void HorizontalBeam(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Count)
+        return;
+    const float PI = 3.14159274;
+    float latitude = 0.5 * PI;
+    float longitude = ((float)id.x * (1.0 / 64.0)) * (2.0 * PI) - 0.5 * PI;
+    float cosLatitude = cos(latitude);
+    float sinLatitude = sqrt(1.0 - cosLatitude * cosLatitude);
+    float3 direction = normalize(float3(-(sinLatitude * cos(longitude)), -cosLatitude, sinLatitude * sin(longitude)));
+    _BeamY[id.x] = direction.y;
+    _BeamRaw[id.x] = _Cube.SampleLevel(sampler_PointClamp, direction, 0);
+    _BeamCentered[id.x] = _Cube.SampleLevel(sampler_PointClamp, CubemapTexelCenter(direction, _FaceSize), 0);
+}

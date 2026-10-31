@@ -18,14 +18,14 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         public bool TryUpgradeFromMasterNode(IMasterNode1 masterNode, out Dictionary<BlockFieldDescriptor, int> blockMap)
         {
             blockMap = null;
-            if(!(masterNode is StackLitMasterNode1 stackLitMasterNode))
+            if (!(masterNode is StackLitMasterNode1 stackLitMasterNode))
                 return false;
 
             m_MigrateFromOldSG = true;
 
             // Set data
             systemData.surfaceType = (SurfaceType)stackLitMasterNode.m_SurfaceType;
-            systemData.blendMode = HDSubShaderUtilities.UpgradeLegacyAlphaModeToBlendMode((int)stackLitMasterNode.m_AlphaMode);
+            systemData.blendingMode = HDSubShaderUtilities.UpgradeLegacyAlphaModeToBlendMode((int)stackLitMasterNode.m_AlphaMode);
             // Previous master node wasn't having any renderingPass. Assign it correctly now.
             systemData.renderQueueType = systemData.surfaceType == SurfaceType.Opaque ? HDRenderQueue.RenderQueueType.Opaque : HDRenderQueue.RenderQueueType.Transparent;
             systemData.alphaTest = stackLitMasterNode.m_AlphaTest;
@@ -44,7 +44,6 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             builtinData.distortionDepthTest = stackLitMasterNode.m_DistortionDepthTest;
             builtinData.addPrecomputedVelocity = stackLitMasterNode.m_AddPrecomputedVelocity;
             builtinData.depthOffset = stackLitMasterNode.m_depthOffset;
-            builtinData.alphaToMask = stackLitMasterNode.m_AlphaToMask;
 
             lightingData.normalDropOffSpace = stackLitMasterNode.m_NormalDropOffSpace;
             lightingData.blendPreserveSpecular = stackLitMasterNode.m_BlendPreserveSpecular;
@@ -70,14 +69,14 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             stackLitData.screenSpaceSpecularOcclusionAOConeSize = (StackLitData.SpecularOcclusionAOConeSize)stackLitMasterNode.m_ScreenSpaceSpecularOcclusionAOConeSize;
             stackLitData.screenSpaceSpecularOcclusionAOConeDir = (StackLitData.SpecularOcclusionAOConeDir)stackLitMasterNode.m_ScreenSpaceSpecularOcclusionAOConeDir;
             stackLitData.dataBasedSpecularOcclusionAOConeSize = (StackLitData.SpecularOcclusionAOConeSize)stackLitMasterNode.m_DataBasedSpecularOcclusionAOConeSize;
-            stackLitData.specularOcclusionConeFixupMethod = (StackLitData.SpecularOcclusionConeFixupMethod)stackLitMasterNode.m_SpecularOcclusionConeFixupMethod;      
+            stackLitData.specularOcclusionConeFixupMethod = (StackLitData.SpecularOcclusionConeFixupMethod)stackLitMasterNode.m_SpecularOcclusionConeFixupMethod;
             stackLitData.anisotropyForAreaLights = stackLitMasterNode.m_AnisotropyForAreaLights;
             stackLitData.recomputeStackPerLight = stackLitMasterNode.m_RecomputeStackPerLight;
             stackLitData.honorPerLightMinRoughness = stackLitMasterNode.m_HonorPerLightMinRoughness;
             stackLitData.shadeBaseUsingRefractedAngles = stackLitMasterNode.m_ShadeBaseUsingRefractedAngles;
             stackLitData.debug = stackLitMasterNode.m_Debug;
             stackLitData.devMode = stackLitMasterNode.m_DevMode;
-            
+
             target.customEditorGUI = stackLitMasterNode.m_OverrideEnabled ? stackLitMasterNode.m_ShaderGUIOverride : "";
 
             // Set blockmap

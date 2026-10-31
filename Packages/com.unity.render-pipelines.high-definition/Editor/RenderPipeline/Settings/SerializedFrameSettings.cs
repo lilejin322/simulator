@@ -1,127 +1,150 @@
 using UnityEngine.Rendering.HighDefinition;
 using System;
-
 using Object = UnityEngine.Object;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
     class SerializedFrameSettings
     {
-        SerializedProperty m_RootData;
-        SerializedProperty m_RootOverrides;
-        SerializedBitArray128 m_BitDatas;
-        SerializedBitArray128 m_BitOverrides;
-        public SerializedProperty sssQualityMode;
-        public SerializedProperty sssQualityLevel;
-        public SerializedProperty sssCustomSampleBudget;
-        public SerializedProperty lodBias;
-        public SerializedProperty lodBiasMode;
-        public SerializedProperty lodBiasQualityLevel;
-        public SerializedProperty maximumLODLevel;
-        public SerializedProperty maximumLODLevelMode;
-        public SerializedProperty maximumLODLevelQualityLevel;
-        public SerializedProperty materialQuality;
-
-        public SerializedObject serializedObject => m_RootData.serializedObject;
-
-        public LitShaderMode? litShaderMode
+        public class Data
         {
-            get
+            internal SerializedObject[] bitArrayTargetSerializedObjects;
+            internal SerializedProperty root;
+            SerializedBitArrayAny m_BitDatas;
+            public SerializedProperty sssQualityMode;
+            public SerializedProperty sssQualityLevel;
+            public SerializedProperty sssCustomSampleBudget;
+            public SerializedProperty sssDownsampleSteps;
+            public SerializedProperty lodBias;
+            public SerializedProperty lodBiasMode;
+            public SerializedProperty lodBiasQualityLevel;
+            public SerializedProperty maximumLODLevel;
+            public SerializedProperty maximumLODLevelMode;
+            public SerializedProperty maximumLODLevelQualityLevel;
+            public SerializedProperty materialQuality;
+            public SerializedProperty msaaMode;
+
+            public Object[] targetObjects => root.serializedObject.targetObjects;
+
+            public LitShaderMode? litShaderMode
             {
-                bool? val = IsEnabled(FrameSettingsField.LitShaderMode);
-                return val == null
-                    ? (LitShaderMode?)null
-                    : val.Value == true
+                get
+                {
+                    bool? val = GetEnabled(FrameSettingsField.LitShaderMode);
+                    return val == null
+                        ? (LitShaderMode?)null
+                        : val.Value == true
                         ? LitShaderMode.Deferred
                         : LitShaderMode.Forward;
-            }
-            set => SetEnabled(FrameSettingsField.LitShaderMode, value == LitShaderMode.Deferred);
-        }
-
-        public bool? IsEnabled(FrameSettingsField field)
-            => HaveMultipleValue(field) ? (bool?)null : m_BitDatas.GetBitAt((uint)field);
-        public void SetEnabled(FrameSettingsField field, bool value)
-            => m_BitDatas.SetBitAt((uint)field, value);
-        public bool HaveMultipleValue(FrameSettingsField field)
-            => m_BitDatas.HasBitMultipleDifferentValue((uint)field);
-
-        public bool GetOverrides(FrameSettingsField field)
-            => m_BitOverrides?.GetBitAt((uint)field) ?? false; //rootOverride can be null in case of hdrpAsset defaults
-        public void SetOverrides(FrameSettingsField field, bool value)
-            => m_BitOverrides?.SetBitAt((uint)field, value); //rootOverride can be null in case of hdrpAsset defaults
-        public bool HaveMultipleOverride(FrameSettingsField field)
-            => m_BitOverrides?.HasBitMultipleDifferentValue((uint)field) ?? false;
-
-        ref FrameSettings GetData(Object obj)
-        {
-            if (obj is HDAdditionalCameraData)
-                return ref (obj as HDAdditionalCameraData).renderingPathCustomFrameSettings;
-            if (obj is HDProbe)
-                return ref (obj as HDProbe).frameSettings;
-            if (obj is HDRenderPipelineAsset)
-                switch (HDRenderPipelineUI.selectedFrameSettings)
-                {
-                    case HDRenderPipelineUI.SelectedFrameSettings.Camera:
-                        return ref (obj as HDRenderPipelineAsset).GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
-                    case HDRenderPipelineUI.SelectedFrameSettings.BakedOrCustomReflection:
-                        return ref (obj as HDRenderPipelineAsset).GetDefaultFrameSettings(FrameSettingsRenderType.CustomOrBakedReflection);
-                    case HDRenderPipelineUI.SelectedFrameSettings.RealtimeReflection:
-                        return ref (obj as HDRenderPipelineAsset).GetDefaultFrameSettings(FrameSettingsRenderType.RealtimeReflection);
-                    default:
-                        throw new System.ArgumentException("Unknown kind of HDRenderPipelineUI.SelectedFrameSettings");
                 }
-            throw new System.ArgumentException("Unknown kind of object");
-        }
-
-        FrameSettingsOverrideMask? GetMask(Object obj)
-        {
-            if (obj is HDAdditionalCameraData)
-                return (obj as HDAdditionalCameraData).renderingPathCustomFrameSettingsOverrideMask;
-            if (obj is HDProbe)
-                return (obj as HDProbe).frameSettingsOverrideMask;
-            if (obj is HDRenderPipelineAsset)
-                return null;
-            throw new System.ArgumentException("Unknown kind of object");
-        }
-
-        public SerializedFrameSettings(SerializedProperty rootData, SerializedProperty rootOverrides)
-        {
-            m_RootData      = rootData;
-            m_RootOverrides = rootOverrides;
-            m_BitDatas      = rootData.FindPropertyRelative("bitDatas").ToSerializeBitArray128();
-            m_BitOverrides  = rootOverrides?.FindPropertyRelative("mask").ToSerializeBitArray128();  //rootOverride can be null in case of hdrpAsset defaults
-
-            sssQualityMode              = rootData.FindPropertyRelative("sssQualityMode");
-            sssQualityLevel             = rootData.FindPropertyRelative("sssQualityLevel");
-            sssCustomSampleBudget       = rootData.FindPropertyRelative("sssCustomSampleBudget");
-            lodBias                     = rootData.FindPropertyRelative("lodBias");
-            lodBiasMode                 = rootData.FindPropertyRelative("lodBiasMode");
-            lodBiasQualityLevel         = rootData.FindPropertyRelative("lodBiasQualityLevel");
-            maximumLODLevel             = rootData.FindPropertyRelative("maximumLODLevel");
-            maximumLODLevelMode         = rootData.FindPropertyRelative("maximumLODLevelMode");
-            maximumLODLevelQualityLevel = rootData.FindPropertyRelative("maximumLODLevelQualityLevel");
-            materialQuality             = rootData.Find((FrameSettings s) => s.materialQuality);
-        }
-
-        public struct TitleDrawingScope : IDisposable
-        {
-            bool hasOverride;
-
-            public TitleDrawingScope(UnityEngine.Rect rect, UnityEngine.GUIContent label, SerializedFrameSettings serialized)
-            {
-                EditorGUI.BeginProperty(rect, label, serialized.m_RootData);
-
-                hasOverride = serialized.m_BitOverrides != null;
-                if (hasOverride)
-                    EditorGUI.BeginProperty(rect, label, serialized.m_RootOverrides);
+                set => SetEnabled(FrameSettingsField.LitShaderMode, value == LitShaderMode.Deferred);
             }
 
-            void IDisposable.Dispose()
+            public bool? GetEnabled(FrameSettingsField field)
+                => HasMultipleDifferentValues(field) ? (bool?)null : GetEnabledUnchecked(field);
+            public bool GetEnabledUnchecked(FrameSettingsField field)
+                => m_BitDatas.GetBitAt((uint)field);
+            public void SetEnabled(FrameSettingsField field, bool value)
+                => m_BitDatas.SetBitAt((uint)field, value);
+            public bool HasMultipleDifferentValues(FrameSettingsField field)
+                => m_BitDatas.HasBitMultipleDifferentValue((uint)field);
+
+            public Data(SerializedProperty rootData, SerializedObject[] bitArrayTargetSerializedObjects = null)
             {
-                EditorGUI.EndProperty();
-                if (hasOverride)
-                    EditorGUI.EndProperty();
+                root = rootData;
+                this.bitArrayTargetSerializedObjects = bitArrayTargetSerializedObjects ?? Helper.GetBitArrayTargetSerializedObjects(rootData.serializedObject);
+                m_BitDatas = rootData.FindPropertyRelative("bitDatas").ToSerializedBitArray(this.bitArrayTargetSerializedObjects);
+            
+                sssQualityMode = rootData.FindPropertyRelative("sssQualityMode");
+                sssQualityLevel = rootData.FindPropertyRelative("sssQualityLevel");
+                sssCustomSampleBudget = rootData.FindPropertyRelative("sssCustomSampleBudget");
+                sssDownsampleSteps = rootData.FindPropertyRelative("sssCustomDownsampleSteps");
+                lodBias = rootData.FindPropertyRelative("lodBias");
+                lodBiasMode = rootData.FindPropertyRelative("lodBiasMode");
+                lodBiasQualityLevel = rootData.FindPropertyRelative("lodBiasQualityLevel");
+                maximumLODLevel = rootData.FindPropertyRelative("maximumLODLevel");
+                maximumLODLevelMode = rootData.FindPropertyRelative("maximumLODLevelMode");
+                maximumLODLevelQualityLevel = rootData.FindPropertyRelative("maximumLODLevelQualityLevel");
+                materialQuality = rootData.FindPropertyRelative("materialQuality");
+                msaaMode = rootData.FindPropertyRelative("msaaMode");
             }
+            
+            public void Update() => root.serializedObject.Update();
+            public void ApplyModifiedProperties() => root.serializedObject.ApplyModifiedProperties();
         }
+
+        public class Mask
+        {
+            internal SerializedProperty root;
+            SerializedBitArrayAny m_BitOverrides;
+
+            public bool? GetOverrided(FrameSettingsField field)
+                => HasMultipleDifferentOverrides(field) ? (bool?)null : GetOverridedUnchecked(field);
+            public bool GetOverridedUnchecked(FrameSettingsField field)
+                => m_BitOverrides.GetBitAt((uint)field);
+            public void SetOverrided(FrameSettingsField field, bool value)
+                => m_BitOverrides.SetBitAt((uint)field, value);
+            public bool HasMultipleDifferentOverrides(FrameSettingsField field)
+                => m_BitOverrides.HasBitMultipleDifferentValue((uint)field);
+
+            public Mask(SerializedProperty rootOverrides, Data rootData)
+            {
+                root = rootOverrides;
+                m_BitOverrides = rootOverrides.FindPropertyRelative("mask").ToSerializedBitArray(rootData.bitArrayTargetSerializedObjects);
+            }
+            
+            public void Update() => root.serializedObject.Update();
+            public void ApplyModifiedProperties() => root.serializedObject.ApplyModifiedProperties();
+        }
+        
+        public static class Helper
+        {
+            public static SerializedObject[] GetBitArrayTargetSerializedObjects(SerializedObject so)
+            {
+                var bitArrayTargetObjects = so.targetObjects;
+                SerializedObject[] bitArrayTargetSerializedObjects = new SerializedObject[bitArrayTargetObjects.Length];
+                for (int i = 0; i < bitArrayTargetObjects.Length; i++)
+                {
+                    bitArrayTargetSerializedObjects[i] = new SerializedObject(bitArrayTargetObjects[i]);
+                }
+                return bitArrayTargetSerializedObjects;
+            }
+
+        }
+        
+        public Data data { get; private set; }
+        public Mask mask { get; private set; }
+
+        #region Retarget API to keep compatibility
+        public Object[] targetObjects => data.targetObjects;
+        public LitShaderMode? litShaderMode
+        {
+            get => data.litShaderMode;
+            set => data.litShaderMode = value;
+        }
+
+        public bool? IsEnabled(FrameSettingsField field) => data.GetEnabled(field);
+        public void SetEnabled(FrameSettingsField field, bool value) => data.SetEnabled(field, value);
+        public bool HasMultipleDifferentValues(FrameSettingsField field) => data.HasMultipleDifferentValues(field);
+
+        public bool? GetOverrided(FrameSettingsField field) => mask.GetOverrided(field);
+        public void SetOverrided(FrameSettingsField field, bool value) => mask.SetOverrided(field, value);
+        public bool HasMultipleDifferentOverrides(FrameSettingsField field) => mask.HasMultipleDifferentOverrides(field);
+        #endregion
+
+        public SerializedFrameSettings(SerializedProperty rootDatas, SerializedProperty rootOverrides)
+        {
+            var targets = Helper.GetBitArrayTargetSerializedObjects(rootDatas.serializedObject);
+            data = new(rootDatas, targets);
+
+            //rootOverride can be null in case of hdrpAsset defaults
+            if (rootOverrides == null)
+                return;
+            
+            mask = new(rootOverrides, data);
+        }
+        
+        public void Update() => data.Update();
+        public void ApplyModifiedProperties() => data.ApplyModifiedProperties();
     }
 }

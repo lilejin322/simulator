@@ -8,7 +8,8 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 {
     enum ShaderGraphVersion
     {
-        Initial = 0,
-        FirstTimeMigration = Initial,
+        NeverMigrated = 0,
+        FirstTimeMigration,
+        MaterialType,
     }
 }

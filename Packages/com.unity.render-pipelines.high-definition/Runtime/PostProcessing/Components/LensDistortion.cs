@@ -6,7 +6,8 @@ namespace UnityEngine.Rendering.HighDefinition
     /// A volume component that holds settings for the Lens Distortion effect.
     /// </summary>
     [Serializable, VolumeComponentMenu("Post-processing/Lens Distortion")]
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Post-Processing-Lens-Distortion" + Documentation.endURL)]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
+    [HDRPHelpURL("Post-Processing-Lens-Distortion")]
     public sealed class LensDistortion : VolumeComponent, IPostProcessComponent
     {
         /// <summary>
@@ -30,13 +31,13 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Sets the center point for the distortion.
         /// </summary>
-        [Tooltip("Sets the center point for the distortion.")]
+        [Tooltip("Distortion center point. 0.5,0.5 is center of the screen.")]
         public Vector2Parameter center = new Vector2Parameter(new Vector2(0.5f, 0.5f));
 
         /// <summary>
-        /// Controls global screen scaling for the distortion effect. Use this to hide the screen borders when using a high <see cref="intensity"/>.
+        /// Controls global screen scaling for the distortion effect. Use this to hide the screen borders when using high <see cref="intensity"/>.
         /// </summary>
-        [Tooltip("Controls global screen scaling for the distortion effect. Use this to hide the screen borders when using a high \"Intensity\".")]
+        [Tooltip("Controls global screen scaling for the distortion effect. Use this to hide the screen borders when using high \"Intensity\".")]
         public ClampedFloatParameter scale = new ClampedFloatParameter(1f, 0.01f, 5f);
 
         /// <summary>

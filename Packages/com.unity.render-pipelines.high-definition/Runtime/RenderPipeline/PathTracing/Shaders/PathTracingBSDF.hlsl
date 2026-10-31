@@ -8,6 +8,12 @@
 #define MIN_GGX_ROUGHNESS 0.00001
 #define MAX_GGX_ROUGHNESS 0.99999
 
+float3x3 GetTangentFrame(float3 tangent, float3 bitangent, float3 normal, bool anisotropic)
+{
+    // If we have anisotropy, we want our local frame to follow tangential directions, otherwise any orientation will do
+    return anisotropic ? float3x3(tangent, bitangent, normal) : GetLocalFrame(normal);
+}
+
 float Lambda_AnisoGGX(float roughnessX,
                       float roughnessY,
                       float3 V)
@@ -32,71 +38,17 @@ float D_AnisoGGX(float roughnessX,
 namespace BRDF
 {
 
-bool SampleGGX(MaterialData mtlData,
-               float roughness,
-               float3 fresnel0,
-               float3 inputSample,
-           out float3 outgoingDir,
-           out float3 value,
-           out float pdf,
-           out float3 fresnel)
+float GetGGXMultipleScatteringEnergy(float roughness, float sqrtNdotV)
 {
-    roughness = clamp(roughness, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
-
-    float NdotL, NdotH, VdotH;
-    float3x3 localToWorld = GetLocalFrame(mtlData.bsdfData.normalWS);
-    SampleGGXDir(inputSample.xy, mtlData.V, localToWorld, roughness, outgoingDir, NdotL, NdotH, VdotH);
-
-    if (NdotL < 0.001 || !IsAbove(mtlData, outgoingDir))
-        return false;
-
-    float D = D_GGX(NdotH, roughness);
-    pdf = D * NdotH / (4.0 * VdotH);
-
-    if (pdf < 0.001)
-        return false;
-
-    float NdotV = dot(mtlData.bsdfData.normalWS, mtlData.V);
-    float Vg = V_SmithJointGGX(NdotL, NdotV, roughness);
-    fresnel = F_Schlick(fresnel0, VdotH);
-
-    value = fresnel * D * Vg * NdotL;
-
-    return true;
-}
-
-void EvaluateGGX(MaterialData mtlData,
-                 float roughness,
-                 float3 fresnel0,
-                 float3 outgoingDir,
-             out float3 value,
-             out float pdf,
-             out float3 fresnel)
-{
-    float NdotV = dot(mtlData.bsdfData.normalWS, mtlData.V);
-    if (NdotV < 0.001)
-    {
-        value = 0.0;
-        pdf = 0.0;
-        return;
-    }
-    float NdotL = dot(mtlData.bsdfData.normalWS, outgoingDir);
-
-    roughness = clamp(roughness, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
-
-    float3 H = normalize(mtlData.V + outgoingDir);
-    float NdotH = dot(mtlData.bsdfData.normalWS, H);
-    float VdotH = dot(mtlData.V, H);
-    float D = D_GGX(NdotH, roughness);
-    pdf = D * NdotH / (4.0 * VdotH);
-
-    float Vg = V_SmithJointGGX(NdotL, NdotV, roughness);
-    fresnel = F_Schlick(fresnel0, VdotH);
-
-    value = fresnel * D * Vg * NdotL;
+    float2 coordLUT = Remap01ToHalfTexelCoord(float2(sqrtNdotV, roughness), FGDTEXTURE_RESOLUTION);
+    float E = SAMPLE_TEXTURE2D_LOD(_PreIntegratedFGD_GGXDisneyDiffuse, s_linear_clamp_sampler, coordLUT, 0).y;
+    return (1.0 - E) / E;
 }
 
 bool SampleAnisoGGX(MaterialData mtlData,
+                    float3 normal,
+                    float roughnessX,
+                    float roughnessY,
                     float3 fresnel0,
                     float3 inputSample,
                 out float3 outgoingDir,
@@ -104,12 +56,14 @@ bool SampleAnisoGGX(MaterialData mtlData,
                 out float pdf,
                 out float3 fresnel)
 {
-    float roughnessX = clamp(mtlData.bsdfData.roughnessT, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
-    float roughnessY = clamp(mtlData.bsdfData.roughnessB, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
+    roughnessX = clamp(roughnessX, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
+    roughnessY = clamp(roughnessY, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
 
     float VdotH;
     float3 localV, localH;
-    float3x3 localToWorld = GetTangentFrame(mtlData);
+    float3x3 localToWorld = GetTangentFrame(mtlData.bsdfData.tangentWS,
+                                            mtlData.bsdfData.bitangentWS,
+                                            normal, roughnessX != roughnessY);
     SampleAnisoGGXVisibleNormal(inputSample.xy, mtlData.V, localToWorld, roughnessX, roughnessY, localV, localH, VdotH);
 
     // Compute the reflection direction
@@ -117,7 +71,11 @@ bool SampleAnisoGGX(MaterialData mtlData,
     outgoingDir = mul(localL, localToWorld);
 
     if (localL.z < 0.001 || !IsAbove(mtlData, outgoingDir))
+    {
+        pdf = 0.0;
+        fresnel = 0.0;
         return false;
+    }
 
     float pdfNoGV = D_AnisoGGX(roughnessX, roughnessY, localH) / (4.0 * localV.z);
     float lambdaVPlusOne = Lambda_AnisoGGX(roughnessX, roughnessY, localV) + 1.0;
@@ -133,25 +91,45 @@ bool SampleAnisoGGX(MaterialData mtlData,
     return true;
 }
 
+bool SampleAnisoGGX(MaterialData mtlData,
+                    float3 normal,
+                    float roughnessX,
+                    float roughnessY,
+                    float3 fresnel0,
+                    float3 inputSample,
+                out float3 outgoingDir,
+                out float3 value,
+                out float pdf)
+{
+    float3 dummyFresnel;
+    return SampleAnisoGGX(mtlData, normal, roughnessX, roughnessY, fresnel0, inputSample, outgoingDir, value, pdf, dummyFresnel);
+}
+
 void EvaluateAnisoGGX(MaterialData mtlData,
+                      float3 normal,
+                      float roughnessX,
+                      float roughnessY,
                       float3 fresnel0,
                       float3 outgoingDir,
                   out float3 value,
                   out float pdf,
                   out float3 fresnel)
 {
-    float NdotV = dot(mtlData.bsdfData.normalWS, mtlData.V);
+    float NdotV = dot(normal, mtlData.V);
     if (NdotV < 0.001)
     {
         value = 0.0;
         pdf = 0.0;
+        fresnel = 0.0;
         return;
     }
 
-    float roughnessX = clamp(mtlData.bsdfData.roughnessT, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
-    float roughnessY = clamp(mtlData.bsdfData.roughnessB, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
+    roughnessX = clamp(roughnessX, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
+    roughnessY = clamp(roughnessY, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
 
-    float3x3 worldToLocal = transpose(GetTangentFrame(mtlData));
+    float3x3 worldToLocal = transpose(GetTangentFrame(mtlData.bsdfData.tangentWS,
+                                                      mtlData.bsdfData.bitangentWS,
+                                                      normal, roughnessX != roughnessY));
     float3 localV = mul(mtlData.V, worldToLocal);
     float3 localL = mul(outgoingDir, worldToLocal);
     float3 localH = normalize(localV + localL);
@@ -166,22 +144,87 @@ void EvaluateAnisoGGX(MaterialData mtlData,
     pdf = pdfNoGV / lambdaVPlusOne;
 }
 
+void EvaluateAnisoGGX(MaterialData mtlData,
+                      float3 normal,
+                      float roughnessX,
+                      float roughnessY,
+                      float3 fresnel0,
+                      float3 outgoingDir,
+                  out float3 value,
+                  out float pdf)
+{
+    float3 dummyFresnel;
+    EvaluateAnisoGGX(mtlData, normal, roughnessX, roughnessY, fresnel0, outgoingDir, value, pdf, dummyFresnel);
+}
+
+bool SampleGGX(MaterialData mtlData,
+               float3 normal,
+               float roughness,
+               float3 fresnel0,
+               float3 inputSample,
+           out float3 outgoingDir,
+           out float3 value,
+           out float pdf,
+           out float3 fresnel)
+{
+    return SampleAnisoGGX(mtlData, normal, roughness, roughness, fresnel0, inputSample, outgoingDir, value, pdf, fresnel);
+}
+
+bool SampleGGX(MaterialData mtlData,
+               float3 normal,
+               float roughness,
+               float3 fresnel0,
+               float3 inputSample,
+           out float3 outgoingDir,
+           out float3 value,
+           out float pdf)
+{
+    float3 dummyFresnel;
+    return SampleGGX(mtlData, normal, roughness, fresnel0, inputSample, outgoingDir, value, pdf, dummyFresnel);
+}
+
+void EvaluateGGX(MaterialData mtlData,
+                 float3 normal,
+                 float roughness,
+                 float3 fresnel0,
+                 float3 outgoingDir,
+             out float3 value,
+             out float pdf,
+             out float3 fresnel)
+{
+    return EvaluateAnisoGGX(mtlData, normal, roughness, roughness, fresnel0, outgoingDir, value, pdf, fresnel);
+}
+
+void EvaluateGGX(MaterialData mtlData,
+                float3 normal,
+                float roughness,
+                float3 fresnel0,
+                float3 outgoingDir,
+            out float3 value,
+            out float pdf)
+{
+    float3 dummyFresnel;
+    EvaluateGGX(mtlData, normal, roughness, fresnel0, outgoingDir, value, pdf, dummyFresnel);
+}
+
 bool SampleDelta(MaterialData mtlData,
+                 float3 normal,
+                 float ior,
              out float3 outgoingDir,
              out float3 value,
              out float pdf)
 {
     if (IsAbove(mtlData))
     {
-        outgoingDir = reflect(-mtlData.V, mtlData.bsdfData.normalWS);
-        float NdotV = dot(mtlData.bsdfData.normalWS, mtlData.V);
+        outgoingDir = reflect(-mtlData.V, normal);
+        float NdotV = dot(normal, mtlData.V);
         value = F_Schlick(mtlData.bsdfData.fresnel0, NdotV);
     }
     else // Below
     {
-        outgoingDir = -reflect(mtlData.V, mtlData.bsdfData.normalWS);
-        float NdotV = -dot(mtlData.bsdfData.normalWS, mtlData.V);
-        value = F_FresnelDielectric(1.0 / mtlData.bsdfData.ior, NdotV);
+        outgoingDir = -reflect(mtlData.V, normal);
+        float NdotV = -dot(normal, mtlData.V);
+        value = F_FresnelDielectric(1.0 / ior, NdotV);
     }
 
     value *= DELTA_PDF;
@@ -191,17 +234,21 @@ bool SampleDelta(MaterialData mtlData,
 }
 
 bool SampleLambert(MaterialData mtlData,
+                   float3 normal,
                    float3 inputSample,
                out float3 outgoingDir,
                out float3 value,
                out float pdf)
 {
-    outgoingDir = SampleHemisphereCosine(inputSample.x, inputSample.y, mtlData.bsdfData.normalWS);
+    outgoingDir = SampleHemisphereCosine(inputSample.x, inputSample.y, normal);
 
     if (!IsAbove(mtlData, outgoingDir))
+    {
+        pdf = 0.0;
         return false;
+    }
 
-    pdf = dot(mtlData.bsdfData.normalWS, outgoingDir) * INV_PI;
+    pdf = dot(normal, outgoingDir) * INV_PI;
 
     if (pdf < 0.001)
         return false;
@@ -212,32 +259,39 @@ bool SampleLambert(MaterialData mtlData,
 }
 
 void EvaluateLambert(MaterialData mtlData,
+                     float3 normal,
                      float3 outgoingDir,
                  out float3 value,
                  out float pdf)
 {
-    pdf = dot(mtlData.bsdfData.normalWS, outgoingDir) * INV_PI;
+    pdf = saturate(dot(normal, outgoingDir)) * INV_PI;
     value = mtlData.bsdfData.diffuseColor * pdf;
 }
 
+#ifndef USE_DIFFUSE_LAMBERT_BRDF
+
 bool SampleBurley(MaterialData mtlData,
+                  float3 normal,
                   float3 inputSample,
               out float3 outgoingDir,
               out float3 value,
               out float pdf)
 {
-    outgoingDir = SampleHemisphereCosine(inputSample.x, inputSample.y, mtlData.bsdfData.normalWS);
+    outgoingDir = SampleHemisphereCosine(inputSample.x, inputSample.y, normal);
 
     if (!IsAbove(mtlData, outgoingDir))
+    {
+        pdf = 0.0;
         return false;
+    }
 
-    float NdotL = dot(mtlData.bsdfData.normalWS, outgoingDir);
+    float NdotL = dot(normal, outgoingDir);
     pdf = NdotL * INV_PI;
 
     if (pdf < 0.001)
         return false;
 
-    float NdotV = saturate(dot(mtlData.bsdfData.normalWS, mtlData.V));
+    float NdotV = saturate(dot(normal, mtlData.V));
     float LdotV = saturate(dot(outgoingDir, mtlData.V));
     value = mtlData.bsdfData.diffuseColor * DisneyDiffuseNoPI(NdotV, NdotL, LdotV, mtlData.bsdfData.perceptualRoughness) * pdf;
 
@@ -245,41 +299,78 @@ bool SampleBurley(MaterialData mtlData,
 }
 
 void EvaluateBurley(MaterialData mtlData,
+                    float3 normal,
                     float3 outgoingDir,
                 out float3 value,
                 out float pdf)
 {
-    float NdotL = dot(mtlData.bsdfData.normalWS, outgoingDir);
-    float NdotV = saturate(dot(mtlData.bsdfData.normalWS, mtlData.V));
+    float NdotL = saturate(dot(normal, outgoingDir));
+    float NdotV = saturate(dot(normal, mtlData.V));
     float LdotV = saturate(dot(outgoingDir, mtlData.V));
 
     pdf = NdotL * INV_PI;
     value = mtlData.bsdfData.diffuseColor * DisneyDiffuseNoPI(NdotV, NdotL, LdotV, mtlData.bsdfData.perceptualRoughness) * pdf;
 }
 
+#endif // USE_DIFFUSE_LAMBERT_BRDF
+
 bool SampleDiffuse(MaterialData mtlData,
+                   float3 normal,
                    float3 inputSample,
                out float3 outgoingDir,
                out float3 value,
                out float pdf)
 {
 #ifdef USE_DIFFUSE_LAMBERT_BRDF
-    return SampleLambert(mtlData, inputSample, outgoingDir, value, pdf);
+    return SampleLambert(mtlData, normal, inputSample, outgoingDir, value, pdf);
 #else
-    return SampleBurley(mtlData, inputSample, outgoingDir, value, pdf);
+    return SampleBurley(mtlData, normal, inputSample, outgoingDir, value, pdf);
 #endif
 }
 
 void EvaluateDiffuse(MaterialData mtlData,
+                     float3 normal,
                      float3 outgoingDir,
                  out float3 value,
                  out float pdf)
 {
 #ifdef USE_DIFFUSE_LAMBERT_BRDF
-    EvaluateLambert(mtlData, outgoingDir, value, pdf);
+    EvaluateLambert(mtlData, normal, outgoingDir, value, pdf);
 #else
-    EvaluateBurley(mtlData, outgoingDir, value, pdf);
+    EvaluateBurley(mtlData, normal, outgoingDir, value, pdf);
 #endif
+}
+
+void EvaluateSheen(MaterialData mtlData,
+                   float3 normal,
+                   float roughness,
+                   float3 outgoingDir,
+               out float3 value,
+               out float pdf)
+{
+    // We use cosine-weighted sampling for this lobe
+    float NdotL = saturate(dot(normal, outgoingDir));
+    pdf = NdotL * INV_PI;
+
+    float NdotV = dot(normal, mtlData.V);
+    if (NdotV < 0.001)
+    {
+        value = 0.0;
+        return;
+    }
+
+    roughness = clamp(roughness, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
+
+    float3 H = normalize(mtlData.V + outgoingDir);
+    float NdotH = dot(normal, H);
+
+    float D = D_Charlie(NdotH, roughness);
+
+    // We use this visibility term to match the raster implementation (Fabric.hlsl)
+    float Vg = V_Ashikhmin(NdotL, NdotV);
+    //float Vg = V_Charlie(NdotL, NdotV, roughness);
+
+    value = mtlData.bsdfData.fresnel0 * D * Vg * NdotL;
 }
 
 } // namespace BRDF
@@ -288,26 +379,32 @@ namespace BTDF
 {
 
 bool SampleGGX(MaterialData mtlData,
+               float3 normal,
+               float roughness,
+               float ior,
                float3 inputSample,
            out float3 outgoingDir,
            out float3 value,
            out float pdf)
 {
-    float roughness = clamp(mtlData.bsdfData.roughnessT, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
+    roughness = clamp(roughness, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
 
     float NdotL, NdotH, VdotH;
-    float3x3 localToWorld = GetLocalFrame(mtlData.bsdfData.normalWS);
+    float3x3 localToWorld = GetLocalFrame(normal);
     SampleGGXDir(inputSample.xy, mtlData.V, localToWorld, roughness, outgoingDir, NdotL, NdotH, VdotH);
 
     // FIXME: won't be necessary after new version of SampleGGXDir()
     float3 H = normalize(mtlData.V + outgoingDir);
-    outgoingDir = refract(-mtlData.V, H, 1.0 / mtlData.bsdfData.ior);
-    NdotL = dot(mtlData.bsdfData.normalWS, outgoingDir);
+    outgoingDir = refract(-mtlData.V, H, 1.0 / ior);
+    NdotL = dot(normal, outgoingDir);
 
     if (NdotL > -0.001 || !IsBelow(mtlData, outgoingDir))
+    {
+        pdf = 0.0;
         return false;
+    }
 
-    float NdotV = dot(mtlData.bsdfData.normalWS, mtlData.V);
+    float NdotV = dot(normal, mtlData.V);
     float LdotH = dot(outgoingDir, H);
 
     float3 F = F_Schlick(mtlData.bsdfData.fresnel0, VdotH);
@@ -315,40 +412,49 @@ bool SampleGGX(MaterialData mtlData,
     float Vg = V_SmithJointGGX(-NdotL, NdotV, roughness);
 
     // Compute the Jacobian
-    float jacobian = max(abs(VdotH + mtlData.bsdfData.ior * LdotH), 0.001);
-    jacobian = Sq(mtlData.bsdfData.ior) * abs(LdotH) / Sq(jacobian);
+    float jacobian = max(abs(VdotH + ior * LdotH), 0.001);
+    jacobian = Sq(ior) * abs(LdotH) / Sq(jacobian);
 
     pdf = D * NdotH * jacobian;
     value = abs(4.0 * (1.0 - F) * D * Vg * NdotL * VdotH * jacobian);
 
-    return (pdf > 0.001);
+    return pdf > 0.001;
 }
 
 bool SampleAnisoGGX(MaterialData mtlData,
+                    float3 normal,
+                    float roughnessX,
+                    float roughnessY,
+                    float ior,
                     float3 inputSample,
                 out float3 outgoingDir,
                 out float3 value,
                 out float pdf)
 {
-    float roughnessX = clamp(mtlData.bsdfData.roughnessT, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
-    float roughnessY = clamp(mtlData.bsdfData.roughnessB, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
+    roughnessX = clamp(roughnessX, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
+    roughnessY = clamp(roughnessY, MIN_GGX_ROUGHNESS, MAX_GGX_ROUGHNESS);
 
     float VdotH;
     float3 localV, localH;
-    float3x3 localToWorld = GetTangentFrame(mtlData);
+    float3x3 localToWorld = GetTangentFrame(mtlData.bsdfData.tangentWS,
+                                            mtlData.bsdfData.bitangentWS,
+                                            normal, roughnessX != roughnessY);
     SampleAnisoGGXVisibleNormal(inputSample.xy, mtlData.V, localToWorld, roughnessX, roughnessY, localV, localH, VdotH);
 
     // Compute refraction direction instead of reflection
-    float3 localL = refract(-localV, localH, 1.0 / mtlData.bsdfData.ior);
+    float3 localL = refract(-localV, localH, 1.0 / ior);
     outgoingDir = mul(localL, localToWorld);
 
     if (localL.z > -0.001 || !IsBelow(mtlData, outgoingDir))
+    {
+        pdf = 0.0;
         return false;
+    }
 
     // Compute the Jacobian
     float LdotH = dot(localL, localH);
-    float jacobian = max(abs(VdotH + mtlData.bsdfData.ior * LdotH), 0.001);
-    jacobian = Sq(mtlData.bsdfData.ior) * abs(LdotH) / Sq(jacobian);
+    float jacobian = max(abs(VdotH + ior * LdotH), 0.001);
+    jacobian = Sq(ior) * abs(LdotH) / Sq(jacobian);
 
     float3 F = F_Schlick(mtlData.bsdfData.fresnel0, VdotH);
     float  D = D_AnisoGGX(roughnessX, roughnessY, localH);
@@ -360,31 +466,54 @@ bool SampleAnisoGGX(MaterialData mtlData,
     pdf = pdfNoGV / lambdaVPlusOne;
     value = abs((1.0 - F) * pdfNoGV / (lambdaVPlusOne + lambdaL));
 
-    return (pdf > 0.001);
+    return pdf > 0.001;
 }
 
 bool SampleDelta(MaterialData mtlData,
+                 float3 normal,
+                 float ior,
              out float3 outgoingDir,
              out float3 value,
              out float pdf)
 {
     if (IsAbove(mtlData))
     {
-        outgoingDir = refract(-mtlData.V, mtlData.bsdfData.normalWS, 1.0 / mtlData.bsdfData.ior);
-        float NdotV = dot(mtlData.bsdfData.normalWS, mtlData.V);
+        outgoingDir = refract(-mtlData.V, normal, 1.0 / ior);
+        float NdotV = dot(normal, mtlData.V);
         value = 1.0 - F_Schlick(mtlData.bsdfData.fresnel0, NdotV);
     }
     else // Below
     {
-        outgoingDir = -refract(mtlData.V, mtlData.bsdfData.normalWS, mtlData.bsdfData.ior);
-        float NdotV = -dot(mtlData.bsdfData.normalWS, mtlData.V);
-        value = 1.0 - F_FresnelDielectric(1.0 / mtlData.bsdfData.ior, NdotV);
+        outgoingDir = -refract(mtlData.V, normal, ior);
+        float NdotV = -dot(normal, mtlData.V);
+        value = 1.0 - F_FresnelDielectric(1.0 / ior, NdotV);
     }
 
     value *= DELTA_PDF;
     pdf = DELTA_PDF;
 
     return any(outgoingDir);
+}
+
+bool SampleLambert(MaterialData mtlData,
+                   float3 normal,
+                   float3 inputSample,
+               out float3 outgoingDir,
+               out float3 value,
+               out float pdf)
+{
+    bool retVal = BRDF::SampleLambert(mtlData, normal, inputSample, outgoingDir, value, pdf);
+    outgoingDir = -outgoingDir;
+    return retVal;
+}
+
+void EvaluateLambert(MaterialData mtlData,
+                     float3 normal,
+                     float3 outgoingDir,
+                 out float3 value,
+                 out float pdf)
+{
+    BRDF::EvaluateLambert(mtlData, normal, -outgoingDir, value, pdf);
 }
 
 } // namespace BTDF
@@ -394,6 +523,7 @@ namespace SSS
 
 #define MAX_WALK_STEPS 16
 #define DIM_OFFSET 42
+#define DIM_THIN_NORMAL_FLIP 108 // First fully available dimension
 
 struct Result
 {
@@ -402,33 +532,31 @@ struct Result
     float3 exitNormal;
 };
 
-bool RandomWalk(float3 position, float3 normal, float3 diffuseColor, float3 meanFreePath, uint2 pixelCoord, out Result result)
+bool RandomWalk(float3 position, float3 normal, float3 diffuseColor, float3 meanFreePath, uint2 pixelCoord, out Result result, bool isThin = false)
 {
     // Remap from our user-friendly parameters to and sigmaS and sigmaT
     float3 sigmaS, sigmaT;
     RemapSubSurfaceScatteringParameters(diffuseColor, meanFreePath, sigmaS, sigmaT);
 
-    // Initialize the intersection structure
-    PathIntersection intersection;
-    intersection.remainingDepth = _RaytracingMaxRecursion + 1;
+    // Initialize the payload
+    PathPayload payload;
+    payload.segmentID = SEGMENT_ID_RANDOM_WALK;
 
     // Initialize the walk parameters
-    RayDesc rayDesc;
-    rayDesc.Origin = position - normal * _RaytracingRayBias;
-    rayDesc.TMin = 0.0;
+    RayDesc ray;
+    ray.Origin = position - normal * _RayTracingRayBias;
+    ray.TMin = 0.0;
 
     bool hit;
     uint walkIdx = 0;
+    float4 walkSample;
 
     result.throughput = 1.0;
 
     do // Start our random walk
     {
         // Samples for direction, distance and channel selection
-        float dirSample0 = GetSample(pixelCoord, _RaytracingSampleIndex, DIM_OFFSET + 4 * walkIdx + 0);
-        float dirSample1 = GetSample(pixelCoord, _RaytracingSampleIndex, DIM_OFFSET + 4 * walkIdx + 1);
-        float distSample = GetSample(pixelCoord, _RaytracingSampleIndex, DIM_OFFSET + 4 * walkIdx + 2);
-        float channelSample = GetSample(pixelCoord, _RaytracingSampleIndex, DIM_OFFSET + 4 * walkIdx + 3);
+        walkSample = GetSample4D(pixelCoord, _RaytracingSampleIndex, DIM_OFFSET + 4 * walkIdx);
 
         // Compute the per-channel weight
         float3 weights = result.throughput * SafeDivide(sigmaS, sigmaT);
@@ -438,27 +566,27 @@ bool RandomWalk(float3 position, float3 normal, float3 diffuseColor, float3 mean
         float3 channelWeights = SafeDivide(weights, wSum);
 
         // Evaluate what channel we should be using for this sample
-        uint channelIdx = GetChannel(channelSample, channelWeights);
+        uint channelIdx = GetChannel(walkSample[3], channelWeights);
 
         // Evaluate the length of our steps
-        rayDesc.TMax = -log(1.0 - distSample) / sigmaT[channelIdx];
+        ray.TMax = -log(1.0 - walkSample[2]) / sigmaT[channelIdx];
 
         // Sample our next path segment direction
-        rayDesc.Direction = walkIdx ?
-            SampleSphereUniform(dirSample0, dirSample1) : SampleHemisphereCosine(dirSample0, dirSample1, -normal);
+        ray.Direction = walkIdx ?
+            SampleSphereUniform(walkSample[0], walkSample[1]) : SampleHemisphereCosine(walkSample[0], walkSample[1], -normal);
 
-        // Initialize the intersection data
-        intersection.t = -1.0;
+        // Initialize the payload data
+        payload.rayTHit = FLT_INF;
 
         // Do the next step
-        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_CULL_FRONT_FACING_TRIANGLES,
-                 RAYTRACINGRENDERERFLAG_PATH_TRACING, 0, 1, 1, rayDesc, intersection);
+        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_CULL_FRONT_FACING_TRIANGLES,
+                 RAYTRACINGRENDERERFLAG_PATH_TRACING, 0, 1, 1, ray, payload);
 
         // Check if we hit something
-        hit = intersection.t > 0.0;
+        hit = payload.rayTHit < FLT_INF;
 
         // How much did the ray travel?
-        float t = hit ? intersection.t : rayDesc.TMax;
+        float t = hit ? payload.rayTHit : ray.TMax;
 
         // Evaluate the transmittance for the current segment
         float3 transmittance = exp(-t * sigmaT);
@@ -470,7 +598,7 @@ bool RandomWalk(float3 position, float3 normal, float3 diffuseColor, float3 mean
         result.throughput *= SafeDivide(hit ? transmittance : sigmaS * transmittance, pdf);
 
         // Compute the next path position
-        rayDesc.Origin += rayDesc.Direction * t;
+        ray.Origin += ray.Direction * t;
 
         // increment the path depth
         walkIdx++;
@@ -491,9 +619,22 @@ bool RandomWalk(float3 position, float3 normal, float3 diffuseColor, float3 mean
     }
     else
     {
-        result.exitPosition = rayDesc.Origin;
-        result.exitNormal = intersection.value;
+        result.exitPosition = ray.Origin;
+        result.exitNormal = payload.value;
     }
+
+#ifdef _DOUBLESIDED_ON
+
+    // If we are dealing with a thin (double-sided) surface, we randomly flip the output normal half the time
+    if (isThin)
+    {
+        if (GetSample(pixelCoord, _RaytracingSampleIndex, DIM_THIN_NORMAL_FLIP) < 0.5)
+            result.exitNormal = -result.exitNormal;
+
+        result.throughput *= 2.0;
+    }
+
+#endif
 
     return true;
 }

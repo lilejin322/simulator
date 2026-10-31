@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System;
 using System.Reflection;
 using UnityEngine.Rendering.HighDefinition.Attributes;
+using System.Linq;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -23,6 +24,14 @@ namespace UnityEngine.Rendering.HighDefinition
             Texcoord2,
             /// <summary>Display texture coordinate 3.</summary>
             Texcoord3,
+            /// <summary>Display texture coordinate 4.</summary>
+            Texcoord4,
+            /// <summary>Display texture coordinate 5.</summary>
+            Texcoord5,
+            /// <summary>Display texture coordinate 6.</summary>
+            Texcoord6,
+            /// <summary>Display texture coordinate 7.</summary>
+            Texcoord7,
             /// <summary>Display tangent in world space.</summary>
             VertexTangentWS,
             /// <summary>Display bi-tangent in world space.</summary>
@@ -83,6 +92,8 @@ namespace UnityEngine.Rendering.HighDefinition
             Lightmap,
             /// <summary>Display materials using instancing.</summary>
             Instancing,
+            /// <summary>Display deferred/forward shading capable materials.</summary>
+            DeferredMaterials,
         }
 
         /// <summary>
@@ -102,7 +113,7 @@ namespace UnityEngine.Rendering.HighDefinition
             AmbientOcclusion,
             /// <summary>Display metal (N/A for AxF).</summary>
             Metal,
-            /// <summary>Display specular.</summary>
+            /// <summary>Display the specular color (fresnel0). For materials using the metallic property, the corresponding fresnel0 term is displayed. (N/A for Unlit).</summary>
             Specular,
             /// <summary>Display alpha.</summary>
             Alpha,
@@ -142,7 +153,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>List of material debug views values.</summary>
         public static int[] debugViewMaterialGBufferValues = null;
 
-        static Dictionary<MaterialSharedProperty, int[]> s_MaterialPropertyMap = new Dictionary<MaterialSharedProperty, int[]>();
+        static Dictionary<MaterialSharedProperty, int[]> s_MaterialPropertyMap = null;
 
         /// <summary>Current material shared properties debug view.</summary>
         public MaterialSharedProperty debugViewMaterialCommonValue = MaterialSharedProperty.None;
@@ -152,55 +163,88 @@ namespace UnityEngine.Rendering.HighDefinition
             BuildDebugRepresentation();
         }
 
+#if UNITY_EDITOR
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStaticsOnLoad()
+        {
+            isDebugViewMaterialInit = false;
+
+            debugViewMaterialStrings = null;
+            debugViewMaterialValues = null;
+            debugViewEngineStrings = null;
+            debugViewEngineValues = null;
+            debugViewMaterialVaryingStrings = null;
+            debugViewMaterialVaryingValues = null;
+            debugViewMaterialPropertiesStrings = null;
+            debugViewMaterialPropertiesValues = null;
+            debugViewMaterialTextureStrings = null;
+            debugViewMaterialTextureValues = null;
+
+            debugViewMaterialGBufferStrings = null;
+            debugViewMaterialGBufferValues = null;
+
+            s_MaterialPropertyMap?.Clear();
+            s_MaterialPropertyMap = null;
+
+            // Static constructors do not get called again
+            BuildDebugRepresentation();
+        }
+#endif
+
         // className include the additional "/"
-        static void FillWithProperties(Type type, ref List<GUIContent> debugViewMaterialStringsList, ref List<int> debugViewMaterialValuesList, string className)
+        static void FillWithProperties(Type type, ref List<GUIContent> debugViewMaterialStringsList, ref List<int> debugViewMaterialValuesList, string className = "")
         {
             var attr = type.GetCustomAttribute<GenerateHLSL>();
 
             if (!attr.needParamDebug)
-            {
                 return;
-            }
 
-            var fields = type.GetFields();
-
-            var localIndex = 0;
-            foreach (var field in fields)
+            using (ListPool<(GUIContent, int)>.Get(out var tmp))
             {
-                // Note: One field can have multiple name. This is to allow to have different debug view mode for the same field
-                // like for example display normal in world space or in view space. Same field but two different modes.
-                List<String> displayNames = new List<string>();
-
-                if (Attribute.IsDefined(field, typeof(PackingAttribute)))
+                var fields = type.GetFields();
+                var localIndex = 0;
+                foreach (var field in fields)
                 {
-                    var packingAttributes = (PackingAttribute[])field.GetCustomAttributes(typeof(PackingAttribute), false);
-                    foreach(PackingAttribute packAttr in packingAttributes)
+                    // Note: One field can have multiple name. This is to allow to have different debug view mode for the same field
+                    // like for example display normal in world space or in view space. Same field but two different modes.
+                    List<String> displayNames = new List<string>();
+
+                    if (Attribute.IsDefined(field, typeof(PackingAttribute)))
                     {
-                        displayNames.AddRange(packAttr.displayNames);
+                        var packingAttributes = (PackingAttribute[])field.GetCustomAttributes(typeof(PackingAttribute), false);
+                        foreach (PackingAttribute packAttr in packingAttributes)
+                        {
+                            displayNames.AddRange(packAttr.displayNames);
+                        }
+                    }
+                    else
+                    {
+                        displayNames.Add(field.Name);
+                    }
+
+                    // Check if the display name have been override by the users
+                    if (Attribute.IsDefined(field, typeof(SurfaceDataAttributes)))
+                    {
+                        var propertyAttr = (SurfaceDataAttributes[])field.GetCustomAttributes(typeof(SurfaceDataAttributes), false);
+                        if (propertyAttr[0].displayNames.Length > 0 && propertyAttr[0].displayNames[0] != "")
+                        {
+                            displayNames.Clear();
+
+                            displayNames.AddRange(propertyAttr[0].displayNames);
+                        }
+                    }
+
+                    foreach (string fieldName in displayNames)
+                    {
+                        tmp.Add((new GUIContent(className + fieldName), attr.paramDefinesStart + (int)localIndex));
+                        localIndex++;
                     }
                 }
-                else
-                {
-                    displayNames.Add(field.Name);
-                }
 
-                // Check if the display name have been override by the users
-                if (Attribute.IsDefined(field, typeof(SurfaceDataAttributes)))
+                foreach (var (name, value) in tmp.OrderBy(t => t.Item1.text))
                 {
-                    var propertyAttr = (SurfaceDataAttributes[])field.GetCustomAttributes(typeof(SurfaceDataAttributes), false);
-                    if (propertyAttr[0].displayNames.Length > 0 && propertyAttr[0].displayNames[0] != "")
-                    {
-                        displayNames.Clear();
-
-                        displayNames.AddRange(propertyAttr[0].displayNames);
-                    }
-                }
-
-                foreach (string fieldName in displayNames)
-                {
-                    debugViewMaterialStringsList.Add(new GUIContent(className + fieldName));
-                    debugViewMaterialValuesList.Add(attr.paramDefinesStart + (int)localIndex);
-                    localIndex++;
+                    debugViewMaterialStringsList.Add(name);
+                    debugViewMaterialValuesList.Add(value);
                 }
             }
         }
@@ -222,7 +266,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         internal class MaterialItem
         {
-            public String className;
+            public string className;
             public Type surfaceDataType;
             public Type bsdfDataType;
         };
@@ -251,16 +295,16 @@ namespace UnityEngine.Rendering.HighDefinition
             int numBSDFDataFields = 0;
             foreach (RenderPipelineMaterial material in materialList)
             {
-                MaterialItem item = new MaterialItem();
+                var materialType = material.GetType();
+                MaterialItem item = new()
+                {
+                    className = materialType.Name + "/",
+                    surfaceDataType = materialType.GetNestedType("SurfaceData"),
+                    bsdfDataType = materialType.GetNestedType("BSDFData")
 
-                item.className = material.GetType().Name + "/";
-
-                item.surfaceDataType = material.GetType().GetNestedType("SurfaceData");
+                };
                 numSurfaceDataFields += item.surfaceDataType.GetFields().Length;
-
-                item.bsdfDataType = material.GetType().GetNestedType("BSDFData");
                 numBSDFDataFields += item.bsdfDataType.GetFields().Length;
-
                 materialItems.Add(item);
             }
 
@@ -274,8 +318,8 @@ namespace UnityEngine.Rendering.HighDefinition
                 List<MaterialItem> materialItems = GetAllMaterialDatas();
 
                 // Init list
-                List < GUIContent> debugViewMaterialStringsList = new List<GUIContent>();
-                List<int> debugViewMaterialValuesList = new List<int>();
+                FillMaterialsInfos(materialItems);
+
                 List<GUIContent> debugViewEngineStringsList = new List<GUIContent>();
                 List<int> debugViewEngineValuesList = new List<int>();
                 List<GUIContent> debugViewMaterialVaryingStringsList = new List<GUIContent>();
@@ -286,20 +330,6 @@ namespace UnityEngine.Rendering.HighDefinition
                 List<int> debugViewMaterialTextureValuesList = new List<int>();
                 List<GUIContent> debugViewMaterialGBufferStringsList = new List<GUIContent>();
                 List<int> debugViewMaterialGBufferValuesList = new List<int>();
-
-                // First element is a reserved location and should not be used (allow to track error)
-                // Special case for None since it cannot be inferred from SurfaceData/BuiltinData
-                debugViewMaterialStringsList.Add(new GUIContent("None"));
-                debugViewMaterialValuesList.Add(0);
-
-                foreach (MaterialItem item in materialItems)
-                {
-                    // BuiltinData are duplicated for each material
-                    // Giving the material specific types allow to move iterator at a separate range for each material
-                    // Otherwise, all BuiltinData will be at same offset and will broke the enum
-                    FillWithProperties(typeof(Builtin.BuiltinData), ref debugViewMaterialStringsList, ref debugViewMaterialValuesList, item.className);
-                    FillWithProperties(item.surfaceDataType, ref debugViewMaterialStringsList, ref debugViewMaterialValuesList, item.className);
-                }
 
                 // Engine properties debug
                 // First element is a reserved location and should not be used (allow to track error)
@@ -322,12 +352,9 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 // Gbuffer debug
                 FillWithPropertiesEnum(typeof(DebugViewGbuffer), ref debugViewMaterialGBufferStringsList, ref debugViewMaterialGBufferValuesList, "");
-                FillWithProperties(typeof(Lit.BSDFData), ref debugViewMaterialGBufferStringsList, ref debugViewMaterialGBufferValuesList, "");
+                FillWithProperties(typeof(Lit.BSDFData), ref debugViewMaterialGBufferStringsList, ref debugViewMaterialGBufferValuesList);
 
                 // Convert to array for UI
-                debugViewMaterialStrings = debugViewMaterialStringsList.ToArray();
-                debugViewMaterialValues = debugViewMaterialValuesList.ToArray();
-
                 debugViewEngineStrings = debugViewEngineStringsList.ToArray();
                 debugViewEngineValues = debugViewEngineValuesList.ToArray();
 
@@ -423,12 +450,32 @@ namespace UnityEngine.Rendering.HighDefinition
                     }
                 }
 
+                s_MaterialPropertyMap = new Dictionary<MaterialSharedProperty, int[]>();
                 foreach (var key in materialPropertyMap.Keys)
                 {
                     s_MaterialPropertyMap[key] = materialPropertyMap[key].ToArray();
                 }
 
                 isDebugViewMaterialInit = true;
+            }
+        }
+
+        private static void FillMaterialsInfos(List<MaterialItem> materialItems)
+        {
+            using (ListPool<GUIContent>.Get(out var debugViewMaterialStringsList))
+            using (ListPool<int>.Get(out var debugViewMaterialValuesList))
+            {
+                // First element is a reserved location and should not be used (allow to track error)
+                // Special case for None since it cannot be inferred from SurfaceData/BuiltinData
+                debugViewMaterialStringsList.Add(new GUIContent("None"));
+                debugViewMaterialValuesList.Add(0);
+
+                FillWithProperties(typeof(Builtin.BuiltinData), ref debugViewMaterialStringsList, ref debugViewMaterialValuesList, "Common/");
+                foreach (MaterialItem item in materialItems)
+                    FillWithProperties(item.surfaceDataType, ref debugViewMaterialStringsList, ref debugViewMaterialValuesList, item.className);
+
+                debugViewMaterialStrings = debugViewMaterialStringsList.ToArray();
+                debugViewMaterialValues = debugViewMaterialValuesList.ToArray();
             }
         }
 
@@ -440,12 +487,13 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>Color for displaying materials using a true metallic color.</summary>
         public Color materialValidateTrueMetalColor = new Color(1.0f, 1.0f, 0.0f);
         /// <summary>Enable display of materials using a true metallic value.</summary>
-        public bool  materialValidateTrueMetal = false;
+        public bool materialValidateTrueMetal = false;
 
         /// <summary>
         /// Current Debug View Material.
         /// </summary>
-        public int[] debugViewMaterial {
+        public int[] debugViewMaterial
+        {
             get => m_DebugViewMaterial;
             internal set
             {
@@ -481,7 +529,7 @@ namespace UnityEngine.Rendering.HighDefinition
         const int kDebugViewMaterialBufferLength = 10;
 
         //buffer must be in float as there is no SetGlobalIntArray in API
-        static float[] s_DebugViewMaterialOffsetedBuffer = new float[kDebugViewMaterialBufferLength + 1]; //first is used size
+        static readonly float[] s_DebugViewMaterialOffsetedBuffer = new float[kDebugViewMaterialBufferLength + 1]; //first is used size
 
         // Reminder: _DebugViewMaterial[i]
         //   i==0 -> the size used in the buffer
@@ -489,11 +537,11 @@ namespace UnityEngine.Rendering.HighDefinition
         // The index stored in this buffer could either be
         //   - a gBufferIndex (always stored in _DebugViewMaterialArray[1] as only one supported)
         //   - a property index which is different for each kind of material even if reflecting the same thing (see MaterialSharedProperty)
-        int[]                m_DebugViewMaterial = new int[kDebugViewMaterialBufferLength + 1]; // No enum there because everything is generated from materials.
-        int                  m_DebugViewEngine = 0;  // No enum there because everything is generated from BSDFData
-        DebugViewVarying     m_DebugViewVarying = DebugViewVarying.None;
-        DebugViewProperties  m_DebugViewProperties = DebugViewProperties.None;
-        int                  m_DebugViewGBuffer = 0; // Can't use GBuffer enum here because the values are actually split between this enum and values from Lit.BSDFData
+        int[] m_DebugViewMaterial = new int[kDebugViewMaterialBufferLength + 1]; // No enum there because everything is generated from materials.
+        int m_DebugViewEngine = 0;  // No enum there because everything is generated from BSDFData
+        DebugViewVarying m_DebugViewVarying = DebugViewVarying.None;
+        DebugViewProperties m_DebugViewProperties = DebugViewProperties.None;
+        int m_DebugViewGBuffer = 0; // Can't use GBuffer enum here because the values are actually split between this enum and values from Lit.BSDFData
 
         internal int materialEnumIndex;
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
 
@@ -9,7 +9,8 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         public enum MaterialType
         {
             Eye,
-            EyeCinematic
+            EyeCinematic,
+            EyeCinematicWithCaustic
         }
 
         [SerializeField]

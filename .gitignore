@@ -30,6 +30,8 @@
 
 # Project specific
 /AssetBundles/
+/LocalAssets/
+/build/
 /Assets/External/Environments/
 /Assets/External/Vehicles/
 /Assets/External/Sensors/
@@ -58,3 +60,27 @@
 /heu_settings.ini
 **/HoudiniEngineUnity/
 **/HoudiniEngineUnity.meta
+# OpenSSL 1.1 compatibility libraries from Unity 2020 builds
+/.build-tools/
+
+# Markdown Version Docs, converted from tools
+/Docs/markdown
+
+# Assets in source code
+/Assets/Maps
+/Assets/Vehicles
+/Assets/NPCs
+/Assets/Pedestrians
+/Assets/Bridges
+/Assets/Controllables
+/Assets/Sensors
+
+# Built-in asset catalogs, generated from the asset sources before every player build
+/Assets/Resources/Builtin*
+
+# Unity 6
+/UserSettings/
+*.slnx
+
+# Asset-download lock
+/.build-assets.lock/

@@ -95,15 +95,33 @@ public class NPCWaypointBehaviour : NPCBehaviourBase
     private void InitNPC()
     {
         Debug.Assert(LaneData != null);
+        if (!rb.isKinematic) // kinematic bodies have no velocity to clear, and Unity 6 warns when it is set
+        {
+            rb.angularVelocity = Vector3.zero;
+            rb.linearVelocity = Vector3.zero;
+        }
         rb.isKinematic = true;
         controller.MainCollider.isTrigger = true;
         controller.ResetLights();
         currentSpeed = 0f;
-        rb.angularVelocity = Vector3.zero;
-        rb.velocity = Vector3.zero;
         CurrentIndex = 0;
         CurrentLoopIndex = 0;
         CurrentDeactivate = LaneDeactivate[CurrentIndex];
+        StopCoroutines();
+        WaypointState = WaypointDriveState.Drive;
+    }
+
+    // The coroutines run on the simulator's FixedUpdateManager, so they outlive this agent unless stopped here:
+    // Unity 6 throws when a coroutine that was not stopped moves the destroyed rigidbody.
+    private void OnDisable()
+    {
+        StopCoroutines();
+    }
+
+    private void StopCoroutines()
+    {
+        if (controller == null || FixedUpdateManager == null)
+            return;
         if (IdleCoroutine != null)
         {
             FixedUpdateManager.StopCoroutine(IdleCoroutine);
@@ -119,7 +137,6 @@ public class NPCWaypointBehaviour : NPCBehaviourBase
             FixedUpdateManager.StopCoroutine(TriggerCoroutine);
             TriggerCoroutine = null;
         }
-        WaypointState = WaypointDriveState.Drive;
     }
 
     public void SetFollowWaypoints(List<DriveWaypoint> waypoints, bool loop, WaypointsPathType pathType)

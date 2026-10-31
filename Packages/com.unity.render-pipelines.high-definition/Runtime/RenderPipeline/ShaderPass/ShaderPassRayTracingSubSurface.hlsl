@@ -9,17 +9,13 @@ void ClosestSubSurface(inout RayIntersectionSubSurface rayIntersection : SV_RayP
     // Always set the new t value
     rayIntersection.t = RayTCurrent();
 
-    // The first thing that we should do is grab the intersection vertex
     IntersectionVertex currentVertex;
-    GetCurrentIntersectionVertex(attributeData, currentVertex);
+    FragInputs fragInput;
+    GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
 
-    // define the incident direction
+    // Evaluate the incident direction
     const float3 incidentDirection = WorldRayDirection();
 
-    // Build the Frag inputs from the intersection vertex
-    FragInputs fragInput;
-    BuildFragInputsFromIntersection(currentVertex, incidentDirection, fragInput);
-    
     PositionInputs posInput;
     posInput.positionWS = fragInput.positionRWS;
     posInput.positionSS = rayIntersection.pixelCoord;
@@ -30,7 +26,8 @@ void ClosestSubSurface(inout RayIntersectionSubSurface rayIntersection : SV_RayP
     bool isVisible;
     GetSurfaceAndBuiltinData(fragInput, -incidentDirection, posInput, surfaceData, builtinData, currentVertex, rayIntersection.cone, isVisible);
 
-    // make sure we output the normal and the indirect diffuse lighting value
+    // make sure we output the normal
     rayIntersection.outNormal = fragInput.tangentToWorld[2];
-    rayIntersection.outIndirectDiffuse = builtinData.bakeDiffuseLighting;
+    // Make sure to output the indirect diffuse lighting value and the emissive value
+    rayIntersection.outIndirectDiffuse = builtinData.bakeDiffuseLighting + builtinData.emissiveColor;
 }

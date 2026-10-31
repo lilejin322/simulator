@@ -1,11 +1,9 @@
-using System.Text;
-using System.Reflection;
-using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.Analytics;
-using UnityEngine.Rendering.HighDefinition;
+using System;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
+using UnityEngine.Analytics;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
@@ -14,123 +12,69 @@ namespace UnityEditor.Rendering.HighDefinition
         const int k_MaxEventsPerHour = 10;
         const int k_MaxNumberOfElements = 1000;
         const string k_VendorKey = "unity.hdrp";
-        const string k_EventName = "uHDRPUsage";
-        
-        public int callbackOrder { get; }
 
-        struct EventData
+        public int callbackOrder => int.MaxValue;
+
+        [Serializable]
+        internal struct UsageEventData : IAnalytic.IData
         {
             // Naming convention for analytics data
+            public string build_target;
+            public string asset_guid;
             public string[] changed_settings;
-
-            public EventData(Dictionary<string, string> diff)
-            {
-                changed_settings = new string[diff.Count];
-
-                int i = 0;
-                foreach (var d in diff)
-                    changed_settings[i++] = $@"{{""{d.Key}"":""{d.Value}""}}";
-            }
         }
 
-        public void OnPostprocessBuild(BuildReport report)
+        [AnalyticInfo(eventName: "uHDRPUsage", vendorKey: "unity.vfxgraph", maxEventsPerHour: 10, maxNumberOfElements: 1000, version: 2)]
+        internal class Analytic : IAnalytic
         {
-            SendEvent();
+            public Analytic(UsageEventData data) { m_Data = data; }
+            public bool TryGatherData(out IAnalytic.IData data, out Exception error)
+            {
+                data = m_Data;
+                error = null;
+                return true;
+            }
+
+            UsageEventData m_Data;
         }
 
-        public static void SendEvent()
+        static void SendUsage()
         {
             if (!EditorAnalytics.enabled)
                 return;
 
-            var hdrpAsset = HDRenderPipeline.currentAsset;
-            if (hdrpAsset == null)
-                return;
+            var activeBuildTarget = EditorUserBuildSettings.activeBuildTarget;
 
-            if (EditorAnalytics.RegisterEventWithLimit(k_EventName, k_MaxEventsPerHour, k_MaxNumberOfElements, k_VendorKey) != AnalyticsResult.Ok)
-                return;
-
-            RenderPipelineSettings settings = hdrpAsset.currentPlatformRenderPipelineSettings;
-            RenderPipelineSettings defaults = RenderPipelineSettings.NewDefault();
-
-            var data = new EventData(DiffSettings(settings, defaults));
-
-            EditorAnalytics.SendEventWithLimit(k_EventName, data);
-        }
-
-
-        // Helpers to get changed settings as JSON
-        static Dictionary<string, string> DiffSettings(object a, object b)
-        {
-            var diff = new Dictionary<string, string>();
-            var fields = a.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public);
-            foreach (var field in fields)
+            using (ListPool<HDRenderPipelineAsset>.Get(out var tmp))
             {
-                var va = field.GetValue(a);
-                var vb = field.GetValue(b);
+                if (!EditorUserBuildSettings.activeBuildTarget.TryGetRenderPipelineAssets<HDRenderPipelineAsset>(tmp) || tmp.Count == 0)
+                    return;
 
-                var t = field.FieldType;
-                if (t == typeof(string))
-                    continue;
-                if (t.IsPrimitive || t.IsEnum)
+                RenderPipelineSettings defaults = RenderPipelineSettings.NewDefault();
+
+                foreach (var hdrpAsset in tmp)
                 {
-                    if (!va.Equals(vb))
-                        diff[field.Name] = va.ToString();
-                }
-                else if (t.IsArray)
-                {
-                    if (DiffArray(va, vb))
-                        diff[field.Name] = ArrayToJson(va);
-                }
-                else
-                {
-                    if (t == typeof(IntScalableSetting) || t == typeof(FloatScalableSetting))
+                    var data = new UsageEventData()
                     {
-                        var values = t.BaseType.GetField("m_Values", BindingFlags.NonPublic | BindingFlags.Instance);
-                        va = values.GetValue(va);
-                        vb = values.GetValue(vb);
-                        if (DiffArray(va, vb))
-                            diff[field.Name] = ArrayToJson(va);
-                    }
-                    else if (t.IsClass || t.IsValueType)
-                    {
-                        var subdiff = DiffSettings(va, vb);
-                        foreach (var d in subdiff)
-                        {
-                            diff[field.Name + "." + d.Key] = d.Value;
-                        }
-                    }
+                        build_target = activeBuildTarget.ToString(),
+                        asset_guid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(hdrpAsset.GetEntityId())),
+                        changed_settings = hdrpAsset.currentPlatformRenderPipelineSettings.ToNestedColumnWithDefault(defaults, true)
+                    };
+                    Analytic analytic = new Analytic(data);
+                    EditorAnalytics.SendAnalytic(analytic);
                 }
             }
-
-            return diff;
         }
 
-        static bool DiffArray(object a, object b)
+        void IPostprocessBuildWithReport.OnPostprocessBuild(BuildReport _)
         {
-            var va = (System.Collections.IList)a;
-            var vb = (System.Collections.IList)b;
-
-            if (va.Count != vb.Count)
-                return true;
-            for (int i = 0; i < va.Count; i++)
-            {
-                if (!va[i].Equals(vb[i]))
-                    return true;
-            }
-            return false;
+            SendUsage();
         }
 
-        static string ArrayToJson(object array)
+        [MenuItem("internal:Edit/Rendering/Analytics/Send HDRP usage analytics", priority = 0)]
+        static void SendAnalytic()
         {
-            var a = (System.Collections.IList)array;
-            StringBuilder sb = new StringBuilder("[");
-            for (int i = 0; i < a.Count; i++)
-            {
-                sb.Append(a[i].ToString());
-                sb.Append(i == a.Count - 1 ? "]" : ",");
-            }
-            return sb.ToString();
+            SendUsage();
         }
     }
 }

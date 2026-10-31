@@ -1,50 +1,112 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
+using UnityEditor.Callbacks;
+using UnityEditor.Rendering.Analytics;
+using UnityEditor.Rendering.HighDefinition.Analytics;
 using UnityEngine;
 using UnityEditor.ShaderGraph;
 using UnityEngine.Rendering.HighDefinition;
 using UnityEditor.Rendering.HighDefinition.ShaderGraph;
 
 // Material property names
+using static UnityEngine.Rendering.HighDefinition.HDMaterial;
 using static UnityEngine.Rendering.HighDefinition.HDMaterialProperties;
+using UnityEngine.Rendering;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
     class MaterialModificationProcessor : AssetModificationProcessor
     {
+        static readonly string s_ShaderGraphExtensionMeta = $".{ShaderGraphImporter.Extension}.meta";
+        static readonly string s_ShaderGraphExtension = $".{ShaderGraphImporter.Extension}";
+        const string k_MaterialExtension = ".mat";
+
         static void OnWillCreateAsset(string asset)
         {
-            if (!asset.ToLowerInvariant().EndsWith(".mat"))
-                return;
-
-            MaterialPostprocessor.s_CreatedAssets.Add(asset);
+            if (asset.HasExtension(k_MaterialExtension))
+                MaterialPostprocessor.s_CreatedAssets.Add(asset);
         }
     }
 
     class MaterialReimporter : Editor
     {
         static bool s_NeedToCheckProjSettingExistence = true;
+        static bool s_AutoReimportProjectShaderGraphsOnVersionUpdate = false;
+        internal static bool s_ReimportShaderGraphDependencyOnMaterialUpdate = true;
 
         static internal void ReimportAllMaterials()
         {
-            string[] guids = AssetDatabase.FindAssets("t:material", null);
-            // There can be several materials subAssets per guid ( ie : FBX files ), remove duplicate guids.
-            var distinctGuids = guids.Distinct();
-
-            int materialIdx = 0;
-            int totalMaterials = distinctGuids.Count();
-            foreach (var asset in distinctGuids)
-            {
-                materialIdx++;
-                var path = AssetDatabase.GUIDToAssetPath(asset);
-                EditorUtility.DisplayProgressBar("Material Upgrader re-import", string.Format("({0} of {1}) {2}", materialIdx, totalMaterials, path), (float)materialIdx / (float)totalMaterials);
-                AssetDatabase.ImportAsset(path);
-            }
-            UnityEditor.EditorUtility.ClearProgressBar();
-
+            AssetReimportUtils.ReimportAll<Material>(out var duration, out var numberOfAssetsReimported);
+            AssetReimporterAnalytic.Send<Material>(duration, numberOfAssetsReimported);
             MaterialPostprocessor.s_NeedsSavingAssets = true;
+        }
+
+        static internal void ReimportAllHDShaderGraphs()
+        {
+            AssetReimportUtils.ReimportAll<Shader>(out var duration, out var numberOfAssetsReimported, path => CheckHDShaderGraphVersionsForUpgrade(path));
+            AssetReimporterAnalytic.Send<Shader>(duration, numberOfAssetsReimported);
+            MaterialPostprocessor.s_NeedsSavingAssets = true;
+        }
+
+        internal static bool CheckHDShaderGraphVersionsForUpgrade(string assetPath, Shader shader = null, bool ignoreNonHDRPShaderGraphs = false)
+        {
+            bool upgradeNeeded = false;
+
+            shader = shader ?? (Shader)AssetDatabase.LoadAssetAtPath(assetPath, typeof(Shader));
+            if (ignoreNonHDRPShaderGraphs)
+            {
+                // Note: this might still be an HDRP shadergraph but old, without HDMetaData,
+                // eg using a masternode.
+                if (!HDShaderUtils.IsHDRPShaderGraph(shader))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (!GraphUtil.IsShaderGraphAsset(shader))
+                    return false;
+            }
+
+            GUID subTargetGUID;
+            if (shader.TryGetMetadataOfType<HDMetadata>(out var hdMetaData))
+            {
+                subTargetGUID = hdMetaData.subTargetGuid;
+            }
+            else
+            {
+                // If HDMetaData doesn't even exist, if it is an HDRP shadergraph,
+                // we're sure it's an old one (masternode based)
+                return true;
+            }
+
+            if (subTargetGUID.Empty())
+            {
+                upgradeNeeded = true;
+                // If subTargetGUID doesn't have any values, it means the SG was last imported
+                // pre-plugin materials aware, need upgrade
+                return upgradeNeeded;
+            }
+
+            bool isSubTargetPlugin = HDShaderUtils.GetMaterialPluginSubTarget(subTargetGUID, out IPluginSubTargetMaterialUtils subTargetMaterialUtils);
+
+            upgradeNeeded |= hdMetaData.hdSubTargetVersion < MigrationDescription.LastVersion<ShaderGraphVersion>();
+            if (isSubTargetPlugin)
+            {
+                // For potential subtarget-specific versioning - ie for plugin subtargets, a single version is enough:
+                // When the active subtarget is changed for the HDTarget, the shadergraph is thus reserialized and HDMetaData
+                // is also rewritten.
+                // This is in contrast with the subasset AssetVersion in materials having a dictionary of versions by GUID.
+                // This is needed because a shader can be changed on a material without any hooks to update it, so the material
+                // postprocessor which updates the .mat version on behalf of the shaders must make sure to not mis-interpret a version
+                // from a previous plugin shader. That's why the AssetVersion asset tracks a dictionary of current (material) versions
+                // by guid. (The .version field is of course the main HDRP versioning line as given by k_Migrations in MaterialPostProcessor)
+
+                upgradeNeeded |= (hdMetaData.subTargetSpecificVersion < subTargetMaterialUtils.latestSubTargetVersion);
+            }
+
+            return upgradeNeeded;
         }
 
         [InitializeOnLoadMethod]
@@ -54,37 +116,83 @@ namespace UnityEditor.Rendering.HighDefinition
             {
                 if (Time.renderedFrameCount > 0)
                 {
+                    if (!HDRenderPipeline.isReady)
+                        return;
+
+                    bool reimportAllHDShaderGraphsTriggered = false;
+                    bool reimportAllMaterialsTriggered = false;
                     bool fileExist = true;
                     // We check the file existence only once to avoid IO operations every frame.
-                    if(s_NeedToCheckProjSettingExistence)
+                    if (s_NeedToCheckProjSettingExistence)
                     {
-                        fileExist = System.IO.File.Exists("ProjectSettings/HDRPProjectSettings.asset");
+                        fileExist = System.IO.File.Exists(HDProjectSettings.filePath);
                         s_NeedToCheckProjSettingExistence = false;
                     }
 
                     //This method is called at opening and when HDRP package change (update of manifest.json)
-                    var curUpgradeVersion = HDProjectSettings.materialVersionForUpgrade;
+                    int curMaterialVersion = HDProjectSettings.materialVersionForUpgrade;
+                    bool scanMaterialsForUpgradeNeeded = (curMaterialVersion < MaterialPostprocessor.k_Migrations.Length)
+                        || (HDProjectSettings.pluginSubTargetLastSeenMaterialVersionsSum < HDShaderUtils.GetHDPluginSubTargetMaterialVersionsSum());
 
-                    if (curUpgradeVersion != MaterialPostprocessor.k_Migrations.Length)
+                    var curHDSubTargetVersion = HDProjectSettings.hdShaderGraphLastSeenVersion;
+                    bool scanHDShaderGraphsForUpgradeNeeded = (curHDSubTargetVersion < MigrationDescription.LastVersion<ShaderGraphVersion>())
+                        || (HDProjectSettings.pluginSubTargetLastSeenSubTargetVersionsSum < HDShaderUtils.GetHDPluginSubTargetVersionsSum());
+
+                    // First test if scan for shadergraph version upgrade might be needed (triggered through their importer)
+                    // We do shadergraphs first as the HDMetaData object might need to be updated and the material update might depend
+                    // on it.
+                    // Note: this auto-update is disabled by default for now.
+                    if (s_AutoReimportProjectShaderGraphsOnVersionUpdate && scanHDShaderGraphsForUpgradeNeeded)
+                    {
+                        string commandLineOptions = System.Environment.CommandLine;
+                        bool inTestSuite = commandLineOptions.Contains("-testResults");
+                        if (!inTestSuite && fileExist && !Application.isBatchMode)
+                        {
+                            EditorUtility.DisplayDialog("HDRP ShaderGraph scan for upgrade", "The ShaderGraphs with HDRP SubTarget in your Project were created using an older version of the High Definition Render Pipeline (HDRP)." +
+                                " Unity must upgrade them to be compatible with your current version of HDRP. \n" +
+                                " Unity will re-import all of the HDRP ShaderGraphs in your project, save them to disk, and check them out in source control if needed.\n" +
+                                " Please see the Material upgrade guide in the HDRP documentation for more information.", "OK");
+                        }
+
+                        // When we open a project from scratch all the material have been converted and we don't need to do it two time.
+                        // However if we update with an open editor from the package manager we must call reimport.
+                        // As we can't know, we are always calling reimport resulting in unecessary work when opening a project.
+                        ReimportAllHDShaderGraphs();
+                        reimportAllHDShaderGraphsTriggered = true;
+                    }
+                    // we do else here, as we want to first call SaveAssetsToDisk() for shadergraphs, as it updates the HDProjectSettings version sentinels
+                    // (tocheck: it's probably safe to also do materials right after)
+                    else if (scanMaterialsForUpgradeNeeded)
                     {
                         string commandLineOptions = System.Environment.CommandLine;
                         bool inTestSuite = commandLineOptions.Contains("-testResults");
                         if (!inTestSuite && fileExist && !Application.isBatchMode)
                         {
                             EditorUtility.DisplayDialog("HDRP Material upgrade", "The Materials in your Project were created using an older version of the High Definition Render Pipeline (HDRP)." +
-                                                        " Unity must upgrade them to be compatible with your current version of HDRP. \n" +
-                                                        " Unity will re-import all of the Materials in your project, save the upgraded Materials to disk, and check them out in source control if needed.\n"+
-                                                        " Please see the Material upgrade guide in the HDRP documentation for more information.", "Ok");
+                                " Unity must upgrade them to be compatible with your current version of HDRP. \n" +
+                                " Unity will re-import all of the Materials in your project, save the upgraded Materials to disk, and check them out in source control if needed.\n" +
+                                " Please see the Material upgrade guide in the HDRP documentation for more information.", "OK");
                         }
 
                         // When we open a project from scratch all the material have been converted and we don't need to do it two time.
-                        // However if we update with an open editor from the package manager we must call reimport
-                        // as we can't know, we are always calling reimport resulting in unecessary work when opening a project
+                        // However if we update with an open editor from the package manager we must call reimport.
+                        // As we can't know, we are always calling reimport resulting in unecessary work when opening a project.
                         ReimportAllMaterials();
+                        reimportAllMaterialsTriggered = true;
                     }
 
+                    // Note: A reimport all above should really have gone through all .mat or .shadergraph, because the SaveAssetsToDisk() call will update
+                    // our versions in HDProjectSettings on which we base the version change detection and trigger the scan for reimport.
+                    // We can still have these two flags set at the same time, however, if the user multi-selects .mat and .shadergraph,
+                    // as the MaterialPostProcessor.OnPostprocessAllAssets() will be called for both and set both of those flags if needed.
+                    // This should be safe however since by the time we reach this point here, we already checked if we needed a re-import scan just
+                    // above.
                     if (MaterialPostprocessor.s_NeedsSavingAssets)
-                        MaterialPostprocessor.SaveAssetsToDisk();
+                    {
+                        MaterialPostprocessor.SaveAssetsToDisk(updateMaterialLastSeenVersions: reimportAllMaterialsTriggered, updateShaderGraphLastSeenVersions: reimportAllHDShaderGraphsTriggered);
+                        reimportAllHDShaderGraphsTriggered = false;
+                        reimportAllMaterialsTriggered = false;
+                    }
                 }
             };
         }
@@ -94,23 +202,31 @@ namespace UnityEditor.Rendering.HighDefinition
     {
         internal static List<string> s_CreatedAssets = new List<string>();
         internal static List<string> s_ImportedAssetThatNeedSaving = new List<string>();
+        internal static Dictionary<string, int> s_ImportedMaterialCounter = new Dictionary<string, int>();
         internal static bool s_NeedsSavingAssets = false;
 
-        static internal void SaveAssetsToDisk()
+        // Important: This should only be called by the RegisterUpgraderReimport(), ie the shadegraph/material version
+        // change detection and project rescan function since SaveAssetsToDisk() here will update the lastseen versions
+        // that the upgrader uses to detect version changes.
+        static internal void SaveAssetsToDisk(bool updateMaterialLastSeenVersions = true, bool updateShaderGraphLastSeenVersions = false)
         {
-            string commandLineOptions = System.Environment.CommandLine;
-            bool inTestSuite = commandLineOptions.Contains("-testResults");
-            if (inTestSuite)
-                return;
-
             foreach (var asset in s_ImportedAssetThatNeedSaving)
             {
                 AssetDatabase.MakeEditable(asset);
             }
 
             AssetDatabase.SaveAssets();
-            //to prevent data loss, only update the saved version if user applied change and assets are written to
-            HDProjectSettings.materialVersionForUpgrade = MaterialPostprocessor.k_Migrations.Length;
+            //to prevent data loss, only update the last saved version trackers if user applied change and assets are written to
+            if (updateShaderGraphLastSeenVersions)
+            {
+                HDProjectSettings.hdShaderGraphLastSeenVersion = MigrationDescription.LastVersion<ShaderGraphVersion>();
+                HDProjectSettings.UpdateLastSeenSubTargetVersionsOfPluginSubTargets();
+            }
+            if (updateMaterialLastSeenVersions)
+            {
+                HDProjectSettings.materialVersionForUpgrade = MaterialPostprocessor.k_Migrations.Length;
+                HDProjectSettings.UpdateLastSeenMaterialVersionsOfPluginSubTargets();
+            }
 
             s_ImportedAssetThatNeedSaving.Clear();
             s_NeedsSavingAssets = false;
@@ -124,80 +240,153 @@ namespace UnityEditor.Rendering.HighDefinition
             HDShaderUtils.ResetMaterialKeywords(material);
         }
 
+        static readonly string s_ShaderGraphExtensionMeta = $".{ShaderGraphImporter.Extension}.meta";
+        static readonly string s_ShaderGraphExtension = $".{ShaderGraphImporter.Extension}";
+        const string k_MaterialExtension = ".mat";
+
+        [RunAfterClass(typeof(HDRenderPipelineGlobalSettingsPostprocessor))]
         static void OnPostprocessAllAssets(string[] importedAssets, string[] deletedAssets, string[] movedAssets, string[] movedFromAssetPaths)
         {
-            foreach (var asset in importedAssets)
+            using (var diffusionProfileRegisterer = new VolumeUtils.DiffusionProfileRegisterScope())
             {
-                if (!asset.ToLowerInvariant().EndsWith(".mat"))
-                    continue;
-
-                var material = (Material)AssetDatabase.LoadAssetAtPath(asset, typeof(Material));
-                if (!HDShaderUtils.IsHDRPShader(material.shader, upgradable: true))
-                    continue;
-
-                HDShaderUtils.ShaderID id = HDShaderUtils.GetShaderEnumFromShader(material.shader);
-                var latestVersion = k_Migrations.Length;
-                var wasUpgraded = false;
-                var assetVersions = AssetDatabase.LoadAllAssetsAtPath(asset);
-                AssetVersion assetVersion = null;
-                foreach (var subAsset in assetVersions)
+                foreach (var asset in importedAssets)
                 {
-                    if (subAsset != null && subAsset.GetType() == typeof(AssetVersion))
+                    if (!asset.HasExtension(k_MaterialExtension))
+                        continue;
+
+                    // Materials (.mat) post processing
+                    var material = (Material)AssetDatabase.LoadAssetAtPath(asset, typeof(Material));
+                    if (material == null)
+                        continue;
+
+                    // Register Diffuse Profiles
+                    diffusionProfileRegisterer.RegisterReferencedDiffusionProfilesFromMaterial(material);
+
+                    if (MaterialReimporter.s_ReimportShaderGraphDependencyOnMaterialUpdate && GraphUtil.IsShaderGraphAsset(material.shader))
                     {
-                        assetVersion = subAsset as AssetVersion;
-                        break;
-                    }
-                }
+                        // Check first if the HDRP shadergraph assigned needs a migration:
+                        // Here ignoreNonHDRPShaderGraphs = false is useful to not ignore non HDRP ShaderGraphs as
+                        // the detection is based on the presence of the "HDMetaData" object and old HDRP ShaderGraphs don't have these,
+                        // so we can conservatively force a re-import of any ShaderGraphs. Unity might not have reimported such ShaderGraphs
+                        // based on declared source dependencies by the ShaderGraphImporter because these might have moved / changed
+                        // for old ones. We can cover these cases here.
+                        //
+                        // Note we could also check this dependency in ReimportAllMaterials but in case a user manually re-imports a material,
+                        // (ie the OnPostprocessAllAssets call here is not generated from ReimportAllMaterials())
+                        // we would miss re-importing that dependency.
+                        if (MaterialReimporter.CheckHDShaderGraphVersionsForUpgrade("", material.shader, ignoreNonHDRPShaderGraphs: false))
+                        {
+                            s_ImportedMaterialCounter.TryGetValue(asset, out var importCounter);
+                            s_ImportedMaterialCounter[asset] = ++importCounter;
 
-                //subasset not found
-                if (!assetVersion)
-                {
-                    wasUpgraded = true;
-                    assetVersion = ScriptableObject.CreateInstance<AssetVersion>();
-                    assetVersion.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector | HideFlags.NotEditable;
-                    if (s_CreatedAssets.Contains(asset))
+                            // CheckHDShaderGraphVersionsForUpgrade always return true if a ShaderGraph don't have an HDMetaData attached
+                            // we need a check to avoid importing the same assets over and over again.
+                            if (importCounter > 2)
+                                continue;
+
+                            var shaderPath = AssetDatabase.GetAssetPath(material.shader.GetEntityId());
+                            AssetDatabase.ImportAsset(shaderPath);
+
+                            // Restart the material import instead of proceeding otherwise the shadergraph will be processed after
+                            // (the above ImportAsset(shaderPath) returns before the actual re-importing taking place).
+                            AssetDatabase.ImportAsset(asset);
+                            continue;
+                        }
+                    }
+
+                    if (!HDShaderUtils.IsHDRPShader(material.shader, upgradable: true))
+                        continue;
+
+                    (ShaderID id, GUID subTargetGUID) = HDShaderUtils.GetShaderIDsFromShader(material.shader);
+                    var latestVersion = k_Migrations.Length;
+
+                    bool isMaterialUsingPlugin = HDShaderUtils.GetMaterialPluginSubTarget(subTargetGUID, out IPluginSubTargetMaterialUtils subTargetMaterialUtils);
+
+                    var wasUpgraded = false;
+                    var assetVersions = AssetDatabase.LoadAllAssetsAtPath(asset);
+                    AssetVersion assetVersion = null;
+                    foreach (var subAsset in assetVersions)
                     {
-                        //just created
-                        assetVersion.version = latestVersion;
-                        s_CreatedAssets.Remove(asset);
-
-                        //[TODO: remove comment once fixed]
-                        //due to FB 1175514, this not work. It is being fixed though.
-                        //delayed call of the following work in some case and cause infinite loop in other cases.
-                        AssetDatabase.AddObjectToAsset(assetVersion, asset);
-
-                        // Init material in case it's used before an inspector window is opened
-                        HDShaderUtils.ResetMaterialKeywords(material);
+                        if (subAsset != null && subAsset.GetType() == typeof(AssetVersion))
+                        {
+                            assetVersion = subAsset as AssetVersion;
+                            break;
+                        }
                     }
-                    else
+
+                    //subasset not found
+                    if (!assetVersion)
                     {
-                        //asset exist prior migration
-                        assetVersion.version = 0;
-                        AssetDatabase.AddObjectToAsset(assetVersion, asset);
+                        wasUpgraded = true;
+                        assetVersion = ScriptableObject.CreateInstance<AssetVersion>();
+                        assetVersion.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector | HideFlags.NotEditable;
+                        if (s_CreatedAssets.Contains(asset))
+                        {
+                            //just created
+                            s_CreatedAssets.Remove(asset);
+                            assetVersion.version = latestVersion;
+                            if (isMaterialUsingPlugin)
+                            {
+                                assetVersion.hdPluginSubTargetMaterialVersions.Add(subTargetGUID, subTargetMaterialUtils.latestMaterialVersion);
+                            }
+
+                            //[TODO: remove comment once fixed]
+                            //due to FB 1175514, this not work. It is being fixed though.
+                            //delayed call of the following work in some case and cause infinite loop in other cases.
+                            AssetDatabase.AddObjectToAsset(assetVersion, asset);
+
+                            // Init material in case it's used before an inspector window is opened
+                            HDShaderUtils.ResetMaterialKeywords(material);
+                        }
+                        else
+                        {
+                            //asset exist prior migration
+                            assetVersion.version = 0;
+                            if (isMaterialUsingPlugin)
+                            {
+                                assetVersion.hdPluginSubTargetMaterialVersions.Add(subTargetGUID, (int)(PluginMaterial.GenericVersions.NeverMigrated));
+                            }
+                            AssetDatabase.AddObjectToAsset(assetVersion, asset);
+                        }
                     }
-                }
+                    // TODO: Maybe systematically remove from s_CreateAssets just in case
 
-                //upgrade
-                while (assetVersion.version < latestVersion)
-                {
-                    k_Migrations[assetVersion.version](material, id);
-                    assetVersion.version++;
-                    wasUpgraded = true;
-                }
+                    //upgrade
+                    while (assetVersion.version >= 0 && assetVersion.version < latestVersion)
+                    {
+                        k_Migrations[assetVersion.version](material, id);
+                        assetVersion.version++;
+                        wasUpgraded = true;
+                    }
 
-                if (wasUpgraded)
-                {
-                    EditorUtility.SetDirty(assetVersion);
-                    s_ImportedAssetThatNeedSaving.Add(asset);
-                    s_NeedsSavingAssets = true;
+                    if (isMaterialUsingPlugin)
+                    {
+                        int hdPluginMaterialVersion = (int)(PluginMaterial.GenericVersions.NeverMigrated);
+                        bool neverMigrated = (assetVersion.hdPluginSubTargetMaterialVersions.Count == 0)
+                            || (false == assetVersion.hdPluginSubTargetMaterialVersions.TryGetValue(subTargetGUID, out hdPluginMaterialVersion));
+                        if (neverMigrated)
+                        {
+                            assetVersion.hdPluginSubTargetMaterialVersions.Add(subTargetGUID, hdPluginMaterialVersion);
+                        }
+
+                        if (hdPluginMaterialVersion < subTargetMaterialUtils.latestMaterialVersion)
+                        {
+                            if (subTargetMaterialUtils.MigrateMaterial(material, hdPluginMaterialVersion))
+                            {
+                                assetVersion.hdPluginSubTargetMaterialVersions[subTargetGUID] = subTargetMaterialUtils.latestMaterialVersion;
+                                wasUpgraded = true;
+                            }
+                        }
+                    }
+
+                    if (wasUpgraded)
+                    {
+                        EditorUtility.SetDirty(assetVersion);
+                        s_ImportedAssetThatNeedSaving.Add(asset);
+                        s_NeedsSavingAssets = true;
+                    }
                 }
             }
-        }
-
-        public void OnPostprocessSpeedTree(GameObject speedtree)
-        {
-            SpeedTreeImporter stImporter = assetImporter as SpeedTreeImporter;            
-            SpeedTree8MaterialUpgrader.PostprocessSpeedTree8Materials(speedtree, stImporter, HDSpeedTree8MaterialUpgrader.HDSpeedTree8MaterialFinalizer);	
         }
 
         // Note: It is not possible to separate migration step by kind of shader
@@ -207,19 +396,21 @@ namespace UnityEditor.Rendering.HighDefinition
         // So we must have migration step that work on every materials at once.
         // Which also means that if we want to update only one shader, we need
         // to bump all materials version...
-        static internal Action<Material, HDShaderUtils.ShaderID>[] k_Migrations = new Action<Material, HDShaderUtils.ShaderID>[]
+        static internal Action<Material, ShaderID>[] k_Migrations = new Action<Material, ShaderID>[]
         {
-             StencilRefactor,
-             ZWriteForTransparent,
-             RenderQueueUpgrade,
-             ShaderGraphStack,
-             MoreMaterialSurfaceOptionFromShaderGraph,
-             AlphaToMaskUIFix,
-             MigrateDecalRenderQueue,
-             ExposedDecalInputsFromShaderGraph,
-             FixIncorrectEmissiveColorSpace,
-             ExposeRefraction,
-             MetallicRemapping,
+            StencilRefactor,
+            ZWriteForTransparent,
+            RenderQueueUpgrade,
+            ShaderGraphStack,
+            MoreMaterialSurfaceOptionFromShaderGraph,
+            AlphaToMaskUIFix,
+            MigrateDecalRenderQueue,
+            ExposedDecalInputsFromShaderGraph,
+            FixIncorrectEmissiveColorSpace,
+            ExposeRefraction,
+            MetallicRemapping,
+            ForceForwardEmissiveForDeferred,
+            UnlitStencilTag,
         };
 
         #region Migrations
@@ -246,12 +437,12 @@ namespace UnityEditor.Rendering.HighDefinition
         //}
         //}
 
-        static void StencilRefactor(Material material, HDShaderUtils.ShaderID id)
+        static void StencilRefactor(Material material, ShaderID id)
         {
             HDShaderUtils.ResetMaterialKeywords(material);
         }
 
-        static void ZWriteForTransparent(Material material, HDShaderUtils.ShaderID id)
+        static void ZWriteForTransparent(Material material, ShaderID id)
         {
             // For transparent materials, the ZWrite property that is now used is _TransparentZWrite.
             if (material.GetSurfaceType() == SurfaceType.Transparent)
@@ -261,7 +452,7 @@ namespace UnityEditor.Rendering.HighDefinition
         }
 
         #endregion
-        static void RenderQueueUpgrade(Material material, HDShaderUtils.ShaderID id)
+        static void RenderQueueUpgrade(Material material, ShaderID id)
         {
             // Replace previous ray tracing render queue for opaque to regular opaque with raytracing
             if (material.renderQueue == ((int)UnityEngine.Rendering.RenderQueue.GeometryLast + 20))
@@ -327,7 +518,8 @@ namespace UnityEditor.Rendering.HighDefinition
 
         // properties in this tab should be properties from Unlit or PBR cross pipeline shader
         // that are suppose to be synchronize with the Material during upgrade
-        readonly static string[] s_ShadergraphStackFloatPropertiesToSynchronize = {
+        readonly static string[] s_ShadergraphStackFloatPropertiesToSynchronize =
+        {
             "_SurfaceType",
             "_BlendMode",
             "_DstBlend",
@@ -342,11 +534,11 @@ namespace UnityEditor.Rendering.HighDefinition
             "_RenderQueueType"  // Needed as seems to not reset correctly
         };
 
-        static void ShaderGraphStack(Material material, HDShaderUtils.ShaderID id)
+        static void ShaderGraphStack(Material material, ShaderID id)
         {
             Shader shader = material.shader;
 
-            if (shader.IsShaderGraph())
+            if (shader.IsShaderGraphAsset())
             {
                 if (shader.TryGetMetadataOfType<HDMetadata>(out var obj))
                 {
@@ -367,20 +559,19 @@ namespace UnityEditor.Rendering.HighDefinition
                         bool alphaTest = material.HasProperty("_AlphaCutoffEnable") && material.GetFloat("_AlphaCutoffEnable") > 0.0f;
 
                         material.renderQueue = isTransparent ? (int)HDRenderQueue.Priority.Transparent :
-                                                    alphaTest ? (int)HDRenderQueue.Priority.OpaqueAlphaTest : (int)HDRenderQueue.Priority.Opaque;
+                            alphaTest ? (int)HDRenderQueue.Priority.OpaqueAlphaTest : (int)HDRenderQueue.Priority.Opaque;
 
                         material.SetFloat("_RenderQueueType", isTransparent ? (float)HDRenderQueue.RenderQueueType.Transparent : (float)HDRenderQueue.RenderQueueType.Opaque);
                     }
-                        
                 }
             }
 
             HDShaderUtils.ResetMaterialKeywords(material);
         }
 
-        static void MoreMaterialSurfaceOptionFromShaderGraph(Material material, HDShaderUtils.ShaderID id)
+        static void MoreMaterialSurfaceOptionFromShaderGraph(Material material, ShaderID id)
         {
-            if (material.shader.IsShaderGraph())
+            if (material.IsShaderGraph())
             {
                 // Synchronize properties we exposed from SG to the material
                 ResetFloatProperty(kReceivesSSR);
@@ -404,22 +595,18 @@ namespace UnityEditor.Rendering.HighDefinition
             HDShaderUtils.ResetMaterialKeywords(material);
         }
 
-        static void AlphaToMaskUIFix(Material material, HDShaderUtils.ShaderID id)
+        static void AlphaToMaskUIFix(Material material, ShaderID id)
         {
-            if (material.HasProperty(kAlphaToMask) && material.HasProperty(kAlphaToMaskInspector))
-            {
-                material.SetFloat(kAlphaToMaskInspector, material.GetFloat(kAlphaToMask));
-                HDShaderUtils.ResetMaterialKeywords(material);
-            }
+            // Not used anymore, alpha to mask option is removed
         }
 
-        static void MigrateDecalRenderQueue(Material material, HDShaderUtils.ShaderID id)
+        static void MigrateDecalRenderQueue(Material material, ShaderID id)
         {
             const string kSupportDecals = "_SupportDecals";
 
             // Take the opportunity to remove _SupportDecals from Unlit as it is not suppose to be here
             if (HDShaderUtils.IsUnlitHDRPShader(material.shader))
-            {               
+            {
                 var serializedMaterial = new SerializedObject(material);
                 if (TryFindProperty(serializedMaterial, kSupportDecals, SerializedType.Integer, out var property, out _, out _))
                 {
@@ -449,9 +636,9 @@ namespace UnityEditor.Rendering.HighDefinition
             HDShaderUtils.ResetMaterialKeywords(material);
         }
 
-        static void ExposedDecalInputsFromShaderGraph(Material material, HDShaderUtils.ShaderID id)
+        static void ExposedDecalInputsFromShaderGraph(Material material, ShaderID id)
         {
-            if (id == HDShaderUtils.ShaderID.Decal)
+            if (id == ShaderID.Decal)
             {
                 // In order for the new properties (kAffectsAlbedo...) to be taken into account, we need to make it dirty so that the parameter is created first
                 HDShaderUtils.ResetMaterialKeywords(material);
@@ -553,7 +740,7 @@ namespace UnityEditor.Rendering.HighDefinition
                 const string s_MeshDecalsMAOSStr = "DBufferMesh_MAOS";
                 const string s_MeshDecals3RTStr = "DBufferMesh_3RT";
                 const string s_MeshDecalsForwardEmissive = "Mesh_Emissive";
-                
+
                 material.SetShaderPassEnabled(s_MeshDecalsMStr, true);
                 material.SetShaderPassEnabled(s_MeshDecalsSStr, true);
                 material.SetShaderPassEnabled(s_MeshDecalsMSStr, true);
@@ -565,7 +752,7 @@ namespace UnityEditor.Rendering.HighDefinition
                 material.SetShaderPassEnabled(s_MeshDecalsForwardEmissive, true);
             }
 
-            if (id == HDShaderUtils.ShaderID.SG_Decal)
+            if (id == ShaderID.SG_Decal)
             {
                 // We can't erase obsolete disabled pass from already existing Material, so we need to re-enable all of them
                 const string s_ShaderGraphMeshDecals4RT = "ShaderGraph_DBufferMesh4RT";
@@ -577,13 +764,13 @@ namespace UnityEditor.Rendering.HighDefinition
                 material.SetShaderPassEnabled(s_ShaderGraphMeshDecalForwardEmissive, true);
             }
 
-            if (id == HDShaderUtils.ShaderID.Decal || id == HDShaderUtils.ShaderID.SG_Decal)
+            if (id == ShaderID.Decal || id == ShaderID.SG_Decal)
             {
                 HDShaderUtils.ResetMaterialKeywords(material);
             }
-        }     
+        }
 
-        static void FixIncorrectEmissiveColorSpace(Material material, HDShaderUtils.ShaderID id)
+        static void FixIncorrectEmissiveColorSpace(Material material, ShaderID id)
         {
             // kEmissiveColorLDR wasn't correctly converted to linear color space.
             // so here we adjust the value of kEmissiveColorLDR to compensate. But only if not using a HDR Color
@@ -609,10 +796,10 @@ namespace UnityEditor.Rendering.HighDefinition
             }
         }
 
-        static void ExposeRefraction(Material material, HDShaderUtils.ShaderID id)
+        static void ExposeRefraction(Material material, ShaderID id)
         {
             // Lit SG now have a shader feature for refraction instead of an hardcoded material
-            if (id == HDShaderUtils.ShaderID.SG_Lit)
+            if (id == ShaderID.SG_Lit)
             {
                 // Sync the default refraction model from the shader graph to the shader
                 // We need to do this because the material may already have a refraction model information (from the Lit)
@@ -626,13 +813,13 @@ namespace UnityEditor.Rendering.HighDefinition
             }
         }
 
-        static void MetallicRemapping(Material material, HDShaderUtils.ShaderID id)
+        static void MetallicRemapping(Material material, ShaderID id)
         {
             const string kMetallicRemapMax = "_MetallicRemapMax";
 
             // Lit shaders now have metallic remapping for the mask map
-            if (id == HDShaderUtils.ShaderID.Lit || id == HDShaderUtils.ShaderID.LitTesselation
-             || id == HDShaderUtils.ShaderID.LayeredLit || id == HDShaderUtils.ShaderID.LayeredLitTesselation)
+            if (id == ShaderID.Lit || id == ShaderID.LitTesselation
+                || id == ShaderID.LayeredLit || id == ShaderID.LayeredLitTesselation)
             {
                 const string kMetallic = "_Metallic";
                 if (material.HasProperty(kMetallic) && material.HasProperty(kMetallicRemapMax))
@@ -641,7 +828,7 @@ namespace UnityEditor.Rendering.HighDefinition
                     material.SetFloat(kMetallicRemapMax, metallic);
                 }
             }
-            else if (id == HDShaderUtils.ShaderID.Decal)
+            else if (id == ShaderID.Decal)
             {
                 HDShaderUtils.ResetMaterialKeywords(material);
                 var serializedMaterial = new SerializedObject(material);
@@ -657,6 +844,18 @@ namespace UnityEditor.Rendering.HighDefinition
                 serializedMaterial.ApplyModifiedProperties();
 
                 material.SetFloat(kMetallicRemapMax, metallicScale);
+            }
+        }
+
+        // This function below is not used anymore - the code have been removed - however we must maintain the function to keep already converted Material coherent
+        // As it doesn't do anything special, there is no problem to let it
+        static void ForceForwardEmissiveForDeferred(Material material, ShaderID id)
+        {
+            // Force Forward emissive for deferred pass is only setup for Lit shader
+            if (id == ShaderID.SG_Lit || id == ShaderID.Lit || id == ShaderID.LitTesselation
+                || id == ShaderID.LayeredLit || id == ShaderID.LayeredLitTesselation)
+            {
+                HDShaderUtils.ResetMaterialKeywords(material);
             }
         }
 
@@ -1021,6 +1220,12 @@ namespace UnityEditor.Rendering.HighDefinition
             container.FindPropertyRelative("m_Scale").vector2Value = scale;
             container.FindPropertyRelative("m_Offset").vector2Value = offset;
             res.parent.DeleteArrayElementAtIndex(res.index + 1);
+        }
+
+        static void UnlitStencilTag(Material material, ShaderID id)
+        {
+            if (id == ShaderID.Unlit || id == ShaderID.SG_Unlit)
+                HDShaderUtils.ResetMaterialKeywords(material);
         }
 
         #endregion

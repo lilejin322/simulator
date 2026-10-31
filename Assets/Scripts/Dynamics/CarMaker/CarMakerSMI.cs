@@ -25,7 +25,7 @@ namespace Simulator.Sensors
     public class CarMakerSMI : MonoBehaviour, IVehicleDynamics
     {
         private Rigidbody RB;
-        public Vector3 Velocity => RB.velocity;
+        public Vector3 Velocity => RB.linearVelocity;
         public Vector3 AngularVelocity => RB.angularVelocity;
         public Transform BaseLink { get { return BaseLinkTransform; } }
         public Transform BaseLinkTransform;
@@ -116,7 +116,7 @@ namespace Simulator.Sensors
             RB.transform.position = new Vector3(posRight, AgentPosition.z, posForward);
             RB.transform.rotation = Quaternion.Euler(AgentRoll, AgentHeading, AgentPitch);
 
-            RB.velocity = Vector3.zero;
+            RB.linearVelocity = Vector3.zero;
             RB.angularVelocity = Vector3.zero;
         }
 

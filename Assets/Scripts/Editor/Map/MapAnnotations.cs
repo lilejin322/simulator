@@ -1947,7 +1947,7 @@ public class MapAnnotations : EditorWindow
         var laneName = lane.name;
         var laneNumber = Regex.Match(laneName, @"\d+").Value;
         if (laneNumber != "") {return int.Parse(laneNumber);}
-        return lane.GetInstanceID();
+        return lane.GetEntityId().GetHashCode();
     }
 
     private string GetLanesCommonLineName(MapTrafficLane lane, MapTrafficLane otherLane)

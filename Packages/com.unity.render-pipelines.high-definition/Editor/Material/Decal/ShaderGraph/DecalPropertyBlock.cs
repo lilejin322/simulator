@@ -1,12 +1,3 @@
-using System;
-using System.Collections.Generic;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.HighDefinition;
-using UnityEditor.ShaderGraph;
-using UnityEngine.UIElements;
-using UnityEditor.UIElements;
-using UnityEngine;
-
 // We share the name of the properties in the UI to avoid duplication
 using static UnityEditor.Rendering.HighDefinition.DecalSurfaceOptionsUIBlock.Styles;
 
@@ -30,6 +21,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             AddProperty(affectSmoothnessText, () => decalData.affectsSmoothness, (newValue) => decalData.affectsSmoothness = newValue);
             AddProperty(affectEmissionText, () => decalData.affectsEmission, (newValue) => decalData.affectsEmission = newValue);
             AddProperty(supportLodCrossFadeText, () => decalData.supportLodCrossFade, (newValue) => decalData.supportLodCrossFade = newValue);
+            AddProperty(transparentDynamicUpdateText, () => decalData.transparentDynamicUpdate, (newValue) => decalData.transparentDynamicUpdate = newValue);
         }
     }
 }

@@ -6,6 +6,22 @@
 
 #define DWORD_PER_TILE 16 // See dwordsPerTile in LightLoop.cs, we have roomm for 31 lights and a number of light value all store on 16 bit (ushort)
 
+// Depending if we are in ray tracing or not we need to use a different set of environement data
+#if defined(WORLD_ENVIRONMENT_DATA) || defined(SHADER_STAGE_RAY_TRACING)
+#define PLANAR_CAPTURE_VP _PlanarCaptureVPWL
+#define PLANAR_SCALE_OFFSET _PlanarScaleOffsetWL
+#define CUBE_SCALE_OFFSET _CubeScaleOffsetWL
+#else
+#define PLANAR_CAPTURE_VP _PlanarCaptureVP
+#define PLANAR_SCALE_OFFSET _PlanarScaleOffset
+#define CUBE_SCALE_OFFSET _CubeScaleOffset
+#endif
+
+// Disable contact shadows if turned off
+#ifdef CONTACT_SHADOWS_OFF
+#define LIGHTLOOP_DISABLE_CONTACT_SHADOWS
+#endif
+
 // Some file may not required HD shadow context at all. In this case provide an empty one
 // Note: if a double defintion error occur it is likely have include HDShadow.hlsl (and so HDShadowContext.hlsl) after lightloopdef.hlsl
 #ifndef HAVE_HD_SHADOW_CONTEXT
@@ -17,6 +33,9 @@ struct HDShadowContext { float unused; };
 struct LightLoopContext
 {
     int sampleReflection;
+#ifdef APPLY_FOG_ON_SKY_REFLECTIONS
+    float3 positionWS; // For sky reflection, we need position to evalute height base fog
+#endif
 
     HDShadowContext shadowContext;
 
@@ -40,8 +59,32 @@ struct LightLoopOutput
 #define SINGLE_PASS_CONTEXT_SAMPLE_REFLECTION_PROBES 0
 #define SINGLE_PASS_CONTEXT_SAMPLE_SKY 1
 
-#define PLANAR_ATLAS_SIZE _PlanarAtlasData.x
-#define PLANAR_ATLAS_RCP_MIP_PADDING _PlanarAtlasData.y
+#define REFL_ATLAS_CUBE_PADDING _ReflectionAtlasCubeData.xy
+#define REFL_ATLAS_CUBE_MIP_PADDING _ReflectionAtlasCubeData.z
+#define REFL_ATLAS_PLANAR_PADDING _ReflectionAtlasPlanarData.xy
+#define REFL_ATLAS_TEXEL_SIZE _ReflectionAtlasPlanarData.zw
+
+float2 GetReflectionAtlasCoordsCube(float4 scaleOffset, float3 dir, float lod)
+{
+    float2 uv = saturate(PackNormalOctQuadEncode(dir) * 0.5 + 0.5);
+    float2 padding = REFL_ATLAS_CUBE_PADDING;
+    // Every octahedral mip has at least one texel padding. This improves octahedral mapping as it always should have border for every mip.
+    padding *= pow(2.0, max(lod - REFL_ATLAS_CUBE_MIP_PADDING, 0.0));
+    float2 size = scaleOffset.xy - padding;
+    float2 offset = scaleOffset.zw + 0.5 * padding;
+    return uv * size + offset;
+}
+
+float2 GetReflectionAtlasCoordsPlanar(float4 scaleOffset, float2 uv, float lod)
+{
+    float2 padding = REFL_ATLAS_PLANAR_PADDING;
+    float2 size = scaleOffset.xy - padding;
+    float2 offset = scaleOffset.zw + 0.5 * padding;
+    float2 paddingClamp = REFL_ATLAS_TEXEL_SIZE * pow(2.0, ceil(lod)) * 0.5;
+    float2 minClamp = scaleOffset.zw + paddingClamp;
+    float2 maxClamp = scaleOffset.zw + scaleOffset.xy - paddingClamp;
+    return clamp(uv * size + offset, minClamp, maxClamp);
+}
 
 // The EnvLightData of the sky light contains a bunch of compile-time constants.
 // This function sets them directly to allow the compiler to propagate them and optimize the code.
@@ -73,18 +116,40 @@ EnvLightData InitSkyEnvLightData(int envIndex)
     return output;
 }
 
+// Variant environment data that provides a better default behavior for screen space refraction, when no proxy volume is available.
+EnvLightData InitDefaultRefractionEnvLightData(int envIndex)
+{
+    EnvLightData output = InitSkyEnvLightData(envIndex);
+
+    // For screen space refraction, instead of an infinite projection, utilize the renderer's extents.
+    output.proxyExtents = GetRendererExtents();
+
+    // Revert the infinite projection.
+    output.minProjectionDistance = 0;
+
+    return output;
+}
+
 bool IsEnvIndexCubemap(int index)   { return index >= 0; }
 bool IsEnvIndexTexture2D(int index) { return index < 0; }
 
-// Clamp the UVs to avoid edge beelding caused by bilinear filtering on the edge of the atlas.
-float2 RemapUVForPlanarAtlas(float2 coord, float2 size, float lod)
+float EdgeSampleFade(float2 positionNDC, float2 samplePositionNDC, float amplitude = 100.0f)
 {
-    float2 scale = rcp(size + PLANAR_ATLAS_RCP_MIP_PADDING) * size;
-    float2 offset = 0.5 * (1.0 - scale);
+    float2 ndc = samplePositionNDC;
+    float2 rcoords = abs(saturate(ndc.xy) * 2.0 - 1.0);
 
-    // Avoid edge bleeding for texture when sampling with lod by clamping uvs:
-    float2 mipClamp = pow(2, lod) / (size * PLANAR_ATLAS_SIZE * 2);
-    return clamp(coord * scale + offset, mipClamp, 1 - mipClamp);
+    // When the object normal is not aligned with the reflection plane, the reflected ray might deviate too much and go out
+    // of the reflection frustum. So we apply blending when the reflection sample coords are on the edges of the texture
+    // These "edges" depend on the screen space coordinates of the pixel, because it is expected that a pixel on the
+    // edge of the screen will sample on the edge of the texture
+
+    // Blending factors taking the above into account
+    bool2 blend = (positionNDC < ndc.xy) ^ (ndc.xy < 0.5);
+    float2 alphas = saturate(amplitude * abs(ndc.xy - positionNDC));
+    alphas = float2(Smoothstep01(alphas.x), Smoothstep01(alphas.y));
+
+    float2 weights = lerp(1.0, saturate(2.0 - 2.0 * rcoords), blend * alphas);
+    return weights.x * weights.y;
 }
 
 // Note: index is whatever the lighting architecture want, it can contain information like in which texture to sample (in case we have a compressed BC6H texture and an uncompressed for real time reflection ?)
@@ -105,62 +170,48 @@ float4 SampleEnv(LightLoopContext lightLoopContext, int index, float3 texCoord, 
     {
         if (cacheType == ENVCACHETYPE_TEXTURE2D)
         {
-            //_Env2DCaptureVP is in capture space
-            float3 ndc = ComputeNormalizedDeviceCoordinatesWithZ(texCoord, _Env2DCaptureVP[index]);
-
-            // Apply atlas scale and offset
-            float2 scale = _Env2DAtlasScaleOffset[index].xy;
-            float2 offset = _Env2DAtlasScaleOffset[index].zw;
-            float2 atlasCoords = RemapUVForPlanarAtlas(ndc.xy, scale, lod);
-            atlasCoords = atlasCoords * scale + offset;
-
-            color.rgb = SAMPLE_TEXTURE2D_LOD(_Env2DTextures, s_trilinear_clamp_sampler, atlasCoords, lod).rgb;
-#if UNITY_REVERSED_Z
-            // We check that the sample was capture by the probe according to its frustum planes, except the far plane.
-            //   When using oblique projection, the far plane is so distorded that it is not reliable for this check.
-            //   and most of the time, what we want, is the clipping from the oblique near plane.
-            color.a = any(ndc.xy < 0) || any(ndc.xyz > 1) ? 0.0 : 1.0;
-#else
-            color.a = any(ndc.xyz < 0) || any(ndc.xy > 1) ? 0.0 : 1.0;
+            //_ReflAtlasPlanarCaptureVP is in capture space
+            float4 samplePosCS = ComputeClipSpacePosition(texCoord, PLANAR_CAPTURE_VP[index]);
+#if UNITY_UV_STARTS_AT_TOP
+            samplePosCS.y = -samplePosCS.y;
 #endif
-            float3 capturedForwardWS = _Env2DCaptureForward[index].xyz;
-            if (dot(capturedForwardWS, texCoord) < 0.0)
-                color.a = 0.0;
-            else
+            float2 ndc = samplePosCS.xy * rcp(samplePosCS.w);
+            ndc.xy = ndc.xy * 0.5 + 0.5;
+            float2 atlasCoords = GetReflectionAtlasCoordsPlanar(PLANAR_SCALE_OFFSET[index], ndc.xy, lod);
+
+            color.a = all(abs(samplePosCS.xyz) < samplePosCS.w) ? 1.0 : 0.0;
+            if (color.a > 0.0)
             {
-                // Controls the blending on the edges of the screen
-                const float amplitude = 100.0;
-
-                float2 rcoords = abs(saturate(ndc.xy) * 2.0 - 1.0);
-
-                // When the object normal is not aligned with the reflection plane, the reflected ray might deviate too much and go out
-                // of the reflection frustum. So we apply blending when the reflection sample coords are on the edges of the texture
-                // These "edges" depend on the screen space coordinates of the pixel, because it is expected that a pixel on the
-                // edge of the screen will sample on the edge of the texture
-
-                // Blending factors taking the above into account
-                bool2 blend = (positionNDC < ndc.xy) ^ (ndc.xy < 0.5);
-                float2 alphas = saturate(amplitude * abs(ndc.xy - positionNDC));
-                alphas = float2(Smoothstep01(alphas.x), Smoothstep01(alphas.y));
-
-                float2 weights = lerp(1.0, saturate(2.0 - 2.0 * rcoords), blend * alphas);
-                color.a *= weights.x * weights.y;
+                color.rgb = SAMPLE_TEXTURE2D_ARRAY_LOD(_ReflectionAtlas, s_trilinear_clamp_sampler, atlasCoords, sliceIdx, lod).rgb;
+                color.a *= EdgeSampleFade(positionNDC, ndc.xy);
             }
         }
         else if (cacheType == ENVCACHETYPE_CUBEMAP)
         {
-            color.rgb = SAMPLE_TEXTURECUBE_ARRAY_LOD_ABSTRACT(_EnvCubemapTextures, s_trilinear_clamp_sampler, texCoord, _EnvSliceSize * index + sliceIdx, lod).rgb;
+            float2 atlasCoords = GetReflectionAtlasCoordsCube(CUBE_SCALE_OFFSET[index], texCoord, lod);
+
+            color.rgb = SAMPLE_TEXTURE2D_ARRAY_LOD(_ReflectionAtlas, s_trilinear_clamp_sampler, atlasCoords, sliceIdx, lod).rgb;
         }
+
+        // Planar and Reflection Probes aren't pre-expose, so best to clamp to max16 here in case of inf
+        color.rgb = ClampToFloat16Max(color.rgb);
 
         color.rgb *= rangeCompressionFactorCompensation;
     }
     else // SINGLE_PASS_SAMPLE_SKY
     {
         color.rgb = SampleSkyTexture(texCoord, lod, sliceIdx).rgb;
-    }
+        // Sky isn't pre-expose, so best to clamp to max16 here in case of inf
+        color.rgb = ClampToFloat16Max(color.rgb);
 
-    // Planar, Reflection Probes and Sky aren't pre-expose, so best to clamp to max16 here in case of inf
-    color.rgb = ClampToFloat16Max(color.rgb);
+#ifdef APPLY_FOG_ON_SKY_REFLECTIONS
+        if (_FogEnabled)
+        {
+            float4 fogAttenuation = EvaluateFogForSkyReflections(lightLoopContext.positionWS, texCoord);
+            color.rgb = color.rgb * fogAttenuation.a + fogAttenuation.rgb;
+        }
+#endif
+    }
 
     return color;
 }
@@ -188,7 +239,7 @@ void GetCountAndStartTile(PositionInputs posInput, uint lightCategory, out uint 
 #endif
 
     // The first entry inside a tile is the number of light for lightCategory (thus the +0)
-    lightCount = g_vLightListGlobal[DWORD_PER_TILE * tileOffset + 0] & 0xffff;
+    lightCount = g_vLightListTile[LIGHT_DWORD_PER_FPTL_TILE * tileOffset + 0] & 0xffff;
     start = tileOffset;
 }
 
@@ -208,7 +259,7 @@ uint FetchIndex(uint tileOffset, uint lightOffset)
 {
     const uint lightOffsetPlusOne = lightOffset + 1; // Add +1 as first slot is reserved to store number of light
     // Light index are store on 16bit
-    return (g_vLightListGlobal[DWORD_PER_TILE * tileOffset + (lightOffsetPlusOne >> 1)] >> ((lightOffsetPlusOne & 1) * DWORD_PER_TILE)) & 0xffff;
+    return (g_vLightListTile[LIGHT_DWORD_PER_FPTL_TILE * tileOffset + (lightOffsetPlusOne >> 1)] >> ((lightOffsetPlusOne & 1) * 16)) & 0xffff;
 }
 
 #elif defined(USE_CLUSTERED_LIGHTLIST)
@@ -232,6 +283,12 @@ uint GetLightClusterIndex(uint2 tileIndex, float linearDepth)
     return SnapToClusterIdxFlex(linearDepth, logBase, g_isLogBaseBufferEnabled != 0);
 }
 
+void UnpackClusterLayeredOffset(uint packedValue, out uint offset, out uint count)
+{
+    offset = packedValue & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
+    count = packedValue >> LIGHT_CLUSTER_PACKING_OFFSET_BITS;
+}
+
 void GetCountAndStartCluster(uint2 tileIndex, uint clusterIndex, uint lightCategory, out uint start, out uint lightCount)
 {
     int nrClusters = (1 << g_iLog2NumClusters);
@@ -239,8 +296,7 @@ void GetCountAndStartCluster(uint2 tileIndex, uint clusterIndex, uint lightCateg
     const int idx = GenerateLayeredOffsetBufferIndex(lightCategory, tileIndex, clusterIndex, _NumTileClusteredX, _NumTileClusteredY, nrClusters, unity_StereoEyeIndex);
 
     uint dataPair = g_vLayeredOffsetsBuffer[idx];
-    start = dataPair & 0x7ffffff;
-    lightCount = (dataPair >> 27) & 31;
+    UnpackClusterLayeredOffset(dataPair, start, lightCount);
 }
 
 void GetCountAndStartCluster(PositionInputs posInput, uint lightCategory, out uint start, out uint lightCount)
@@ -261,22 +317,49 @@ void GetCountAndStart(PositionInputs posInput, uint lightCategory, out uint star
 
 uint FetchIndex(uint lightStart, uint lightOffset)
 {
-    return g_vLightListGlobal[lightStart + lightOffset];
+    return g_vLightListCluster[lightStart + lightOffset];
 }
 
 #elif defined(USE_BIG_TILE_LIGHTLIST)
 
+// The "big tile" list contains the number of objects contained within the tile followed by the
+// list of object indices. Note that while objects are already sorted by type, we don't know the
+// number of each type of objects (e.g. lights), so we should remember to break out of the loop.
+// Each light indices are encoded into 16 bits.
+void GetBigTileLightCountAndStart(uint tileIndex, out uint lightCount, out uint start)
+{
+    start = tileIndex;
+    lightCount = g_vBigTileLightList[MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * tileIndex / 2] & 0xFFFF;
+    // On Metal for unknow reasons it seems we have bad value sometimes causing freeze / crash. This min here prevent it.
+    lightCount = min(lightCount, MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE);
+}
+
 uint FetchIndex(uint lightStart, uint lightOffset)
 {
-    return g_vBigTileLightList[lightStart + lightOffset];
+    const uint lightOffsetPlusOne = lightOffset + 1; // Add +1 as first slot is reserved to store number of light
+    // Light index are store on 16bit
+    return (g_vBigTileLightList[MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * lightStart / 2 + (lightOffsetPlusOne >> 1)] >> ((lightOffsetPlusOne & 1) * 16)) & 0xffff;
 }
 
 #else
-// Fallback case (mainly for raytracing right now)
+// Fallback case (mainly for raytracing right or for shader stages that don't define the keywords)
 uint FetchIndex(uint lightStart, uint lightOffset)
 {
     return 0;
 }
+
+uint GetTileSize()
+{
+    return 1;
+}
+
+void GetCountAndStart(PositionInputs posInput, uint lightCategory, out uint start, out uint lightCount)
+{
+    start = 0;
+    lightCount = 0;
+    return;
+}
+
 #endif // USE_FPTL_LIGHTLIST
 
 #else
@@ -329,18 +412,48 @@ EnvLightData FetchEnvLight(uint index)
     return _EnvLightDatas[index];
 }
 
-// In the first 8 bits of the target we store the max fade of the contact shadows as a byte
+// In the first bits of the target we store the max fade of the contact shadows as a byte.
+//By default its 8 bits for the fade and 24 for the mask, please check the LightLoop.cs definitions.
 void UnpackContactShadowData(uint contactShadowData, out float fade, out uint mask)
 {
-    fade = float(contactShadowData >> 24) / 255.0;
-    mask = contactShadowData & 0xFFFFFF; // store only the first 24 bits which represent
+    if (_ContactShadowDirectionalOnly == 1)
+    {
+        fade = contactShadowData / ((float)CONTACT_SHADOW_FADE_MASK);
+        mask = 0x1u;
+    }
+    else
+    {
+        fade = float(contactShadowData >> CONTACT_SHADOW_MASK_BITS) / ((float)CONTACT_SHADOW_FADE_MASK);
+        mask = contactShadowData & CONTACT_SHADOW_MASK_MASK; // store only the first 24 bits which represent
+    }
+}
+
+void UnpackContactShadowData(uint4 contactShadowData, out float4 fade, out uint4 mask)
+{
+    if (_ContactShadowDirectionalOnly == 1)
+    {
+        fade = contactShadowData / ((float4)CONTACT_SHADOW_FADE_MASK);
+        mask = (uint4)0x1u;
+    }
+    else
+    {
+        fade = float4(contactShadowData >> (uint4)CONTACT_SHADOW_MASK_BITS) / ((float4)CONTACT_SHADOW_FADE_MASK);
+        mask = contactShadowData & (uint4)CONTACT_SHADOW_MASK_MASK; // store only the first 24 bits which represent
+    }
 }
 
 uint PackContactShadowData(float fade, uint mask)
 {
-    uint fadeAsByte = (uint(saturate(fade) * 255) << 24);
+    if (_ContactShadowDirectionalOnly == 1)
+    {
+        return uint(saturate(fade) * CONTACT_SHADOW_FADE_MASK);
+    }
+    else
+    {
+        uint fadeAsByte = (uint(saturate(fade) * CONTACT_SHADOW_FADE_MASK) << CONTACT_SHADOW_MASK_BITS);
 
-    return fadeAsByte | mask;
+        return fadeAsByte | mask;
+    }
 }
 
 // We always fetch the screen space shadow texture to reduce the number of shader variant, overhead is negligible,
@@ -348,11 +461,42 @@ uint PackContactShadowData(float fade, uint mask)
 // We perform a single featch a the beginning of the lightloop
 void InitContactShadow(PositionInputs posInput, inout LightLoopContext context)
 {
+#ifdef LIGHTLOOP_DISABLE_CONTACT_SHADOWS
+    context.contactShadowFade = 0.0;
+    context.contactShadow = 0;
+#else
     // Note: When we ImageLoad outside of texture size, the value returned by Load is 0 (Note: On Metal maybe it clamp to value of texture which is also fine)
     // We use this property to have a neutral value for contact shadows that doesn't consume a sampler and work also with compute shader (i.e use ImageLoad)
     // We store inverse contact shadow so neutral is white. So either we sample inside or outside the texture it return 1 in case of neutral
-    uint packedContactShadow = LOAD_TEXTURE2D_X(_ContactShadowTexture, posInput.positionSS).x;
-    UnpackContactShadowData(packedContactShadow, context.contactShadowFade, context.contactShadow);
+
+    // If the contact shadow directional flag is on, then we can interpolate safely the data.
+    // We interpolate only for upsampling the contact shadow data for the lighting.
+    if (_ContactShadowHalfResolution == 1)
+    {
+        uint2 p = posInput.positionSS / 2u;
+
+        // TODO: replace that with a bilinear sample, but it require a float texture instead of uint which is a different resource type
+        // we're limited by the number of resources to bind, so maybe we could switch to an 8888 UNorm target instead?
+        uint4 contactShadowData;
+        contactShadowData.x = LOAD_TEXTURE2D_X(_ContactShadowTexture, p + uint2(0, 0)).x;
+        contactShadowData.y = LOAD_TEXTURE2D_X(_ContactShadowTexture, p + uint2(1, 0)).x;
+        contactShadowData.z = LOAD_TEXTURE2D_X(_ContactShadowTexture, p + uint2(0, 1)).x;
+        contactShadowData.w = LOAD_TEXTURE2D_X(_ContactShadowTexture, p + uint2(1, 1)).x;
+
+        float4 fade;
+        uint4 mask;
+
+        UnpackContactShadowData(contactShadowData, fade, mask);
+
+        context.contactShadowFade = dot(fade, (float4)0.25);
+        context.contactShadow = mask.x | mask.y | mask.z | mask.w; 
+    }
+    else
+    {
+        uint contactShadowData = LOAD_TEXTURE2D_X(_ContactShadowTexture, posInput.positionSS).x;
+        UnpackContactShadowData(contactShadowData, context.contactShadowFade, context.contactShadow);
+    }
+#endif // LIGHTLOOP_DISABLE_CONTACT_SHADOWS
 }
 
 void InvalidateConctactShadow(PositionInputs posInput, inout LightLoopContext context)
@@ -363,8 +507,23 @@ void InvalidateConctactShadow(PositionInputs posInput, inout LightLoopContext co
 
 float GetContactShadow(LightLoopContext lightLoopContext, int contactShadowMask, float rayTracedShadow)
 {
-    bool occluded = (lightLoopContext.contactShadow & contactShadowMask) != 0;
+#ifdef LIGHTLOOP_DISABLE_CONTACT_SHADOWS
+    return 1.0;
+#else
+    bool occluded;
+
+    // Low mode, directional contact shadow only
+    if (_ContactShadowDirectionalOnly == 1)
+    {
+        occluded = contactShadowMask & 1; // In low mode, only directional lights have a mask, we can use the first bit set as the sun light.
+    }
+    else
+    {
+        occluded = (lightLoopContext.contactShadow & contactShadowMask) != 0;
+    }
+
     return 1.0 - occluded * lerp(lightLoopContext.contactShadowFade, 1.0, rayTracedShadow) * _ContactShadowOpacity;
+#endif // LIGHTLOOP_DISABLE_CONTACT_SHADOWS
 }
 
 float GetScreenSpaceShadow(PositionInputs posInput, uint shadowIndex)

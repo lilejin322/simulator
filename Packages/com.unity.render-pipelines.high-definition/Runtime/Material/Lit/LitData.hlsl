@@ -3,6 +3,7 @@
 //-------------------------------------------------------------------------------------
 
 // Use surface gradient normal mapping as it handle correctly triplanar normal mapping and multiple UVSet
+// Not used in rtx as it requires derivatives
 #ifndef SHADER_STAGE_RAY_TRACING
 #define SURFACE_GRADIENT
 #endif
@@ -12,13 +13,15 @@
 //-------------------------------------------------------------------------------------
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/SampleUVMapping.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/MaterialUtilities.hlsl"
-#ifndef SHADER_STAGE_RAY_TRACING
+#if !defined(SHADER_STAGE_RAY_TRACING) || defined (PATH_TRACING_CLUSTERED_DECALS)
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Decal/DecalUtilities.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitDecalData.hlsl"
 #endif
+#ifndef SURFACE_GRADIENT
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/NormalSurfaceGradient.hlsl"
+#endif
 
-//#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/SphericalCapPivot/SPTDistribution.hlsl"
-//#define SPECULAR_OCCLUSION_USE_SPTD
+//#define PROJECTED_SPACE_NDF_FILTERING
 
 // Struct that gather UVMapping info of all layers + common calculation
 // This is use to abstract the mapping that can differ on layers
@@ -106,6 +109,7 @@ void GenerateLayerTexCoordBasisTB(FragInputs input, inout LayerTexCoord layerTex
 #define SAMPLER_HEIGHTMAP_IDX sampler_HeightMap
 
 #define SAMPLER_SUBSURFACE_MASK_MAP_IDX sampler_SubsurfaceMaskMap
+#define SAMPLER_TRANSMISSION_MASK_MAP_IDX sampler_TransmissionMaskMap
 #define SAMPLER_THICKNESSMAP_IDX sampler_ThicknessMap
 
 // include LitDataIndividualLayer to define GetSurfaceData
@@ -123,6 +127,9 @@ void GenerateLayerTexCoordBasisTB(FragInputs input, inout LayerTexCoord layerTex
 #endif
 #ifdef _SUBSURFACE_MASK_MAP
 #define _SUBSURFACE_MASK_MAP_IDX
+#endif
+#ifdef _TRANSMISSION_MASK_MAP
+#define _TRANSMISSION_MASK_MAP_IDX
 #endif
 #ifdef _THICKNESSMAP
 #define _THICKNESSMAP_IDX
@@ -142,7 +149,17 @@ void GetLayerTexCoord(float2 texCoord0, float2 texCoord1, float2 texCoord2, floa
                       float3 positionRWS, float3 vertexNormalWS, inout LayerTexCoord layerTexCoord)
 {
     layerTexCoord.vertexNormalWS = vertexNormalWS;
-    layerTexCoord.triplanarWeights = ComputeTriplanarWeights(vertexNormalWS);
+    float objectSpaceMapping = false;
+    float3 normalToComputeWeights = layerTexCoord.vertexNormalWS;
+#ifndef LAYERED_LIT_SHADER
+    objectSpaceMapping = _ObjectSpaceUVMapping;
+    if (objectSpaceMapping)
+    {
+        normalToComputeWeights = TransformWorldToObjectNormal(normalToComputeWeights);
+    }
+#endif
+
+    layerTexCoord.triplanarWeights = ComputeTriplanarWeights(normalToComputeWeights);
 
     int mappingType = UV_MAPPING_UVSET;
 #if defined(_MAPPING_PLANAR)
@@ -151,11 +168,12 @@ void GetLayerTexCoord(float2 texCoord0, float2 texCoord1, float2 texCoord2, floa
     mappingType = UV_MAPPING_TRIPLANAR;
 #endif
 
+
     // Be sure that the compiler is aware that we don't use UV1 to UV3 for main layer so it can optimize code
     ComputeLayerTexCoord(   texCoord0, texCoord1, texCoord2, texCoord3, _UVMappingMask, _UVDetailsMappingMask,
                             _BaseColorMap_ST.xy, _BaseColorMap_ST.zw, _DetailMap_ST.xy, _DetailMap_ST.zw, 1.0, _LinkDetailsWithBase,
                             positionRWS, _TexWorldScale,
-                            mappingType, layerTexCoord);
+                            mappingType, objectSpaceMapping, layerTexCoord);
 }
 
 // This is call only in this file
@@ -193,11 +211,7 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
 #endif
 #endif
 
-#ifdef _DOUBLESIDED_ON
-    float3 doubleSidedConstants = _DoubleSidedConstants.xyz;
-#else
-    float3 doubleSidedConstants = float3(1.0, 1.0, 1.0);
-#endif
+    float3 doubleSidedConstants = GetDoubleSidedConstants();
 
     ApplyDoubleSidedFlipOrMirror(input, doubleSidedConstants); // Apply double sided flip on the vertex normal
 
@@ -215,7 +229,9 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
 #endif
 
 #if defined(_ALPHATEST_ON)
-    float alphaValue = SAMPLE_UVMAPPING_TEXTURE2D(_BaseColorMap, sampler_BaseColorMap, layerTexCoord.base).a * _BaseColor.a;
+    float alphaTex = SAMPLE_UVMAPPING_TEXTURE2D(_BaseColorMap, sampler_BaseColorMap, layerTexCoord.base).a;
+    alphaTex = lerp(_AlphaRemapMin, _AlphaRemapMax, alphaTex);
+    float alphaValue = alphaTex * _BaseColor.a;
 
     // Perform alha test very early to save performance (a killed pixel will not sample textures)
     #if SHADERPASS == SHADERPASS_TRANSPARENT_DEPTH_PREPASS
@@ -237,19 +253,35 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     float3 bentNormalTS;
     float3 bentNormalWS;
     float alpha = GetSurfaceData(input, layerTexCoord, surfaceData, normalTS, bentNormalTS);
+
+    // This need to be init here to quiet the compiler in case of decal, but can be override later.
+    surfaceData.geomNormalWS = input.tangentToWorld[2];
+    surfaceData.specularOcclusion = 1.0;
+
+#ifdef DECAL_NORMAL_BLENDING
+    if (_EnableDecals)
+    {
+        #ifndef SURFACE_GRADIENT
+        normalTS = SurfaceGradientFromTangentSpaceNormalAndFromTBN(normalTS,
+                input.tangentToWorld[0], input.tangentToWorld[1]);
+        #endif
+
+        DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
+        ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData, normalTS);
+    }
+
+    GetNormalWS_SG(input, normalTS, surfaceData.normalWS, doubleSidedConstants);
+#else
     GetNormalWS(input, normalTS, surfaceData.normalWS, doubleSidedConstants);
 
-    surfaceData.geomNormalWS = input.tangentToWorld[2];
-
-    surfaceData.specularOcclusion = 1.0; // This need to be init here to quiet the compiler in case of decal, but can be override later.
-
-#if HAVE_DECALS
+    #if HAVE_DECALS
     if (_EnableDecals)
     {
         // Both uses and modifies 'surfaceData.normalWS'.
         DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
         ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData);
     }
+    #endif
 #endif
 
     // Use bent normal to sample GI if available
@@ -259,27 +291,26 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     bentNormalWS = surfaceData.normalWS;
 #endif
 
-#if defined(DEBUG_DISPLAY)  && !defined(SHADER_STAGE_RAY_TRACING)
+#if defined(DEBUG_DISPLAY)
+#if !defined(SHADER_STAGE_RAY_TRACING)
+    // Mipmap mode debugging isn't supported with ray tracing as it relies on derivatives
     if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
     {
-        surfaceData.baseColor = GetTextureDataDebug(_DebugMipMapMode, layerTexCoord.base.uv, _BaseColorMap, _BaseColorMap_TexelSize, _BaseColorMap_MipInfo, surfaceData.baseColor);
+        surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG(posInput.positionSS, input.texCoord0);
         surfaceData.metallic = 0;
     }
+#endif
 
-    // We need to call ApplyDebugToSurfaceData after filling the surfarcedata and before filling builtinData
+    // We need to call ApplyDebugToSurfaceData after filling the surfaceData and before filling builtinData
     // as it can modify attribute use for static lighting
     ApplyDebugToSurfaceData(input.tangentToWorld, surfaceData);
 #endif
 
     // By default we use the ambient occlusion with Tri-ace trick (apply outside) for specular occlusion.
     // If user provide bent normal then we process a better term
-#if defined(_BENTNORMALMAP) && defined(_SPECULAR_OCCLUSION_FROM_BENT_NORMAL_MAP)
+#if defined(_SPECULAR_OCCLUSION_FROM_BENT_NORMAL_MAP)
     // If we have bent normal and ambient occlusion, process a specular occlusion
-    #ifdef SPECULAR_OCCLUSION_USE_SPTD
-    surfaceData.specularOcclusion = GetSpecularOcclusionFromBentAOPivot(V, bentNormalWS, surfaceData.normalWS, surfaceData.ambientOcclusion, PerceptualSmoothnessToPerceptualRoughness(surfaceData.perceptualSmoothness));
-    #else
     surfaceData.specularOcclusion = GetSpecularOcclusionFromBentAO(V, bentNormalWS, surfaceData.normalWS, surfaceData.ambientOcclusion, PerceptualSmoothnessToRoughness(surfaceData.perceptualSmoothness));
-#endif
     // Don't do spec occ from Ambient if there is no mask mask
 #elif defined(_MASKMAP) && !defined(_SPECULAR_OCCLUSION_NONE)
     surfaceData.specularOcclusion = GetSpecularOcclusionFromAmbientOcclusion(ClampNdotV(dot(surfaceData.normalWS, V)), surfaceData.ambientOcclusion, PerceptualSmoothnessToRoughness(surfaceData.perceptualSmoothness));
@@ -290,7 +321,11 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
 
 #if defined(_ENABLE_GEOMETRIC_SPECULAR_AA) && !defined(SHADER_STAGE_RAY_TRACING)
     // Specular AA
+    #ifdef PROJECTED_SPACE_NDF_FILTERING
+    surfaceData.perceptualSmoothness = ProjectedSpaceGeometricNormalFiltering(surfaceData.perceptualSmoothness, input.tangentToWorld[2], _SpecularAAScreenSpaceVariance, _SpecularAAThreshold);
+    #else
     surfaceData.perceptualSmoothness = GeometricNormalFiltering(surfaceData.perceptualSmoothness, input.tangentToWorld[2], _SpecularAAScreenSpaceVariance, _SpecularAAThreshold);
+    #endif
 #endif
 
     // Caution: surfaceData must be fully initialize before calling GetBuiltinData

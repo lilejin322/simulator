@@ -8,7 +8,8 @@ namespace UnityEngine.Rendering.HighDefinition
         enum Version
         {
             Initial,
-            InfiniteProjectionInShape
+            InfiniteProjectionInShape,
+            ForcePositiveSize,
         }
 
         static readonly MigrationDescription<Version, ProxyVolume> k_Migration = MigrationDescription.New(
@@ -21,6 +22,11 @@ namespace UnityEngine.Rendering.HighDefinition
                 {
                     p.shape = ProxyShape.Infinite;
                 }
+            }),
+            MigrationStep.New(Version.ForcePositiveSize, (ProxyVolume p) =>
+            {
+                p.sphereRadius = Mathf.Abs(p.sphereRadius);
+                p.boxSize = new Vector3(Mathf.Abs(p.boxSize.x), Mathf.Abs(p.boxSize.y), Mathf.Abs(p.boxSize.z));
             })
         );
 
@@ -29,9 +35,9 @@ namespace UnityEngine.Rendering.HighDefinition
         Version IVersionable<Version>.version { get => m_CSVersion; set => m_CSVersion = value; }
 
         // Obsolete fields
-        [SerializeField, FormerlySerializedAs("m_SphereInfiniteProjection"), Obsolete("For data migration")]
+        [SerializeField, FormerlySerializedAs("m_SphereInfiniteProjection"), Obsolete("For data migration. #from(2021.1)")]
         bool m_ObsoleteSphereInfiniteProjection = false;
-        [SerializeField, FormerlySerializedAs("m_BoxInfiniteProjection"), Obsolete("Kept only for compatibility. Use m_Shape instead")]
+        [SerializeField, FormerlySerializedAs("m_BoxInfiniteProjection"), Obsolete("Kept only for compatibility. Use m_Shape instead. #from(2021.1)")]
         bool m_ObsoleteBoxInfiniteProjection = false;
 
         /// <summary>Serialization callback</summary>

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Copyright (c) 2019 LG Electronics, Inc.
  *
  * This software contains code licensed as described in LICENSE.
@@ -17,7 +17,7 @@ Shader "Simulator/WireframeBox"
 
             CGPROGRAM
             #pragma vertex Vert
-            #pragma geometry Geom
+            #pragma target 4.5
             #pragma fragment Frag
 
             #include "UnityCG.cginc"
@@ -34,99 +34,35 @@ Shader "Simulator/WireframeBox"
 
             float _LineWidth;
 
-            struct v2g
-            {
-                float4x4 transform : TRANSFORM;
-                float4 position : SV_POSITION;
-                float3 size : SIZE;
-                float3 color : COLOR;
-            };
-
             struct g2f
             {
                 float4 position : SV_POSITION;
                 float3 color : COLOR;
             };
 
-            v2g Vert(uint id : SV_VertexID)
-            {
-                Box box = _Boxes[id];
+            #include "ProceduralLine.hlsl"
 
-                v2g output;
-                output.transform = box.transform;
-                output.position = float4(box.position, 1.0f);
-                output.size = box.size * 0.5f;
+            g2f Vert(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
+            {
+                Box box = _Boxes[instanceID];
+                const float3 corners[8] = {
+                    float3(-1, 1, 1), float3(1, 1, 1), float3(1, -1, 1), float3(-1, -1, 1),
+                    float3(-1, 1, -1), float3(1, 1, -1), float3(1, -1, -1), float3(-1, -1, -1)
+                };
+                const uint2 edges[12] = {
+                    uint2(0,1), uint2(1,2), uint2(2,3), uint2(3,0),
+                    uint2(4,5), uint2(5,6), uint2(6,7), uint2(7,4),
+                    uint2(4,0), uint2(5,1), uint2(6,2), uint2(7,3)
+                };
+                uint2 edge = edges[vertexID / 6];
+                float3 start = box.position + box.size * 0.5 * corners[edge.x];
+                float3 end = box.position + box.size * 0.5 * corners[edge.y];
+                float4 v0 = UnityWorldToClipPos(mul(box.transform, float4(start, 1)));
+                float4 v1 = UnityWorldToClipPos(mul(box.transform, float4(end, 1)));
+                g2f output;
+                output.position = LineVertex(v0, v1, vertexID % 6, _LineWidth);
                 output.color = box.color;
                 return output;
-            }
-
-            void Vertex(float4 vertex, float2 normal, float3 color, inout TriangleStream<g2f> output)
-            {
-                g2f o;
-
-                o.position = vertex + float4(normal, 0, 0);
-                o.color = color;
-                output.Append(o);
-
-                o.position = vertex - float4(normal, 0, 0);
-                o.color = color;
-                output.Append(o);
-            }
-
-            void Line(float4x4 transform, float3 p0, float3 p1, float3 color, inout TriangleStream<g2f> output)
-            {
-                float4 v0 = UnityWorldToClipPos(mul(transform, float4(p0, 1)));
-                float4 v1 = UnityWorldToClipPos(mul(transform, float4(p1, 1)));
-
-                float2 dir = normalize((v1.xy / v1.w - v0.xy / v0.w).xy);
-                float2 normal = float2(-dir.y, dir.x);
-
-                float2 size = _LineWidth / _ScreenParams.xy;
-
-                dir *= size * 0.5f;
-                normal *= size;
-
-                Vertex(v0 - float4(dir * v0.w, 0, 0), normal * v0.w, color, output);
-                Vertex(v1 + float4(dir * v1.w, 0, 0), normal * v1.w, color, output);
-
-                output.RestartStrip();
-            }
-
-            [maxvertexcount(48)]
-            void Geom(point v2g input[1], inout TriangleStream<g2f> output)
-            {
-                g2f o;
-
-                float4x4 transform = input[0].transform;
-                float3 center = input[0].position.xyz;
-                float3 size = input[0].size;
-                float3 color = input[0].color;
-
-                float3 edges[12][2] =
-                {
-                    { float3(-1, +1, +1), float3(+1, +1, +1) },
-                    { float3(+1, +1, +1), float3(+1, -1, +1) },
-                    { float3(+1, -1, +1), float3(-1, -1, +1) },
-                    { float3(-1, -1, +1), float3(-1, +1, +1) },
-
-                    { float3(-1, +1, -1), float3(+1, +1, -1) },
-                    { float3(+1, +1, -1), float3(+1, -1, -1) },
-                    { float3(+1, -1, -1), float3(-1, -1, -1) },
-                    { float3(-1, -1, -1), float3(-1, +1, -1) },
-
-                    { float3(-1, +1, -1), float3(-1, +1, +1) },
-                    { float3(+1, +1, -1), float3(+1, +1, +1) },
-                    { float3(+1, -1, -1), float3(+1, -1, +1) },
-                    { float3(-1, -1, -1), float3(-1, -1, +1) },
-                };
-
-                UNITY_UNROLL
-                for (int i = 0; i < 12; i++)
-                {
-                    float3 p0 = center + size * edges[i][0];
-                    float3 p1 = center + size * edges[i][1];
-                    Line(transform, p0, p1, color, output);
-                }
             }
 
             float4 Frag(g2f input) : SV_Target

@@ -2,19 +2,15 @@ using System.IO;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
-#if UNITY_2020_2_OR_NEWER
 using UnityEditor.AssetImporters;
-#else
-using UnityEditor.Experimental.AssetImporters;
-#endif
 
 
 namespace UnityEditor.Rendering.HighDefinition
 {
     class FBXMaterialDescriptionPreprocessor : AssetPostprocessor
     {
-        static readonly uint k_Version = 1;
-        static readonly int k_Order = 2;
+        static readonly uint k_Version = 3;
+        static readonly int k_Order = -980;
         static readonly string k_ShaderPath = "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.shader";
         public override uint GetVersion()
         {
@@ -28,8 +24,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public void OnPreprocessMaterialDescription(MaterialDescription description, Material material, AnimationClip[] clips)
         {
-            var pipelineAsset = GraphicsSettings.currentRenderPipeline;
-            if (!pipelineAsset || pipelineAsset.GetType() != typeof(HDRenderPipelineAsset))
+            if (HDRenderPipeline.currentAsset == null)
                 return;
 
             var lowerCaseExtension = Path.GetExtension(assetPath).ToLower();
@@ -72,7 +67,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
             if (isTransparent)
             {
-                material.SetFloat("_BlendMode", (float)BlendMode.Alpha);
+                material.SetFloat("_BlendMode", (float)BlendingMode.Alpha);
                 material.SetFloat("_EnableBlendModePreserveSpecularLighting", 1.0f);
                 material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
                 material.SetFloat("_SurfaceType", (float)SurfaceType.Transparent);
@@ -86,9 +81,6 @@ namespace UnityEditor.Rendering.HighDefinition
             {
                 material.renderQueue = -1;
             }
-
-            if (description.TryGetProperty("ReflectionFactor", out floatProperty))
-                material.SetFloat("_Metallic", floatProperty);
 
             if (description.TryGetProperty("DiffuseColor", out textureProperty) && textureProperty.texture != null)
             {
@@ -111,17 +103,17 @@ namespace UnityEditor.Rendering.HighDefinition
 
             if (description.TryGetProperty("Bump", out textureProperty) && textureProperty.texture != null)
             {
-                SetMaterialTextureProperty("_BumpMap", material, textureProperty);
+                SetMaterialTextureProperty("_NormalMap", material, textureProperty);
 
                 if (description.TryGetProperty("BumpFactor", out floatProperty))
-                    material.SetFloat("_BumpScale", floatProperty);
+                    material.SetFloat("_NormalScale", floatProperty);
             }
             else if (description.TryGetProperty("NormalMap", out textureProperty) && textureProperty.texture != null)
             {
-                SetMaterialTextureProperty("_BumpMap", material, textureProperty);
+                SetMaterialTextureProperty("_NormalMap", material, textureProperty);
 
                 if (description.TryGetProperty("BumpFactor", out floatProperty))
-                    material.SetFloat("_BumpScale", floatProperty);
+                    material.SetFloat("_NormalScale", floatProperty);
             }
 
             if (description.TryGetProperty("EmissiveColor", out textureProperty))
@@ -138,8 +130,8 @@ namespace UnityEditor.Rendering.HighDefinition
                     material.globalIlluminationFlags |= MaterialGlobalIlluminationFlags.RealtimeEmissive;
                 }
             }
-            else if ( description.TryGetProperty("EmissiveColor", out vectorProperty) && vectorProperty.magnitude > vectorProperty.w
-                || description.HasAnimationCurve("EmissiveColor.x"))
+            else if (description.TryGetProperty("EmissiveColor", out vectorProperty) && vectorProperty.magnitude > vectorProperty.w
+                     || description.HasAnimationCurve("EmissiveColor.x"))
             {
                 if (description.TryGetProperty("EmissiveFactor", out floatProperty))
                     vectorProperty *= floatProperty;
@@ -153,7 +145,13 @@ namespace UnityEditor.Rendering.HighDefinition
                 }
             }
 
-            material.SetFloat("_Glossiness", 0.0f);
+            if (description.TryGetProperty("Shininess", out float shininess))
+            {
+                var glossiness = Mathf.Sqrt(shininess * 0.01f);
+                material.SetFloat("_Smoothness", glossiness);
+            }
+            else
+                material.SetFloat("_Smoothness", 0.0f);
 
             if (PlayerSettings.colorSpace == ColorSpace.Linear)
                 RemapAndTransformColorCurves(description, clips, "DiffuseColor", "_BaseColor", ConvertFloatLinearToGamma);

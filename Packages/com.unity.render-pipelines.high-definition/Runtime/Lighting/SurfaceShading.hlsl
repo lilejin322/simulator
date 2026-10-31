@@ -20,7 +20,7 @@ bool ShouldEvaluateThickObjectTransmission(float3 V, float3 L, PreLightData preL
     // However, this will take a lot more CPU time than doing the same thing using
     // the preprocessor.
     return HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_TRANSMISSION_MODE_THICK_OBJECT) &&
-           (shadowIndex >= 0.0) && (NdotL < 0.0);
+           (shadowIndex >= 0) && (NdotL < 0.0);
 #else
     return false;
 #endif
@@ -82,20 +82,45 @@ DirectLighting ShadeSurface_Directional(LightLoopContext lightLoopContext,
         float4 lightColor = EvaluateLight_Directional(lightLoopContext, posInput, light);
         lightColor.rgb *= lightColor.a; // Composite
 
+        float cloudShadow = 1.0f;
+#ifndef LIGHT_EVALUATION_NO_CLOUDS_SHADOWS
+        // Apply the volumetric cloud shadow if relevant
+        // We evaluate them here instead of inside EvaluateLight_Directional to be able to apply it on objects
+        // with transmission and still benefit from shadow dimmer and colored shadows
+        if (_VolumetricCloudsShadowOriginToggle.w == 1.0)
+        {
+            cloudShadow = EvaluateVolumetricCloudsShadows(light, posInput.positionWS);
+        }
+#endif
+
 #ifdef MATERIAL_INCLUDE_TRANSMISSION
-        if (ShouldEvaluateThickObjectTransmission(V, L, preLightData, bsdfData, light.shadowIndex))
+        if (ShouldEvaluateThickObjectTransmission(V, L, preLightData, bsdfData, 0))
         {
             // Transmission through thick objects does not support shadowing
             // from directional lights. It will use the 'baked' transmittance value.
-            lightColor *= _DirectionalTransmissionMultiplier;
+            lightColor *= _DirectionalTransmissionMultiplier * cloudShadow;
         }
         else
 #endif
         {
             SHADOW_TYPE shadow = EvaluateShadow_Directional(lightLoopContext, posInput, light, builtinData, GetNormalForShadowBias(bsdfData));
+            shadow *= cloudShadow;
             float NdotL  = dot(bsdfData.normalWS, L); // No microshadowing when facing away from light (use for thin transmission as well)
             shadow *= NdotL >= 0.0 ? ComputeMicroShadowing(GetAmbientOcclusionForMicroShadowing(bsdfData), NdotL, _MicroShadowOpacity) : 1.0;
-            lightColor.rgb *= ComputeShadowColor(shadow, light.shadowTint, light.penumbraTint);
+
+#ifdef LIGHT_EVALUATION_BSDF_HANDLES_VISIBILITY
+            if (DirectionalOccluderInRendererBounds(lightLoopContext, light, posInput))
+            {
+            #if _USE_SPLINE_VISIBILITY_FOR_MULTIPLE_SCATTERING
+                // Use the shadow sample as a visibility term. Otherwise the volumetric data will be used to compute the self-shadow.
+                bsdfData.visibility = shadow;
+            #endif
+            }
+            else
+#endif
+            {
+                lightColor.rgb *= ComputeShadowColor(shadow, light.shadowTint, light.penumbraTint);
+            }
         }
 
         // Simulate a sphere/disk light with this hack.
@@ -125,7 +150,7 @@ float3 EvaluateTransmittance_Punctual(LightLoopContext lightLoopContext,
     // TODO: SHADOW BIAS.
     float distBackFaceToLight = GetPunctualShadowClosestDistance(lightLoopContext.shadowContext, s_linear_clamp_sampler,
                                                                  posInput.positionWS, light.shadowIndex, L, light.positionRWS,
-                                                                 light.lightType == GPULIGHTTYPE_POINT);
+                                                                 light.lightType == GPULIGHTTYPE_POINT, light.lightType != GPULIGHTTYPE_PROJECTOR_BOX);
 
     // Our subsurface scattering models use the semi-infinite planar slab assumption.
     // Therefore, we need to find the thickness along the normal.
@@ -175,9 +200,24 @@ DirectLighting ShadeSurface_Punctual(LightLoopContext lightLoopContext,
         else
 #endif
         {
+            PositionInputs shadowPositionInputs = posInput;
+
             // This code works for both surface reflection and thin object transmission.
-            SHADOW_TYPE shadow = EvaluateShadow_Punctual(lightLoopContext, posInput, light, builtinData, GetNormalForShadowBias(bsdfData), L, distances);
-            lightColor.rgb *= ComputeShadowColor(shadow, light.shadowTint, light.penumbraTint);
+            SHADOW_TYPE shadow = EvaluateShadow_Punctual(lightLoopContext, shadowPositionInputs, light, builtinData, GetNormalForShadowBias(bsdfData), L, distances);
+
+#ifdef LIGHT_EVALUATION_BSDF_HANDLES_VISIBILITY
+            if (PunctualOccluderInRendererBounds(lightLoopContext, light, posInput, L))
+            {
+            #if _USE_SPLINE_VISIBILITY_FOR_MULTIPLE_SCATTERING
+                // Use the shadow sample as a visibility term. Otherwise the volumetric data will be used to compute the self-shadow.
+                bsdfData.visibility = shadow;
+            #endif
+            }
+            else
+#endif
+            {
+                lightColor.rgb *= ComputeShadowColor(shadow, light.shadowTint, light.penumbraTint);
+            }
 
 #ifdef DEBUG_DISPLAY
             // The step with the attenuation is required to avoid seeing the screen tiles at the end of lights because the attenuation always falls to 0 before the tile ends.
@@ -199,5 +239,3 @@ DirectLighting ShadeSurface_Punctual(LightLoopContext lightLoopContext,
 
     return lighting;
 }
-
-

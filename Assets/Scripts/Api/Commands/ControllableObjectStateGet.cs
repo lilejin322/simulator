@@ -30,7 +30,7 @@ namespace Simulator.Api.Commands
                 result.Add("transform", transform);
 
                 var rb = controllable.gameObject.GetComponent<Rigidbody>();
-                result.Add("velocity", rb != null ? rb.velocity : Vector3.zero);
+                result.Add("velocity", rb != null ? rb.linearVelocity : Vector3.zero);
                 result.Add("angular_velocity", rb != null ? rb.angularVelocity : Vector3.zero);
 
                 api.SendResult(this, result);

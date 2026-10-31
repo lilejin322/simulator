@@ -3,14 +3,14 @@ using UnityEngine.Serialization;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
-    [Obsolete("For data migration")]
+    [Obsolete("For data migration. #from(2021.1)")]
     enum ObsoleteLitShaderMode
     {
         Forward,
         Deferred
     }
 
-    [Flags, Obsolete("For data migration")]
+    [Flags, Obsolete("For data migration. #from(2021.1)")]
     enum ObsoleteLightLoopSettingsOverrides
     {
         FptlForForwardOpaque = 1 << 0,
@@ -22,7 +22,7 @@ namespace UnityEngine.Rendering.HighDefinition
         //Fptl = 1 << 6, //isFptlEnabled set up by system
     }
 
-    [Flags, Obsolete("For data migration")]
+    [Flags, Obsolete("For data migration. #from(2021.1)")]
     enum ObsoleteFrameSettingsOverrides
     {
         //lighting settings
@@ -65,7 +65,7 @@ namespace UnityEngine.Rendering.HighDefinition
         VolumeVoxelizationsAsync = 1 << 31,
     }
 
-    [Serializable, Obsolete("For data migration")]
+    [Serializable, Obsolete("For data migration. #from(2021.1)")]
     class ObsoleteLightLoopSettings
     {
         public ObsoleteLightLoopSettingsOverrides overrides;
@@ -83,7 +83,7 @@ namespace UnityEngine.Rendering.HighDefinition
     // Each camera must have its own per frame settings
     [Serializable]
     [System.Diagnostics.DebuggerDisplay("FrameSettings overriding {overrides.ToString(\"X\")}")]
-    [Obsolete("For data migration")]
+    [Obsolete("For data migration. #from(2021.1)")]
     class ObsoleteFrameSettings
     {
         public ObsoleteFrameSettingsOverrides overrides;
@@ -136,6 +136,7 @@ namespace UnityEngine.Rendering.HighDefinition
     public partial struct FrameSettings
     {
 #pragma warning disable 618 // Type or member is obsolete
+#pragma warning disable 612
         internal static void MigrateFromClassVersion(ref ObsoleteFrameSettings oldFrameSettingsFormat, ref FrameSettings newFrameSettingsFormat, ref FrameSettingsOverrideMask newFrameSettingsOverrideMask)
         {
             if (oldFrameSettingsFormat == null)
@@ -191,8 +192,6 @@ namespace UnityEngine.Rendering.HighDefinition
 
             if (oldFrameSettingsFormat.lightLoopSettings != null)
             {
-                newFrameSettingsFormat.SetEnabled(FrameSettingsField.DeferredTile, oldFrameSettingsFormat.lightLoopSettings.enableDeferredTileAndCluster);
-                newFrameSettingsFormat.SetEnabled(FrameSettingsField.ComputeLightEvaluation, oldFrameSettingsFormat.lightLoopSettings.enableComputeLightEvaluation);
                 newFrameSettingsFormat.SetEnabled(FrameSettingsField.ComputeLightVariants, oldFrameSettingsFormat.lightLoopSettings.enableComputeLightVariants);
                 newFrameSettingsFormat.SetEnabled(FrameSettingsField.ComputeMaterialVariants, oldFrameSettingsFormat.lightLoopSettings.enableComputeMaterialVariants);
                 newFrameSettingsFormat.SetEnabled(FrameSettingsField.FPTLForForwardOpaque, oldFrameSettingsFormat.lightLoopSettings.enableFptlForForwardOpaque);
@@ -206,7 +205,7 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 if ((val & oldFrameSettingsFormat.overrides) > 0)
                 {
-                    switch(val)
+                    switch (val)
                     {
                         case ObsoleteFrameSettingsOverrides.Shadow:
                             newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.ShadowMaps] = true;
@@ -316,14 +315,8 @@ namespace UnityEngine.Rendering.HighDefinition
                     {
                         switch (val)
                         {
-                            case ObsoleteLightLoopSettingsOverrides.TileAndCluster:
-                                newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.DeferredTile] = true;
-                                break;
                             case ObsoleteLightLoopSettingsOverrides.BigTilePrepass:
                                 newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.BigTilePrepass] = true;
-                                break;
-                            case ObsoleteLightLoopSettingsOverrides.ComputeLightEvaluation:
-                                newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.ComputeLightEvaluation] = true;
                                 break;
                             case ObsoleteLightLoopSettingsOverrides.ComputeLightVariants:
                                 newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.ComputeLightVariants] = true;
@@ -334,6 +327,9 @@ namespace UnityEngine.Rendering.HighDefinition
                             case ObsoleteLightLoopSettingsOverrides.FptlForForwardOpaque:
                                 newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.FPTLForForwardOpaque] = true;
                                 break;
+                            // Obsolete
+                            case ObsoleteLightLoopSettingsOverrides.TileAndCluster: break;
+                            case ObsoleteLightLoopSettingsOverrides.ComputeLightEvaluation: break;
                             default:
                                 throw new ArgumentException("Unknown ObsoleteLightLoopSettingsOverrides");
                         }
@@ -344,7 +340,20 @@ namespace UnityEngine.Rendering.HighDefinition
             //free space:
             oldFrameSettingsFormat = null;
         }
+
+        internal static void MigrateMSAA(ref FrameSettings cameraFrameSettings, ref FrameSettingsOverrideMask newFrameSettingsOverrideMask)
+        {
+            if (cameraFrameSettings.IsEnabled(FrameSettingsField.MSAA))
+                cameraFrameSettings.msaaMode = MSAAMode.FromHDRPAsset;
+            else
+                cameraFrameSettings.msaaMode = MSAAMode.None;
+
+            newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.MSAAMode] = newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.MSAA];
+            newFrameSettingsOverrideMask.mask[(int)FrameSettingsField.MSAA] = false;
+        }
+
 #pragma warning restore 618 // Type or member is obsolete
+#pragma warning restore 612
 
         internal static void MigrateToCustomPostprocessAndCustomPass(ref FrameSettings cameraFrameSettings)
         {
@@ -388,6 +397,7 @@ namespace UnityEngine.Rendering.HighDefinition
             cameraFrameSettings.SetEnabled(FrameSettingsField.MotionBlur, true);
             cameraFrameSettings.SetEnabled(FrameSettingsField.PaniniProjection, true);
             cameraFrameSettings.SetEnabled(FrameSettingsField.Bloom, true);
+            cameraFrameSettings.SetEnabled(FrameSettingsField.LensFlareDataDriven, true);
             cameraFrameSettings.SetEnabled(FrameSettingsField.LensDistortion, true);
             cameraFrameSettings.SetEnabled(FrameSettingsField.ChromaticAberration, true);
             cameraFrameSettings.SetEnabled(FrameSettingsField.Vignette, true);
@@ -395,6 +405,11 @@ namespace UnityEngine.Rendering.HighDefinition
             cameraFrameSettings.SetEnabled(FrameSettingsField.FilmGrain, true);
             cameraFrameSettings.SetEnabled(FrameSettingsField.Dithering, true);
             cameraFrameSettings.SetEnabled(FrameSettingsField.Antialiasing, true);
+        }
+
+        internal static void MigrateToLensFlare(ref FrameSettings cameraFrameSettings)
+        {
+            cameraFrameSettings.SetEnabled(FrameSettingsField.LensFlareDataDriven, true);
         }
 
         internal static void MigrateToDirectSpecularLighting(ref FrameSettings cameraFrameSettings)
@@ -422,8 +437,8 @@ namespace UnityEngine.Rendering.HighDefinition
             // SSS moved from 25 to 46.
             fs.SetEnabled(FrameSettingsField.SubsurfaceScattering, fs.bitDatas[25]);
             // Set the defaults.
-            fs.sssQualityMode        = previouslyHighQuality ? SssQualityMode.OverrideQualitySettings : SssQualityMode.FromQualitySettings;
-            fs.sssQualityLevel       = 0;
+            fs.sssQualityMode = previouslyHighQuality ? SssQualityMode.OverrideQualitySettings : SssQualityMode.FromQualitySettings;
+            fs.sssQualityLevel = 0;
             fs.sssCustomSampleBudget = previouslyHighQuality ? 55 : (int)DefaultSssSampleBudgetForQualityLevel.Low;
         }
 
@@ -435,6 +450,17 @@ namespace UnityEngine.Rendering.HighDefinition
         internal static void MigrateVirtualTexturing(ref FrameSettings cameraFrameSettings)
         {
             cameraFrameSettings.SetEnabled(FrameSettingsField.VirtualTexturing, true);
-        }        
+        }
+        
+        internal static void MigrateAmethystFeatures(ref FrameSettings cameraFrameSettings)
+        {
+            cameraFrameSettings.SetEnabled(FrameSettingsField.Water, true);
+            cameraFrameSettings.SetEnabled(FrameSettingsField.WaterDecals, true);
+            cameraFrameSettings.SetEnabled(FrameSettingsField.WaterExclusion, true);
+            cameraFrameSettings.SetEnabled(FrameSettingsField.ComputeThickness, true);
+            cameraFrameSettings.SetEnabled(FrameSettingsField.LensFlareScreenSpace, true);
+            cameraFrameSettings.SetEnabled(FrameSettingsField.HighQualityLineRendering, true);
+            cameraFrameSettings.SetEnabled(FrameSettingsField.RaytracingVFX, true);
+        }
     }
 }

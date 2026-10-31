@@ -1,13 +1,7 @@
-void ApplyDecalToSurfaceData(DecalSurfaceData decalSurfaceData, float3 vtxNormal, inout SurfaceData surfaceData)
+void ApplyDecalToSurfaceDataNoNormal(DecalSurfaceData decalSurfaceData, inout SurfaceData surfaceData)
 {
     // using alpha compositing https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch23.html
     surfaceData.baseColor.xyz = surfaceData.baseColor.xyz * decalSurfaceData.baseColor.w + decalSurfaceData.baseColor.xyz;
-
-    // Always test the normal as we can have decompression artifact
-    if (decalSurfaceData.normalWS.w < 1.0)
-    {
-        surfaceData.normalWS.xyz = SafeNormalize(surfaceData.normalWS.xyz * decalSurfaceData.normalWS.w + decalSurfaceData.normalWS.xyz);
-    }
 
 #ifdef DECALS_4RT // only smoothness in 3RT mode
     // Don't apply any metallic modification
@@ -34,6 +28,7 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     $SurfaceDescription.Specular:                   surfaceData.specularColor =             surfaceDescription.Specular;
     $SurfaceDescription.DiffusionProfileHash:       surfaceData.diffusionProfileHash =      asuint(surfaceDescription.DiffusionProfileHash);
     $SurfaceDescription.SubsurfaceMask:             surfaceData.subsurfaceMask =            surfaceDescription.SubsurfaceMask;
+    $SurfaceDescription.TransmissionTint:           surfaceData.transmissionMask =          surfaceDescription.TransmissionTint;
     $SurfaceDescription.Thickness:                  surfaceData.thickness =                 surfaceDescription.Thickness;
     $SurfaceDescription.Anisotropy:                 surfaceData.anisotropy =                surfaceDescription.Anisotropy;
 
@@ -63,16 +58,9 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
         surfaceData.baseColor *= (1.0 - Max3(surfaceData.specularColor.r, surfaceData.specularColor.g, surfaceData.specularColor.b));
     #endif
 
-    #ifdef _DOUBLESIDED_ON
-        float3 doubleSidedConstants = _DoubleSidedConstants.xyz;
-    #else
-        float3 doubleSidedConstants = float3(1.0, 1.0, 1.0);
-    #endif
+    float3 doubleSidedConstants = GetDoubleSidedConstants();
 
-    // normal delivered to master node
-    $SurfaceDescription.NormalOS: surfaceData.normalWS = TransformObjectToWorldNormal(surfaceDescription.NormalOS);
-    $SurfaceDescription.NormalTS: GetNormalWS(fragInputs, surfaceDescription.NormalTS, surfaceData.normalWS, doubleSidedConstants);
-    $SurfaceDescription.NormalWS: surfaceData.normalWS = surfaceDescription.NormalWS;
+    ApplyDecalAndGetNormal(fragInputs, posInput, surfaceDescription, surfaceData);
 
     surfaceData.geomNormalWS = fragInputs.tangentToWorld[2];
 
@@ -81,28 +69,23 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     $SurfaceDescription.TangentTS: surfaceData.tangentWS = TransformTangentToWorld(surfaceDescription.TangentTS, fragInputs.tangentToWorld);
     $SurfaceDescription.TangentWS: surfaceData.tangentWS = surfaceDescription.TangentWS;
 
-    #if HAVE_DECALS
-        if (_EnableDecals)
-        {
-            float alpha = 1.0;
-            $SurfaceDescription.Alpha: alpha = surfaceDescription.Alpha;
-
-            // Both uses and modifies 'surfaceData.normalWS'.
-            DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, fragInputs, alpha);
-            ApplyDecalToSurfaceData(decalSurfaceData, fragInputs.tangentToWorld[2], surfaceData);
-        }
-    #endif
-
     bentNormalWS = surfaceData.normalWS;
     $BentNormal: GetNormalWS(fragInputs, surfaceDescription.BentNormal, bentNormalWS, doubleSidedConstants);
 
     surfaceData.tangentWS = Orthonormalize(surfaceData.tangentWS, surfaceData.normalWS);
-        
+
     #ifdef DEBUG_DISPLAY
+    #if !defined(SHADER_STAGE_RAY_TRACING)
+        // Mipmap mode debugging isn't supported with ray tracing as it relies on derivatives
         if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
         {
-            // TODO: need to update mip info
+            #ifdef FRAG_INPUTS_USE_TEXCOORD0
+                surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG(posInput.positionSS, fragInputs.texCoord0);
+            #else
+                surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG_NO_UV(posInput.positionSS);
+            #endif
         }
+    #endif
 
         // We need to call ApplyDebugToSurfaceData after filling the surfarcedata and before filling builtinData
         // as it can modify attribute use for static lighting
@@ -113,7 +96,7 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
         // Just use the value passed through via the slot (not active otherwise)
     #elif defined(_SPECULAR_OCCLUSION_FROM_AO_BENT_NORMAL)
         // If we have bent normal and ambient occlusion, process a specular occlusion
-        surfaceData.specularOcclusion = GetSpecularOcclusionFromBentAO(V, bentNormalWS, surfaceData.normalWS, surfaceData.ambientOcclusion, PerceptualSmoothnessToPerceptualRoughness(surfaceData.perceptualSmoothness));
+        surfaceData.specularOcclusion = GetSpecularOcclusionFromBentAO(V, bentNormalWS, surfaceData.normalWS, surfaceData.ambientOcclusion, PerceptualSmoothnessToRoughness(surfaceData.perceptualSmoothness));
     #elif defined(_AMBIENT_OCCLUSION) && defined(_SPECULAR_OCCLUSION_FROM_AO)
         surfaceData.specularOcclusion = GetSpecularOcclusionFromAmbientOcclusion(ClampNdotV(dot(surfaceData.normalWS, V)), surfaceData.ambientOcclusion, PerceptualSmoothnessToRoughness(surfaceData.perceptualSmoothness));
     #endif

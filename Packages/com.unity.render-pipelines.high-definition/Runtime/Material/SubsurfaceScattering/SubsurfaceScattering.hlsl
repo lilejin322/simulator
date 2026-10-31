@@ -96,12 +96,7 @@ void DecodeFromSSSBuffer(uint2 positionSS, out SSSData sssData)
     DecodeFromSSSBuffer(sssBuffer, positionSS, sssData);
 }
 
-// OUTPUT_SSSBUFFER start from SV_Target2 as SV_Target0 and SV_Target1 are used for lighting buffer, shifts to SV_Target3 if VT is enabled
-#ifdef UNITY_VIRTUAL_TEXTURING
-    #define OUTPUT_SSSBUFFER(NAME) out SSSBufferType0 MERGE_NAME(NAME, 0) : SV_Target3
-#else
-    #define OUTPUT_SSSBUFFER(NAME) out SSSBufferType0 MERGE_NAME(NAME, 0) : SV_Target2
-#endif
+#define OUTPUT_SSSBUFFER(NAME) out SSSBufferType0 MERGE_NAME(NAME, 0)
 
 #define ENCODE_INTO_SSSBUFFER(SURFACE_DATA, UNPOSITIONSS, NAME) EncodeIntoSSSBuffer(ConvertSurfaceDataToSSSData(SURFACE_DATA), UNPOSITIONSS, MERGE_NAME(NAME, 0))
 
@@ -165,6 +160,8 @@ bool TestLightingForSSS(float3 subsurfaceLighting)
 // profile because the thick flag is not set (for pixels that have transmission, we force the flags in a per-pixel
 // material feature)).
 #define MATERIALFEATUREFLAGS_TRANSMISSION_MODE_THICK_OBJECT     ((MATERIALFEATUREFLAGS_SSS_TRANSMISSION_START) << 3)
+#define MATERIALFEATUREFLAGS_SSS_DUAL_LOBE                      ((MATERIALFEATUREFLAGS_SSS_TRANSMISSION_START) << 4)
+#define MATERIALFEATUREFLAGS_SSS_DIFFUSE_POWER                  ((MATERIALFEATUREFLAGS_SSS_TRANSMISSION_START) << 5)
 
 // 15 degrees
 #define TRANSMISSION_WRAP_ANGLE (PI/12)
@@ -177,7 +174,8 @@ void FillMaterialSSS(uint diffusionProfileIndex, float subsurfaceMask, inout BSD
     bsdfData.diffusionProfileIndex = diffusionProfileIndex;
     bsdfData.fresnel0 = _TransmissionTintsAndFresnel0[diffusionProfileIndex].a;
     bsdfData.subsurfaceMask = subsurfaceMask;
-    bsdfData.materialFeatures |= MATERIALFEATUREFLAGS_SSS_OUTPUT_SPLIT_LIGHTING;
+    if (subsurfaceMask != 0)
+        bsdfData.materialFeatures |= MATERIALFEATUREFLAGS_SSS_OUTPUT_SPLIT_LIGHTING;
     bsdfData.materialFeatures |= GetSubsurfaceScatteringTexturingMode(diffusionProfileIndex) << MATERIALFEATUREFLAGS_SSS_TEXTURING_MODE_OFFSET;
 }
 
@@ -189,8 +187,28 @@ bool ShouldOutputSplitLighting(BSDFData bsdfData)
 float3 GetModifiedDiffuseColorForSSS(BSDFData bsdfData)
 {
     // Subsurface scattering mode
-    uint   texturingMode = (bsdfData.materialFeatures >> MATERIALFEATUREFLAGS_SSS_TEXTURING_MODE_OFFSET) & 3;
-    return ApplySubsurfaceScatteringTexturingMode(texturingMode, bsdfData.diffuseColor);
+    if (bsdfData.subsurfaceMask != 0)
+    {
+        uint   texturingMode = (bsdfData.materialFeatures >> MATERIALFEATUREFLAGS_SSS_TEXTURING_MODE_OFFSET) & 3;
+        return ApplySubsurfaceScatteringTexturingMode(texturingMode, bsdfData.diffuseColor);
+    }
+    else
+    {
+        return bsdfData.diffuseColor;
+    }
+}
+
+bool GetDualLobeParameters(uint diffusionProfileIndex, out float multiplierA, out float multiplierB, out float lobeMix)
+{
+    multiplierA = _DualLobeAndDiffusePower[diffusionProfileIndex].r;
+    multiplierB = _DualLobeAndDiffusePower[diffusionProfileIndex].g;
+    lobeMix     = _DualLobeAndDiffusePower[diffusionProfileIndex].b;
+    return multiplierA != multiplierB; // if both multipliers are equal, there is no dual lobe
+}
+
+float GetDiffusePower(uint diffusionProfileIndex)
+{
+    return _DualLobeAndDiffusePower[diffusionProfileIndex].a;
 }
 
 #endif
@@ -198,7 +216,7 @@ float3 GetModifiedDiffuseColorForSSS(BSDFData bsdfData)
 #ifdef MATERIAL_INCLUDE_TRANSMISSION
 
 // Assume that bsdfData.diffusionProfileIndex is init
-void FillMaterialTransmission(uint diffusionProfileIndex, float thickness, inout BSDFData bsdfData)
+void FillMaterialTransmission(uint diffusionProfileIndex, float thickness, float3 transmissionMask, inout BSDFData bsdfData)
 {
     float2 remap = _WorldScalesAndFilterRadiiAndThicknessRemaps[diffusionProfileIndex].zw;
 
@@ -224,7 +242,12 @@ void FillMaterialTransmission(uint diffusionProfileIndex, float thickness, inout
     // in the auto-thickness mode (but is always used for indirect lighting).
     bsdfData.transmittance = ComputeTransmittanceDisney(_ShapeParamsAndMaxScatterDists[diffusionProfileIndex].rgb,
                                                         _TransmissionTintsAndFresnel0[diffusionProfileIndex].rgb,
-                                                        bsdfData.thickness);
+                                                        bsdfData.thickness) * transmissionMask;
+}
+
+void FillMaterialTransmission(uint diffusionProfileIndex, float thickness, inout BSDFData bsdfData)
+{
+    FillMaterialTransmission(diffusionProfileIndex, thickness, 1.0f, bsdfData);
 }
 
 #endif

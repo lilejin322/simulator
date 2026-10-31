@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Unity.Collections.LowLevel.Unsafe;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine.Assertions;
 using UnityEngine.Experimental.Rendering;
 
@@ -9,6 +10,7 @@ namespace UnityEngine.Rendering.HighDefinition
 {
     internal static class HDProbeSystem
     {
+        [NoAutoStaticsCleanup] // Live HDProbe components hold registrations; disposed via beforeAssemblyReload/quitting.
         static HDProbeSystemInternal s_Instance;
 
         static HDProbeSystem()
@@ -90,46 +92,45 @@ namespace UnityEngine.Rendering.HighDefinition
             switch (targetMode)
             {
                 case ProbeSettings.Mode.Realtime:
-                    {
-                        var format = (GraphicsFormat)hd.currentPlatformRenderPipelineSettings.lightLoopSettings.reflectionProbeFormat;
+                {
+                    var format = (GraphicsFormat)hd.currentPlatformRenderPipelineSettings.lightLoopSettings.reflectionProbeFormat;
 
-                        switch (settings.type)
-                        {
-                            case ProbeSettings.ProbeType.PlanarProbe:
-                                target = HDRenderUtilities.CreatePlanarProbeRenderTarget(
-                                    (int)probe.resolution, format
-                                );
-                                break;
-                            case ProbeSettings.ProbeType.ReflectionProbe:
-                                target = HDRenderUtilities.CreateReflectionProbeRenderTarget(
-                                    (int)hd.currentPlatformRenderPipelineSettings.lightLoopSettings.reflectionCubemapSize,
-                                    format
-                                );
-                                break;
-                        }
-                        break;
+                    switch (settings.type)
+                    {
+                        case ProbeSettings.ProbeType.PlanarProbe:
+                            target = HDRenderUtilities.CreatePlanarProbeRenderTarget(
+                                (int)probe.resolution, format
+                            );
+                            break;
+                        case ProbeSettings.ProbeType.ReflectionProbe:
+                            target = HDRenderUtilities.CreateReflectionProbeRenderTarget(
+                                (int)probe.cubeResolution, format
+                            );
+                            break;
                     }
+                    break;
+                }
                 case ProbeSettings.Mode.Baked:
                 case ProbeSettings.Mode.Custom:
-                    {
-                        // Custom and Baked texture only support float16 for now
-                        var format = GraphicsFormat.R16G16B16A16_SFloat;             
+                {
+                    // Custom and Baked texture only support float16 for now
+                    var format = GraphicsFormat.R16G16B16A16_SFloat;
 
-                        switch (settings.type)
-                        {
-                            case ProbeSettings.ProbeType.PlanarProbe:
-                                target = HDRenderUtilities.CreatePlanarProbeRenderTarget(
-                                    (int)probe.resolution, format
-                                );
-                                break;
-                            case ProbeSettings.ProbeType.ReflectionProbe:
-                                target = HDRenderUtilities.CreateReflectionProbeRenderTarget(
-                                    (int)hd.currentPlatformRenderPipelineSettings.lightLoopSettings.reflectionCubemapSize, format
-                                );
-                                break;
-                        }
-                        break;
+                    switch (settings.type)
+                    {
+                        case ProbeSettings.ProbeType.PlanarProbe:
+                            target = HDRenderUtilities.CreatePlanarProbeRenderTarget(
+                                (int)probe.resolution, format
+                            );
+                            break;
+                        case ProbeSettings.ProbeType.ReflectionProbe:
+                            target = HDRenderUtilities.CreateReflectionProbeRenderTarget(
+                                (int)probe.cubeResolution, format
+                            );
+                            break;
                     }
+                    break;
+                }
             }
 
             return target;
@@ -210,10 +211,10 @@ namespace UnityEngine.Rendering.HighDefinition
                     {
                         // Insert in the array
                         // Grow the arrays
-                        if (m_PlanarProbeCount == m_PlanarProbesArray.Length)
+                        if (m_PlanarProbeCount >= m_PlanarProbesArray.Length)
                         {
-                            Array.Resize(ref m_PlanarProbesArray, m_PlanarProbes.Count * 2);
-                            Array.Resize(ref m_PlanarProbeBounds, m_PlanarProbeBounds.Length * 2);
+                            Array.Resize(ref m_PlanarProbesArray, m_PlanarProbeCount * 2);
+                            Array.Resize(ref m_PlanarProbeBounds, m_PlanarProbeCount * 2);
                         }
                         m_PlanarProbesArray[m_PlanarProbeCount] = (PlanarReflectionProbe)probe;
                         m_PlanarProbeBounds[m_PlanarProbeCount] = ((PlanarReflectionProbe)probe).boundingSphere;
@@ -288,7 +289,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
             Array.Resize(
                 ref m_QueryCullResults_Indices,
-                Parameters.maxActivePlanarReflectionProbe + Parameters.maxActiveReflectionProbe
+                Parameters.maxActivePlanarReflectionProbe + Parameters.maxActiveEnvReflectionProbe
             );
             var indexCount = state.cullingGroup.QueryIndices(true, m_QueryCullResults_Indices, 0);
             for (var i = 0; i < indexCount; ++i)
@@ -328,7 +329,7 @@ namespace UnityEngine.Rendering.HighDefinition
             if (probeBounds != null)
             {
                 var h = new Hash128();
-                fixed (BoundingSphere* s = &probeBounds[0])
+                fixed(BoundingSphere* s = &probeBounds[0])
                 {
                     var stride = (ulong)UnsafeUtility.SizeOf<BoundingSphere>();
                     var size = stride * (ulong)probeBounds.Length;
@@ -344,7 +345,7 @@ namespace UnityEngine.Rendering.HighDefinition
                     if (probes[i] == null || probes[i].Equals(null))
                         continue;
 
-                    var instanceID = probes[i].GetInstanceID();
+                    var instanceID = probes[i].GetEntityId();
                     HashUtilities.ComputeHash128(ref instanceID, ref h);
                     HashUtilities.AppendHash(ref h, ref result);
                 }

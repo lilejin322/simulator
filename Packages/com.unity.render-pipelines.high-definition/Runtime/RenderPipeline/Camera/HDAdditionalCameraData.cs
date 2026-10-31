@@ -8,7 +8,8 @@ namespace UnityEngine.Rendering.HighDefinition
     /// Holds the physical settings set on cameras.
     /// </summary>
     [Serializable]
-    public class HDPhysicalCamera
+    [Obsolete("Properties have been migrated to Camera class. #from(2022.2)")]
+    public struct HDPhysicalCamera
     {
         /// <summary>
         /// The minimum allowed aperture.
@@ -31,18 +32,28 @@ namespace UnityEngine.Rendering.HighDefinition
         public const int kMaxBladeCount = 11;
 
         // Camera body
-        [SerializeField] [Min(1f)] int m_Iso = 200;
-        [SerializeField] [Min(0f)] float m_ShutterSpeed = 1f / 200f;
+        [SerializeField] [Min(1f)] int m_Iso;
+        [SerializeField] [Min(0f)] float m_ShutterSpeed;
 
         // Lens
         // Note: focalLength is already defined in the regular camera component
-        [SerializeField] [Range(kMinAperture, kMaxAperture)] float m_Aperture = 16f;
+        [SerializeField] [Range(Camera.kMinAperture, Camera.kMaxAperture)] float m_Aperture;
+        [SerializeField] [Min(0.1f)] float m_FocusDistance;
 
         // Aperture shape
-        [SerializeField] [Range(kMinBladeCount, kMaxBladeCount)] int m_BladeCount = 5;
-        [SerializeField] Vector2 m_Curvature = new Vector2(2f, 11f);
-        [SerializeField] [Range(0f, 1f)] float m_BarrelClipping = 0.25f;
-        [SerializeField] [Range(-1f, 1f)] float m_Anamorphism = 0f;
+        [SerializeField] [Range(Camera.kMinBladeCount, Camera.kMaxBladeCount)] int m_BladeCount;
+        [SerializeField] Vector2 m_Curvature;
+        [SerializeField] [Range(0f, 1f)] float m_BarrelClipping;
+        [SerializeField] [Range(-1f, 1f)] float m_Anamorphism;
+
+        /// <summary>
+        /// The focus distance of the lens. The Depth of Field Volume override uses this value if you set focusDistanceMode to FocusDistanceMode.Camera.
+        /// </summary>
+        public float focusDistance
+        {
+            get => m_FocusDistance;
+            set => m_FocusDistance = Mathf.Max(value, 0.1f);
+        }
 
         /// <summary>
         /// The sensor sensitivity (ISO).
@@ -68,7 +79,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public float aperture
         {
             get => m_Aperture;
-            set => m_Aperture = Mathf.Clamp(value, kMinAperture, kMaxAperture);
+            set => m_Aperture = Mathf.Clamp(value, Camera.kMinAperture, Camera.kMaxAperture);
         }
 
         /// <summary>
@@ -77,7 +88,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public int bladeCount
         {
             get => m_BladeCount;
-            set => m_BladeCount = Mathf.Clamp(value, kMinBladeCount, kMaxBladeCount);
+            set => m_BladeCount = Mathf.Clamp(value, Camera.kMinBladeCount, Camera.kMaxBladeCount);
         }
 
         /// <summary>
@@ -88,8 +99,8 @@ namespace UnityEngine.Rendering.HighDefinition
             get => m_Curvature;
             set
             {
-                m_Curvature.x = Mathf.Max(value.x, kMinAperture);
-                m_Curvature.y = Mathf.Min(value.y, kMaxAperture);
+                m_Curvature.x = Mathf.Max(value.x, Camera.kMinAperture);
+                m_Curvature.y = Mathf.Min(value.y, Camera.kMaxAperture);
             }
         }
 
@@ -116,26 +127,38 @@ namespace UnityEngine.Rendering.HighDefinition
         /// Copies the settings of this instance to another instance.
         /// </summary>
         /// <param name="c">The instance to copy the settings to.</param>
+        [Obsolete("The CopyTo method is obsolete and does not work anymore. Use the assignement operator instead to get a copy of the HDPhysicalCamera parameters. #from(2021.2) #breakingFrom(2021.2)", true)]
         public void CopyTo(HDPhysicalCamera c)
         {
-            c.iso = iso;
-            c.shutterSpeed = shutterSpeed;
-            c.aperture = aperture;
-            c.bladeCount = bladeCount;
-            c.curvature = curvature;
-            c.barrelClipping = barrelClipping;
-            c.anamorphism = anamorphism;
+        }
+
+        /// <summary>
+        /// A set of default physical camera parameters.
+        /// </summary>
+        /// <returns>Returns a set of default physical camera parameters.</returns>
+        public static HDPhysicalCamera GetDefaults()
+        {
+            HDPhysicalCamera val = new HDPhysicalCamera();
+            val.iso = 200;
+            val.shutterSpeed = 1f / 200f;
+            val.aperture = 16;
+            val.focusDistance = 10;
+            val.bladeCount = 5;
+            val.curvature = new Vector2(2f, 11f);
+            val.barrelClipping = 0.25f;
+            val.anamorphism = 0;
+            return val;
         }
     }
 
     /// <summary>
     /// Additional component that holds HDRP specific parameters for Cameras.
     /// </summary>
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "HDRP-Camera" + Documentation.endURL)]
+    [HDRPHelpURLAttribute("hdrp-camera-component-reference")]
     [AddComponentMenu("")] // Hide in menu
     [DisallowMultipleComponent, ExecuteAlways]
     [RequireComponent(typeof(Camera))]
-    public partial class HDAdditionalCameraData : MonoBehaviour, IFrameSettingsHistoryContainer
+    public partial class HDAdditionalCameraData : MonoBehaviour, IFrameSettingsHistoryContainer, IAdditionalData
     {
         /// <summary>
         /// How the camera should handle vertically flipping the frame at the end of rendering.
@@ -194,6 +217,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <returns>The non oblique projection matrix for a particular camera.</returns>
         public delegate Matrix4x4 NonObliqueProjectionGetter(Camera camera);
 
+        [ExcludeCopy]
         Camera m_Camera;
 
         /// <summary>
@@ -215,12 +239,16 @@ namespace UnityEngine.Rendering.HighDefinition
         public enum AntialiasingMode
         {
             /// <summary>No Anti-aliasing.</summary>
+            [InspectorName("No Anti-aliasing")]
             None,
             /// <summary>FXAA.</summary>
+            [InspectorName("Fast Approximate Anti-aliasing (FXAA)")]
             FastApproximateAntialiasing,
             /// <summary>Temporal anti-aliasing.</summary>
+            [InspectorName("Temporal Anti-aliasing (TAA)")]
             TemporalAntialiasing,
             /// <summary>SMAA.</summary>
+            [InspectorName("Subpixel Morphological Anti-aliasing (SMAA)")]
             SubpixelMorphologicalAntiAliasing
         }
 
@@ -248,6 +276,19 @@ namespace UnityEngine.Rendering.HighDefinition
             Medium,
             /// <summary>High quality.</summary>
             High
+        }
+
+        /// <summary>
+        /// TAA Sharpen mode.
+        /// </summary>
+        public enum TAASharpenMode
+        {
+            /// <summary>Low quality.</summary>
+            LowQuality,
+            /// <summary>Sharpen with a separate pass after TAA.</summary>
+            PostSharpen,
+            /// <summary>Run a Contrast Adaptive Sharpening pass after TAA.</summary>
+            ContrastAdaptiveSharpening
         }
 
         /// <summary>Clear mode for the camera background.</summary>
@@ -281,6 +322,13 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>Quality of the anti-aliasing when using TAA.</summary>
         public TAAQualityLevel TAAQuality = TAAQualityLevel.Medium;
 
+        /// <summary>How is the sharpening run sharpening.</summary>
+        public TAASharpenMode taaSharpenMode = TAASharpenMode.LowQuality;
+
+        /// <summary>How much to reduce the ringing from the TAA post-process sharpening. Note that some ringing might be visually desirable and that any value different than 0 will incur into a small additional cost.</summary>
+        [Range(0, 1)]
+        public float taaRingingReduction = 0.0f;
+
         /// <summary>Strength of the sharpening of the history sampled for TAA.</summary>
         [Range(0, 1)]
         public float taaHistorySharpening = 0.35f;
@@ -289,7 +337,7 @@ namespace UnityEngine.Rendering.HighDefinition
         [Range(0.0f, 1.0f)]
         public float taaAntiFlicker = 0.5f;
 
-        /// <summary>Larger is this value, more likely history will be rejected when current and reprojected history motion vector differ by a substantial amount. 
+        /// <summary>Larger is this value, more likely history will be rejected when current and reprojected history motion vector differ by a substantial amount.
         /// Larger values can decrease ghosting but will also reintroduce aliasing on the aforementioned cases.</summary>
         [Range(0.0f, 1.0f)]
         public float taaMotionVectorRejection = 0.0f;
@@ -297,8 +345,20 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>When enabled, ringing artifacts (dark or strangely saturated edges) caused by history sharpening will be improved. This comes at a potential loss of sharpness upon motion.</summary>
         public bool taaAntiHistoryRinging = false;
 
+        /// <summary> Determines how much the history buffer is blended together with current frame result. Higher values means more history contribution. </summary>
+        [Range(HDRenderPipeline.TAABaseBlendFactorMin, HDRenderPipeline.TAABaseBlendFactorMax)]
+        public float taaBaseBlendFactor = 0.875f;
+
+        /// <summary> Scale to apply to the jittering applied when TAA is enabled. </summary>
+        [Range(0.1f, 1.0f)]
+        public float taaJitterScale = 1.0f;
+
         /// <summary>Physical camera parameters.</summary>
-        public HDPhysicalCamera physicalParameters = new HDPhysicalCamera();
+        [ValueCopy] // reference should not be same. only content.
+        [Obsolete("Physical camera properties have been migrated to Camera. #from(2022.2)")]
+#pragma warning disable CS0618
+        public HDPhysicalCamera physicalParameters = HDPhysicalCamera.GetDefaults();
+#pragma warning restore CS0618
 
         /// <summary>Vertical flip mode.</summary>
         public FlipYMode flipYMode;
@@ -327,6 +387,103 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>Enable to retain history buffers even if the camera is disabled.</summary>
         public bool hasPersistentHistory = false;
 
+        /// <summary>Screen size used when Screen Coordinates Override is active.</summary>
+        public Vector4 screenSizeOverride;
+
+        /// <summary>Transform used when Screen Coordinates Override is active.</summary>
+        public Vector4 screenCoordScaleBias;
+
+        #region DLSS_OVERRIDES
+        /// <summary>Allow NVIDIA Deep Learning Super Sampling (DLSS) on this camera.</summary>
+        [Tooltip("Allow NVIDIA Deep Learning Super Sampling (DLSS) on this camera")]
+        public bool allowDeepLearningSuperSampling = true;
+
+        /// <summary>If set to true, NVIDIA Deep Learning Super Sampling (DLSS) will utilize the Quality setting set on this camera instead of the one specified in the quality asset.</summary>
+        [Tooltip("If set to true, NVIDIA Deep Learning Super Sampling (DLSS) will utilize the Quality setting set on this camera instead of the one specified in the quality asset.")]
+        public bool deepLearningSuperSamplingUseCustomQualitySettings = false;
+
+        /// <summary>Selects a performance quality setting for NVIDIA Deep Learning Super Sampling (DLSS) for this camera of this project.</summary>
+        [Tooltip("Selects a performance quality setting for NVIDIA Deep Learning Super Sampling (DLSS) for this camera of this project.")]
+        public uint deepLearningSuperSamplingQuality = 0;
+
+        /// <summary>If set to true, NVIDIA Deep Learning Super Sampling (DLSS) will utilize the Quality setting set on this camera instead of the one specified in the quality asset of this project.</summary>
+        [Tooltip("If set to true, NVIDIA Deep Learning Super Sampling (DLSS) will utilize the attributes (Optimal Settings and Sharpness) specified on this camera, instead of the ones specified in the quality asset of this project.")]
+        public bool deepLearningSuperSamplingUseCustomAttributes = false;
+
+        /// <summary>Sets the sharpness and scale automatically for NVIDIA Deep Learning Super Sampling (DLSS) for this camera, depending on the values of quality settings.</summary>
+        [Tooltip("Sets the sharpness and scale automatically for NVIDIA Deep Learning Super Sampling (DLSS) for this camera, depending on the values of quality settings.")]
+        public bool deepLearningSuperSamplingUseOptimalSettings = true;
+
+        /// <summary>Sets the Sharpening value for NVIDIA Deep Learning Super Sampling (DLSS) for this camera.</summary>
+        [Tooltip("Sets the Sharpening value for NVIDIA Deep Learning Super Sampling (DLSS) for this camera.")]
+        [Range(0, 1)]
+        public float deepLearningSuperSamplingSharpening = 0;
+        #endregion
+
+        #region FSR2_OVERRIDES
+        /// <summary>Allow FidelityFX Super Resolution (FSR2) on this camera.</summary>
+        [Tooltip("Allow FidelityFX Super Resolution (FSR2) on this camera.")]
+        public bool allowFidelityFX2SuperResolution = true;
+
+        /// <summary>If set to true, AMD FidelityFX 2.0 Super Resolution (FSR2) will utilize the Quality setting set on this camera instead of the one specified in the quality asset.</summary>
+        [Tooltip("If set to true, AMD FidelityFX 2.0 Super Resolution (FSR2) will utilize the Quality setting set on this camera instead of the one specified in the quality asset.")]
+        public bool fidelityFX2SuperResolutionUseCustomQualitySettings = false;
+
+        /// <summary>Selects a performance quality setting for AMD FidelityFX 2.0 Super Resolution (FSR2) for this camera of this project.</summary>
+        [Tooltip("Selects a performance quality setting for AMD FidelityFX 2.0 Super Resolution (FSR2) for this camera of this project.")]
+        public uint fidelityFX2SuperResolutionQuality = 0;
+
+        /// <summary>If set to true, AMD FidelityFX 2.0 Super Resolution (FSR2) will utilize the attributes (Optimal Settings and Sharpness) specified on this camera instead of the ones specified in the quality asset of this project.</summary>
+        [Tooltip("If set to true, AMD FidelityFX 2.0 Super Resolution (FSR2) will utilize the attributes (Optimal Settings and Sharpness) specified on this camera, instead of the ones specified in the quality asset of this project.")]
+        public bool fidelityFX2SuperResolutionUseCustomAttributes = false;
+
+        /// <summary>Sets the scale automatically for AMD FidelityFX 2.0 Super Resolution (FSR2) for this camera, depending on the values of quality settings.</summary>
+        [Tooltip("Sets the scale automatically for AMD FidelityFX 2.0 Super Resolution (FSR2) for this camera, depending on the values of quality settings.")]
+        public bool fidelityFX2SuperResolutionUseOptimalSettings = true;
+
+        /// <summary>Enables the Sharpening pass for AMD FidelityFX 2.0 Super Resolution (FSR2) for this camera.</summary>
+        [Tooltip("Enables the Sharpening pass for AMD FidelityFX 2.0 Super Resolution (FSR2) for this camera.")]
+        public bool fidelityFX2SuperResolutionEnableSharpening = false;
+
+        /// <summary>Sets the Sharpening value for AMD FidelityFX 2.0 Super Resolution (FSR2) for this camera.</summary>
+        [Tooltip("Sets the Sharpening value for AMD FidelityFX 2.0 Super Resolution (FSR2) for this camera.")]
+        [Range(0, 1)]
+        public float fidelityFX2SuperResolutionSharpening = 0;
+        #endregion
+
+        /// internal state set by the runtime wether DLSS is enabled or not on this camera, depending on the results of all other settings.
+        [ExcludeCopy]
+        internal bool cameraCanRenderDLSS = false;
+
+        /// internal state set by the runtime whether FSR2 is enabled or not on this camera, depending on the results of all other settings.
+        [ExcludeCopy]
+        internal bool cameraCanRenderFSR2 = false;
+
+        /// internal state set by the runtime whether STP is enabled or not on this camera, depending on the results of all other settings.
+        [ExcludeCopy]
+        internal bool cameraCanRenderSTP = false;
+
+#if ENABLE_UPSCALER_FRAMEWORK
+        /// internal state set by the runtime whether the upscaler framework is enabled or not on this camera, depending on the results of all other settings.
+        [ExcludeCopy]
+        internal bool cameraCanRenderIUpscaler = false;
+
+        // internal state set by the runtime whether the upscaler using the framework is a temporal upscaler or not.
+        [ExcludeCopy]
+        internal bool cameraIUpscalerIsTemporalUpscaler = false;
+#endif
+
+        #region FSR1_OVERRIDES
+        /// <summary>If set to true, AMD FidelityFX Super Resolution (FSR) will utilize the sharpness setting set on this camera instead of the one specified in the quality asset.</summary>
+        [Tooltip("If set to true, AMD FidelityFX Super Resolution (FSR) will utilize the sharpness setting set on this camera instead of the one specified in the quality asset.")]
+        public bool fsrOverrideSharpness = false;
+
+        /// <summary>Sets this camera's sharpness value for AMD FidelityFX Super Resolution.</summary>
+        [Tooltip("Sets this camera's sharpness value for AMD FidelityFX Super Resolution 1.0 (FSR).")]
+        [Range(0, 1)]
+        public float fsrSharpness = FSRUtils.kDefaultSharpnessLinear;
+        #endregion
+
         /// <summary>Event used to override HDRP rendering for this particular camera.</summary>
         public event Action<ScriptableRenderContext, HDCamera> customRender;
         /// <summary>True if any Custom Render event is registered for this camera.</summary>
@@ -342,14 +499,23 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>The object used as a target for centering the Exposure's Procedural Mask metering mode when target object option is set (See Exposure Volume Component).</summary>
         public GameObject exposureTarget = null;
 
+        /// <summary> Mip bias used on texture samplers during material rendering </summary>
+        public float materialMipBias = 0;
+
         internal float probeCustomFixedExposure = 1.0f;
 
+        [ExcludeCopy]
+        internal float deExposureMultiplier = 1.0f;
+
         [SerializeField, FormerlySerializedAs("renderingPathCustomFrameSettings")]
-        FrameSettings m_RenderingPathCustomFrameSettings = FrameSettings.NewDefaultCamera();
+        FrameSettings m_RenderingPathCustomFrameSettings = FrameSettingsDefaults.Get(FrameSettingsRenderType.Camera);
+
         /// <summary>Mask specifying which frame settings are overridden when using custom frame settings.</summary>
         public FrameSettingsOverrideMask renderingPathCustomFrameSettingsOverrideMask;
+
         /// <summary>When using default frame settings, specify which type of frame settings to use.</summary>
         public FrameSettingsRenderType defaultFrameSettings;
+
         /// <summary>Custom frame settings.</summary>
         public ref FrameSettings renderingPathCustomFrameSettings => ref m_RenderingPathCustomFrameSettings;
 
@@ -362,6 +528,7 @@ namespace UnityEngine.Rendering.HighDefinition
         FrameSettings IFrameSettingsHistoryContainer.frameSettings
             => m_RenderingPathCustomFrameSettings;
 
+        [ExcludeCopy]
         FrameSettingsHistory m_RenderingPathHistory = new FrameSettingsHistory()
         {
             defaultType = FrameSettingsRenderType.Camera
@@ -373,21 +540,20 @@ namespace UnityEngine.Rendering.HighDefinition
             set => m_RenderingPathHistory = value;
         }
 
-        string IFrameSettingsHistoryContainer.panelName
-            => m_CameraRegisterName;
-
         /// <summary>
         /// .
         /// </summary>
         /// <returns>.</returns>
         Action IDebugData.GetReset()
-                //caution: we actually need to retrieve the right
-                //m_FrameSettingsHistory as it is a struct so no direct
-                // => m_FrameSettingsHistory.TriggerReset
-                => () => m_RenderingPathHistory.TriggerReset();
+        //caution: we actually need to retrieve the right
+        //m_FrameSettingsHistory as it is a struct so no direct
+        // => m_FrameSettingsHistory.TriggerReset
+            => () => m_RenderingPathHistory.TriggerReset();
 
+        [ExcludeCopy]
         internal ProfilingSampler profilingSampler;
 
+        [ExcludeCopy]
         AOVRequestDataCollection m_AOVRequestDataCollection = new AOVRequestDataCollection(null);
 
         /// <summary>Set AOV requests to use.</summary>
@@ -481,17 +647,12 @@ namespace UnityEngine.Rendering.HighDefinition
         public IEnumerable<AOVRequestData> aovRequests =>
             m_AOVRequestDataCollection ?? (m_AOVRequestDataCollection = new AOVRequestDataCollection(null));
 
-        // Use for debug windows
-        // When camera name change we need to update the name in DebugWindows.
-        // This is the purpose of this class
-        bool m_IsDebugRegistered = false;
-        string m_CameraRegisterName;
-
         // When we are a preview, there is no way inside Unity to make a distinction between camera preview and material preview.
         // This property allow to say that we are an editor camera preview when the type is preview.
         /// <summary>
         /// Unity support two type of preview: Camera preview and material preview. This property allow to know that we are an editor camera preview when the type is preview.
         /// </summary>
+        [field: ExcludeCopy]
         public bool isEditorCameraPreview { get; internal set; }
 
         // This is use to copy data into camera for the Reset() workflow in camera editor
@@ -510,13 +671,56 @@ namespace UnityEngine.Rendering.HighDefinition
             data.antialiasing = antialiasing;
             data.dithering = dithering;
             data.xrRendering = xrRendering;
-            physicalParameters.CopyTo(data.physicalParameters);
+            data.SMAAQuality = SMAAQuality;
+            data.stopNaNs = stopNaNs;
+            data.taaSharpenStrength = taaSharpenStrength;
+            data.TAAQuality = TAAQuality;
+            data.taaSharpenMode = taaSharpenMode;
+            data.taaRingingReduction = taaRingingReduction;
+            data.taaHistorySharpening = taaHistorySharpening;
+            data.taaAntiFlicker = taaAntiFlicker;
+            data.taaMotionVectorRejection = taaMotionVectorRejection;
+            data.taaAntiHistoryRinging = taaAntiHistoryRinging;
+            data.taaBaseBlendFactor = taaBaseBlendFactor;
+            data.taaJitterScale = taaJitterScale;
+            data.flipYMode = flipYMode;
+            data.fullscreenPassthrough = fullscreenPassthrough;
+            data.allowDynamicResolution = allowDynamicResolution;
+            data.invertFaceCulling = invertFaceCulling;
+            data.probeLayerMask = probeLayerMask;
+            data.hasPersistentHistory = hasPersistentHistory;
+            data.exposureTarget = exposureTarget;
+#pragma warning disable CS0618
+            data.physicalParameters = physicalParameters;
+#pragma warning restore CS0618
 
             data.renderingPathCustomFrameSettings = renderingPathCustomFrameSettings;
             data.renderingPathCustomFrameSettingsOverrideMask = renderingPathCustomFrameSettingsOverrideMask;
             data.defaultFrameSettings = defaultFrameSettings;
 
             data.probeCustomFixedExposure = probeCustomFixedExposure;
+
+            data.allowDeepLearningSuperSampling = allowDeepLearningSuperSampling;
+            data.deepLearningSuperSamplingUseCustomQualitySettings = deepLearningSuperSamplingUseCustomQualitySettings;
+            data.deepLearningSuperSamplingQuality = deepLearningSuperSamplingQuality;
+            data.deepLearningSuperSamplingUseCustomAttributes = deepLearningSuperSamplingUseCustomAttributes;
+            data.deepLearningSuperSamplingUseOptimalSettings = deepLearningSuperSamplingUseOptimalSettings;
+            data.deepLearningSuperSamplingSharpening = deepLearningSuperSamplingSharpening;
+
+            data.allowFidelityFX2SuperResolution = allowFidelityFX2SuperResolution;
+            data.fidelityFX2SuperResolutionUseCustomQualitySettings = fidelityFX2SuperResolutionUseCustomQualitySettings;
+            data.fidelityFX2SuperResolutionQuality = fidelityFX2SuperResolutionQuality;
+            data.fidelityFX2SuperResolutionUseCustomAttributes = fidelityFX2SuperResolutionUseCustomAttributes;
+            data.fidelityFX2SuperResolutionUseOptimalSettings = fidelityFX2SuperResolutionUseOptimalSettings;
+            data.fidelityFX2SuperResolutionEnableSharpening = fidelityFX2SuperResolutionEnableSharpening;
+            data.fidelityFX2SuperResolutionSharpening = fidelityFX2SuperResolutionSharpening;
+            data.fsrOverrideSharpness = fsrOverrideSharpness;
+            data.fsrSharpness = fsrSharpness;
+
+            data.materialMipBias = materialMipBias;
+
+            data.screenSizeOverride = screenSizeOverride;
+            data.screenCoordScaleBias = screenCoordScaleBias;
 
             // We must not copy the following
             //data.m_IsDebugRegistered = m_IsDebugRegistered;
@@ -529,6 +733,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Specify a custom getter for non oblique projection matrix.
         /// </summary>
+        [ExcludeCopy]
         public NonObliqueProjectionGetter nonObliqueProjectionGetter = GeometryUtils.CalculateProjectionMatrix;
 
         /// <summary>
@@ -541,41 +746,11 @@ namespace UnityEngine.Rendering.HighDefinition
             return nonObliqueProjectionGetter(camera);
         }
 
-        void RegisterDebug()
-        {
-            if (!m_IsDebugRegistered)
-            {
-                // Note that we register FrameSettingsHistory, so manipulating FrameSettings in the Debug windows
-                // doesn't affect the serialized version
-                // Note camera's preview camera is registered with preview type but then change to game type that lead to issue.
-                // Do not attempt to not register them till this issue persist.
-                m_CameraRegisterName = name;
-                if (m_Camera.cameraType != CameraType.Preview && m_Camera.cameraType != CameraType.Reflection)
-                {
-                    DebugDisplaySettings.RegisterCamera(this);
-                    VolumeDebugSettings.RegisterCamera(this);
-                }
-                m_IsDebugRegistered = true;
-            }
-        }
-
-        void UnRegisterDebug()
-        {
-            if (m_IsDebugRegistered)
-            {
-                // Note camera's preview camera is registered with preview type but then change to game type that lead to issue.
-                // Do not attempt to not register them till this issue persist.
-                if (m_Camera.cameraType != CameraType.Preview && m_Camera?.cameraType != CameraType.Reflection)
-                {
-                    VolumeDebugSettings.UnRegisterCamera(this);
-                    DebugDisplaySettings.UnRegisterCamera(this);
-                }
-                m_IsDebugRegistered = false;
-            }
-        }
-
         void OnEnable()
         {
+            if(GraphicsSettings.currentRenderPipelineAssetType != typeof(HDRenderPipelineAsset))
+                return;
+
             // Be sure legacy HDR option is disable on camera as it cause banding in SceneView. Yes, it is a contradiction, but well, Unity...
             // When HDR option is enabled, Unity render in FP16 then convert to 8bit with a stretch copy (this cause banding as it should be convert to sRGB (or other color appropriate color space)), then do a final shader with sRGB conversion
             // When LDR, unity render in 8bitSRGB, then do a final shader with sRGB conversion
@@ -587,33 +762,11 @@ namespace UnityEngine.Rendering.HighDefinition
             m_Camera.allowMSAA = false; // We don't use this option in HD (it is legacy MSAA) and it produce a warning in the inspector UI if we let it
             m_Camera.allowHDR = false;
 
-            RegisterDebug();
-
-#if UNITY_EDITOR
-            UpdateDebugCameraName();
-            UnityEditor.EditorApplication.hierarchyChanged += UpdateDebugCameraName;
-#endif
-        }
-
-        void UpdateDebugCameraName()
-        {
-            // Move the garbage generated by accessing name outside of HDRP
-            profilingSampler = new ProfilingSampler(HDUtils.ComputeCameraName(name));
-
-            if (name != m_CameraRegisterName)
-            {
-                UnRegisterDebug();
-                RegisterDebug();
-            }
-        }
-
-        void OnDisable()
-        {
-            UnRegisterDebug();
-
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.hierarchyChanged -= UpdateDebugCameraName;
-#endif
+            // By doing that, we force the update of frame settings debug data once. Otherwise, when the Rendering Debugger is opened,
+            // Wrong data is registered to the undo system because it did not get the chance to be updated once.
+            FrameSettings dummy = new FrameSettings(); //don't require full init as will be fully reset in AggregateFrameSettings
+            if (GraphicsSettings.TryGetRenderPipelineSettings<RenderingPathFrameSettings>(out var renderingPathFrameSettings))
+                FrameSettingsHistory.AggregateFrameSettings(renderingPathFrameSettings, ref dummy, m_Camera, this, HDRenderPipeline.currentAsset, null);
         }
 
         // This is called at the creation of the HD Additional Camera Data, to convert the legacy camera settings to HD
@@ -657,7 +810,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             HDCamera hdCamera = HDCamera.GetOrCreate(m_Camera);
             if ((type & BufferAccessType.Color) != 0)
-                return  hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.ColorBufferMipChain);
+                return hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.ColorBufferMipChain);
             else if ((type & BufferAccessType.Depth) != 0)
                 return hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.Depth);
             else if ((type & BufferAccessType.Normal) != 0)
@@ -665,5 +818,12 @@ namespace UnityEngine.Rendering.HighDefinition
             else
                 return null;
         }
+
+#if UNITY_EDITOR
+        [NonSerialized, ExcludeCopy]
+        internal bool doesSceneViewOverrideExposure = false;
+        [NonSerialized, ExcludeCopy]
+        internal float sceneViewOverrideExposureValue = 10f;
+#endif
     }
 }

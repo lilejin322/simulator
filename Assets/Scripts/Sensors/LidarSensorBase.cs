@@ -541,7 +541,7 @@ namespace Simulator.Sensors
             PointCloudMaterial.SetMatrix("_LocalToWorld", lidarToWorld);
             PointCloudMaterial.SetFloat("_Size", PointSize * Utility.GetDpiScale());
             PointCloudMaterial.SetColor("_Color", PointColor);
-            Graphics.DrawProcedural(PointCloudMaterial, new Bounds(transform.position, MaxDistance * Vector3.one), MeshTopology.Points, PointCloudBuffer.count, layer: LayerMask.NameToLayer("Sensor"));
+            Graphics.DrawProcedural(PointCloudMaterial, new Bounds(transform.position, MaxDistance * Vector3.one), MeshTopology.Triangles, 6, PointCloudBuffer.count, layer: LayerMask.NameToLayer("Sensor"));
 
             VisualizeMarker.End();
         }

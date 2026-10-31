@@ -1,10 +1,9 @@
-using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
-    [VolumeComponentEditor(typeof(FilmGrain))]
+    [CustomEditor(typeof(FilmGrain))]
     sealed class FilmGrainEditor : VolumeComponentEditor
     {
         SerializedDataParameter m_Type;
@@ -24,11 +23,45 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public override void OnInspectorGUI()
         {
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.FilmGrain);
+
+            if (EditorGraphicsSettings.ShouldValidateGraphicsForActiveBuildTarget())
+            {
+                var defaultFilmGrain = HDEditorUtils.GetVolumeComponentDefaultState<FilmGrain>();
+
+                // Get effective intensity value (use local if overridden, otherwise use default)
+                bool useDefaultIntensity = !m_Intensity.overrideState.boolValue;
+                float effectiveIntensity = useDefaultIntensity
+                    ? (defaultFilmGrain?.intensity.value ?? 0.0f)
+                    : m_Intensity.value.floatValue;
+
+                var validationSettings = HDProjectSettings.validationSettings;
+                if (effectiveIntensity > 0.0f && !validationSettings.k_FilmGrain_Recommended)
+                {
+                    using (new IndentLevelScope())
+                    {
+                        if (useDefaultIntensity && HDEditorUtils.TryGetVolumeParameterSource<FilmGrain>(
+                              filmGrain => filmGrain.intensity.overrideState && filmGrain.intensity.value > 0.0f,
+                              out var sourceProfile,
+                              out var sourceName))
+                        {
+                            HDEditorUtils.ShowFeatureOptimisationWarning("Film Grain", sourceName, () => Selection.activeObject = sourceProfile);
+                        }
+                        else
+                        {
+                            HDEditorUtils.ShowFeatureOptimisationWarning("Film Grain");
+                        }
+                    }
+
+                }
+            }
+
             PropertyField(m_Type);
 
             if (m_Type.value.intValue == (int)FilmGrainLookup.Custom)
             {
-                PropertyField(m_Texture);
+                using (new IndentLevelScope())
+                    PropertyField(m_Texture);
 
                 var texture = (target as FilmGrain).texture.value;
 

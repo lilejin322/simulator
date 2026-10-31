@@ -75,7 +75,7 @@ namespace Simulator.Api.Commands
                     var agents = SimulatorManager.Instance.AgentManager;
                     GameObject agentGO = null;
 
-                    VehicleDetailData vehicleData = await ConnectionManager.API.GetByIdOrName<VehicleDetailData>(name);
+                    VehicleDetailData vehicleData = await BuiltinAssetLibrary.GetByIdOrName<VehicleDetailData>(name);
                     var config = new AgentConfig(vehicleData.ToVehicleData());
                     config.Position = position;
                     config.Rotation = Quaternion.Euler(rotation);
@@ -87,7 +87,7 @@ namespace Simulator.Api.Commands
                     else
                     {
                         var assetModel = await DownloadManager.GetAsset(BundleConfig.BundleTypes.Vehicle, vehicleData.AssetGuid, vehicleData.Name);
-                        config.Prefab = Loader.LoadVehicleBundle(assetModel.LocalPath);
+                        config.Prefab = Loader.LoadVehicle(assetModel.LocalPath);
                     }
 
                     if (config.Prefab == null)
@@ -143,7 +143,7 @@ namespace Simulator.Api.Commands
                     var rb = agentGO.GetComponent<Rigidbody>();
                     if (rb != null)
                     {
-                        rb.velocity = velocity;
+                        rb.linearVelocity = velocity;
                         rb.angularVelocity = angular_velocity;
                     }
 
@@ -168,7 +168,7 @@ namespace Simulator.Api.Commands
                 {
                     var colorData = args["color"].ReadVector3();
                     var template = sim.NPCManager.NPCVehicles.Find(obj => obj.Prefab.name == name);
-                    if (template.Prefab == null)
+                    if (template == null || template.Prefab == null)
                     {
                         throw new Exception($"Unknown '{name}' NPC name");
                     }
@@ -189,7 +189,7 @@ namespace Simulator.Api.Commands
                     npcController.SetBehaviour<NPCManualBehaviour>();
 
                     var body = npcController.GetComponent<Rigidbody>();
-                    body.velocity = velocity;
+                    body.linearVelocity = velocity;
                     body.angularVelocity = angular_velocity;
 
                     uid = npcController.name;
@@ -213,7 +213,7 @@ namespace Simulator.Api.Commands
                         throw new Exception($"{sceneName} is missing Pedestrian NavMesh");
                     }
 
-                    var model = sim.PedestrianManager.PedestrianData.Find(obj => obj.Name == name).Prefab;
+                    var model = sim.PedestrianManager.PedestrianData.Find(obj => obj.Name == name)?.Prefab;
                     if (model == null)
                     {
                         throw new Exception($"Unknown '{name}' pedestrian name");

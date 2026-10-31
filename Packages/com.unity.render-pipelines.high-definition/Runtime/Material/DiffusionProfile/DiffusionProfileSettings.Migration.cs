@@ -14,9 +14,10 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             Initial,                // 16 profiles per asset
             DiffusionProfileRework, // one profile per asset
+            SplitScatteringDistance,// scattering color + mean free path
         }
 
-        [Obsolete("Profiles are obsolete, only one diffusion profile per asset is allowed.")]
+        [Obsolete("Profiles are obsolete, only one diffusion profile per asset is allowed. #from(2021.3)")]
         internal DiffusionProfile this[int index]
         {
             get => profile;
@@ -26,7 +27,7 @@ namespace UnityEngine.Rendering.HighDefinition
         Version m_Version = MigrationDescription.LastVersion<Version>();
         Version IVersionable<Version>.version { get => m_Version; set => m_Version = value; }
 
-        [Obsolete("Profiles are obsolete, only one diffusion profile per asset is allowed.")]
+        [Obsolete("Profiles are obsolete, only one diffusion profile per asset is allowed. #from(2021.3)")]
         internal DiffusionProfile[] profiles;
 
         static readonly MigrationDescription<Version, DiffusionProfileSettings> k_Migration = MigrationDescription.New(
@@ -46,7 +47,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
                 var currentHDAsset = HDRenderPipeline.currentAsset;
                 if (currentHDAsset == null)
-                    throw new Exception("Can't upgrade diffusion profile when the HDRenderPipeline asset is not assigned in Graphic Settings");
+                    throw new Exception("Can't upgrade diffusion profile without an active HD Render Pipeline asset (see Quality Settings).");
 
                 var defaultProfile = new DiffusionProfile(true);
 
@@ -67,7 +68,7 @@ namespace UnityEngine.Rendering.HighDefinition
                     index++;
                 }
 
-                // We write in the main diffusion profile meta filethe list of created asset so we know where to look
+                // We write in the main diffusion profile meta file the list of created asset so we know where to look
                 // when we upgrade materials inside scenes (from the menu item)
                 SerializableGUIDs toJson;
                 toJson.assetGUIDs = new string[16];
@@ -84,9 +85,9 @@ namespace UnityEngine.Rendering.HighDefinition
                     if (hdAsset.diffusionProfileSettings == d)
                     {
                         // Assign the new diffusion profile assets into the HD asset
-                        hdAsset.diffusionProfileSettingsList = new DiffusionProfileSettings[newProfiles.Keys.Max() + 1];
+                        hdAsset.m_ObsoleteDiffusionProfileSettingsList = new DiffusionProfileSettings[newProfiles.Keys.Max() + 1];
                         foreach (var kp in newProfiles)
-                            hdAsset.diffusionProfileSettingsList[kp.Key] = kp.Value;
+                            hdAsset.m_ObsoleteDiffusionProfileSettingsList[kp.Key] = kp.Value;
                         UnityEditor.EditorUtility.SetDirty(hdAsset);
                     }
                 }
@@ -104,6 +105,11 @@ namespace UnityEngine.Rendering.HighDefinition
                 }
 #endif
 #pragma warning restore 618
+            }),
+            MigrationStep.New(Version.SplitScatteringDistance, (DiffusionProfileSettings d) =>
+            {
+                // The setter will split value in ldr color + multiplier
+                d.scatteringDistance = d.profile.scatteringDistance;
             })
         );
 
@@ -144,7 +150,7 @@ namespace UnityEngine.Rendering.HighDefinition
             var importer = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(mainProfile));
             SerializableGUIDs profiles = JsonUtility.FromJson<SerializableGUIDs>(importer.userData);
 
-            if (String.IsNullOrEmpty(profiles.assetGUIDs?[index]))
+            if (String.IsNullOrEmpty(profiles.assetGUIDs ? [index]))
             {
                 Debug.LogError("Could not upgrade diffusion profile reference in material " + mat + ": index " + index + " not found in main diffusion profile");
                 return;
@@ -171,13 +177,12 @@ namespace UnityEngine.Rendering.HighDefinition
                     stencilGBufferRef |= (int)StencilUsage.SubsurfaceScattering;
                 }
 
-                if(mat.HasProperty("_ReceivesSSR") && mat.GetInt("_ReceivesSSR") == 1)
+                if (mat.HasProperty("_ReceivesSSR") && mat.GetInt("_ReceivesSSR") == 1)
                 {
                     stencilWriteMask |= (int)StencilUsage.TraceReflectionRay;
                     stencilRef |= (int)StencilUsage.TraceReflectionRay;
                     stencilGBufferMask |= (int)StencilUsage.TraceReflectionRay;
                     stencilGBufferRef |= (int)StencilUsage.TraceReflectionRay;
-
                 }
 
                 // As we tag both during motion vector pass and Gbuffer pass we need a separate state and we need to use the write mask
@@ -226,6 +231,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 EditorApplication.delayCall += UnityEditor.AssetDatabase.Refresh;
             }
         }
+
 #endif
     }
 }

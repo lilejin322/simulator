@@ -1,10 +1,11 @@
+using System;
 using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
-    [VolumeComponentEditor(typeof(DepthOfField))]
+    [CustomEditor(typeof(DepthOfField))]
     sealed class DepthOfFieldEditor : VolumeComponentWithQualityEditor
     {
         static partial class Styles
@@ -21,13 +22,19 @@ namespace UnityEditor.Rendering.HighDefinition
             public static GUIContent k_FarFocusEnd = new GUIContent("End", "Sets the distance from the Camera at which the far field blur reaches its maximum blur radius.");
             public static GUIContent k_PhysicallyBased = new GUIContent("Physically Based", "Uses a more accurate but slower physically based method to compute DoF.");
 
+            public static GUIContent k_DepthOfFieldMode = new GUIContent("Focus Mode", "Controls the focus of the camera lens.");
+
+            public static readonly string PbrDofResolutionTitle = "Enable High Resolution";
             public static readonly string InfoBox = "Physically Based DoF currently has a high performance overhead. Enabling TAA is highly recommended when using this option.";
+            public static readonly string FocusDistanceInfoBox = "When using the Physical Camera mode, the depth of field will be influenced by the Aperture, the Focal Length and the Sensor size set in the physical properties of the camera.";
         }
 
         SerializedDataParameter m_FocusMode;
 
         // Physical mode
         SerializedDataParameter m_FocusDistance;
+
+        SerializedDataParameter m_FocusDistanceMode;
 
         // Manual mode
         SerializedDataParameter m_NearFocusStart;
@@ -45,8 +52,9 @@ namespace UnityEditor.Rendering.HighDefinition
         SerializedDataParameter m_HighQualityFiltering;
         SerializedDataParameter m_Resolution;
         SerializedDataParameter m_PhysicallyBased;
-
-        public override bool hasAdvancedMode => true;
+        SerializedDataParameter m_LimitManualRangeNearBlur;
+        SerializedDataParameter m_AdaptiveSamplingWeight;
+        SerializedDataParameter m_CoCStabilization;
 
         public override void OnEnable()
         {
@@ -55,6 +63,7 @@ namespace UnityEditor.Rendering.HighDefinition
             m_FocusMode = Unpack(o.Find(x => x.focusMode));
 
             m_FocusDistance = Unpack(o.Find(x => x.focusDistance));
+            m_FocusDistanceMode = Unpack(o.Find(x => x.focusDistanceMode));
 
             m_NearFocusStart = Unpack(o.Find(x => x.nearFocusStart));
             m_NearFocusEnd = Unpack(o.Find(x => x.nearFocusEnd));
@@ -69,19 +78,23 @@ namespace UnityEditor.Rendering.HighDefinition
             m_HighQualityFiltering = Unpack(o.Find("m_HighQualityFiltering"));
             m_Resolution = Unpack(o.Find("m_Resolution"));
             m_PhysicallyBased = Unpack(o.Find("m_PhysicallyBased"));
-
+            m_LimitManualRangeNearBlur = Unpack(o.Find("m_LimitManualRangeNearBlur"));
+            m_AdaptiveSamplingWeight = Unpack(o.Find("m_AdaptiveSamplingWeight"));
+            m_CoCStabilization = Unpack(o.Find(x => x.coCStabilization));
             base.OnEnable();
         }
 
         public override void OnInspectorGUI()
         {
-            PropertyField(m_FocusMode);
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.DepthOfField);
+
+            PropertyField(m_FocusMode, Styles.k_DepthOfFieldMode);
 
             int mode = m_FocusMode.value.intValue;
             if (mode == (int)DepthOfFieldMode.Off)
                 return;
 
-            using (new HDEditorUtils.IndentScope())
+            using (new IndentLevelScope())
             {
                 // Draw the focus mode controls
                 DrawFocusSettings(mode);
@@ -91,7 +104,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
             base.OnInspectorGUI();
 
-            using (new HDEditorUtils.IndentScope())
+            using (new IndentLevelScope())
             {
                 // Draw the quality controls
                 DrawQualitySettings();
@@ -102,41 +115,120 @@ namespace UnityEditor.Rendering.HighDefinition
         {
             if (mode == (int)DepthOfFieldMode.UsePhysicalCamera)
             {
-                PropertyField(m_FocusDistance);
+                EditorGUILayout.HelpBox(Styles.FocusDistanceInfoBox, MessageType.Info);
+                PropertyField(m_FocusDistanceMode);
+
+                int distanceMode = m_FocusDistanceMode.value.intValue;
+                if (distanceMode == (int)FocusDistanceMode.Volume)
+                {
+                    PropertyField(m_FocusDistance);
+                }
             }
             else if (mode == (int)DepthOfFieldMode.Manual)
             {
-                EditorGUILayout.LabelField("Near Range", EditorStyles.miniLabel);
+                EditorGUI.BeginChangeCheck();
                 PropertyField(m_NearFocusStart, Styles.k_NearFocusStart);
-                PropertyField(m_NearFocusEnd, Styles.k_NearFocusEnd);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    float maxBound = m_NearFocusEnd.overrideState.boolValue ? m_NearFocusEnd.value.floatValue :
+                        m_FarFocusStart.overrideState.boolValue ? m_FarFocusStart.value.floatValue :
+                        m_FarFocusEnd.overrideState.boolValue ? m_FarFocusEnd.value.floatValue : float.MaxValue;
+                    if (m_NearFocusStart.value.floatValue >= maxBound)
+                        m_NearFocusStart.value.floatValue = maxBound - 1e-5f;
+                }
 
-                EditorGUILayout.LabelField("Far Range", EditorStyles.miniLabel);
+                EditorGUI.BeginChangeCheck();
+                PropertyField(m_NearFocusEnd, Styles.k_NearFocusEnd);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    float minBound = m_NearFocusStart.overrideState.boolValue ? m_NearFocusStart.value.floatValue : float.MinValue;
+                    if (m_NearFocusEnd.value.floatValue <= minBound)
+                        m_NearFocusEnd.value.floatValue = minBound + 1e-5f;
+
+                    float maxBound = m_FarFocusStart.overrideState.boolValue ? m_FarFocusStart.value.floatValue :
+                        m_FarFocusEnd.overrideState.boolValue ? m_FarFocusEnd.value.floatValue : float.MaxValue;
+                    if (m_NearFocusEnd.value.floatValue >= maxBound)
+                        m_NearFocusEnd.value.floatValue = maxBound - 1e-5f;
+                }
+
+                EditorGUI.BeginChangeCheck();
                 PropertyField(m_FarFocusStart, Styles.k_FarFocusStart);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    float minBound = m_NearFocusEnd.overrideState.boolValue ? m_NearFocusEnd.value.floatValue :
+                        m_NearFocusStart.overrideState.boolValue ? m_NearFocusStart.value.floatValue : float.MinValue;
+                    if (m_FarFocusStart.value.floatValue <= minBound)
+                        m_FarFocusStart.value.floatValue = minBound + 1e-5f;
+
+                    float maxBound = m_FarFocusEnd.overrideState.boolValue ? m_FarFocusEnd.value.floatValue : float.MaxValue;
+                    if (m_FarFocusStart.value.floatValue >= maxBound)
+                        m_FarFocusStart.value.floatValue = maxBound - 1e-5f;
+                }
+
+                EditorGUI.BeginChangeCheck();
                 PropertyField(m_FarFocusEnd, Styles.k_FarFocusEnd);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    float minBound = m_FarFocusStart.overrideState.boolValue ? m_FarFocusStart.value.floatValue :
+                        m_NearFocusEnd.overrideState.boolValue ? m_NearFocusEnd.value.floatValue :
+                        m_NearFocusStart.overrideState.boolValue ? m_NearFocusStart.value.floatValue : float.MinValue;
+                    if (m_FarFocusEnd.value.floatValue <= minBound)
+                        m_FarFocusEnd.value.floatValue = minBound + 1e-5f;
+                }
             }
         }
 
         void DrawQualitySettings()
         {
+            if (EditorGraphicsSettings.ShouldValidateGraphicsForActiveBuildTarget())
+            {
+                DepthOfField dof = HDEditorUtils.GetVolumeComponentDefaultState<DepthOfField>();
+
+                bool useDefaultQuality = !overrideState;
+                int effectiveQuality = useDefaultQuality
+                    ? dof?.quality.value ?? (int)ScalableSettingLevelParameter.Level.Low
+                    : value;
+
+                if (effectiveQuality > (int)ScalableSettingLevelParameter.Level.Low &&
+                    effectiveQuality != k_CustomQuality)
+                {
+                    string tierName = ((ScalableSettingLevelParameter.Level)effectiveQuality).ToString();
+
+                    HDEditorUtils.ShowFeatureOptimisationWarning(tierName);
+                }
+            }
+
             using (new QualityScope(this))
             {
-                EditorGUILayout.LabelField("Near Blur", EditorStyles.miniLabel);
                 PropertyField(m_NearSampleCount, Styles.k_NearSampleCount);
                 PropertyField(m_NearMaxBlur, Styles.k_NearMaxBlur);
-
-                EditorGUILayout.LabelField("Far Blur", EditorStyles.miniLabel);
                 PropertyField(m_FarSampleCount, Styles.k_FarSampleCount);
                 PropertyField(m_FarMaxBlur, Styles.k_FarMaxBlur);
+                PropertyField(m_PhysicallyBased);
+                PropertyField(m_Resolution);
+                if (m_PhysicallyBased.value.boolValue)
+                    PropertyField(m_AdaptiveSamplingWeight);
 
-                if (isInAdvancedMode)
+                if (m_PhysicallyBased.value.boolValue)
                 {
-                    EditorGUILayout.LabelField("Advanced Tweaks", EditorStyles.miniLabel);
-                    PropertyField(m_Resolution);
-                    PropertyField(m_HighQualityFiltering);
-                    PropertyField(m_PhysicallyBased);
-                    if (m_PhysicallyBased.value.boolValue == true)
+                    if (BeginAdditionalPropertiesScope())
+                    {
+                        EditorGUILayout.Space();
                         EditorGUILayout.HelpBox(Styles.InfoBox, MessageType.Info);
+                    }
+                    EndAdditionalPropertiesScope();
                 }
+                else
+                {
+                    PropertyField(m_HighQualityFiltering);
+                }
+
+                if (m_FocusMode.value.intValue == (int)DepthOfFieldMode.Manual && !m_PhysicallyBased.value.boolValue)
+                {
+                    PropertyField(m_LimitManualRangeNearBlur);
+                }
+
+                PropertyField(m_CoCStabilization);
             }
         }
 
@@ -150,8 +242,8 @@ namespace UnityEditor.Rendering.HighDefinition
             settings.Save<int>(m_FarSampleCount);
             settings.Save<float>(m_FarMaxBlur);
             settings.Save<int>(m_Resolution);
-            settings.Save<bool>(m_HighQualityFiltering);
             settings.Save<bool>(m_PhysicallyBased);
+            settings.Save<bool>(m_LimitManualRangeNearBlur);
 
             return settings;
         }
@@ -163,8 +255,8 @@ namespace UnityEditor.Rendering.HighDefinition
             settings.TryLoad<int>(ref m_FarSampleCount);
             settings.TryLoad<float>(ref m_FarMaxBlur);
             settings.TryLoad<int>(ref m_Resolution);
-            settings.TryLoad<bool>(ref m_HighQualityFiltering);
             settings.TryLoad<bool>(ref m_PhysicallyBased);
+            settings.TryLoad<bool>(ref m_LimitManualRangeNearBlur);
         }
 
         public override void LoadSettingsFromQualityPreset(RenderPipelineSettings settings, int level)
@@ -176,6 +268,7 @@ namespace UnityEditor.Rendering.HighDefinition
             CopySetting(ref m_Resolution, (int)settings.postProcessQualitySettings.DoFResolution[level]);
             CopySetting(ref m_HighQualityFiltering, settings.postProcessQualitySettings.DoFHighQualityFiltering[level]);
             CopySetting(ref m_PhysicallyBased, settings.postProcessQualitySettings.DoFPhysicallyBased[level]);
+            CopySetting(ref m_LimitManualRangeNearBlur, settings.postProcessQualitySettings.LimitManualRangeNearBlur[level]);
         }
     }
 }

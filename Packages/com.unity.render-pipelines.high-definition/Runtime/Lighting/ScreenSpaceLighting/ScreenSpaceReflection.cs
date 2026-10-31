@@ -15,6 +15,16 @@ namespace UnityEngine.Rendering.HighDefinition
         PBRAccumulation
     }
 
+    [GenerateHLSL]
+    // Define if we use SSR, RTR, Mixed or none
+    enum ReflectionsMode
+    {
+        Off,
+        ScreenSpace,
+        RayTraced,
+        Mixed
+    }
+
     /// <summary>
     /// Screen Space Reflection Algorithm Type volume parameter.
     /// </summary>
@@ -34,32 +44,36 @@ namespace UnityEngine.Rendering.HighDefinition
     /// A volume component that holds settings for screen space reflection and ray traced reflections.
     /// </summary>
     [Serializable, VolumeComponentMenu("Lighting/Screen Space Reflection")]
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Override-Screen-Space-Reflection" + Documentation.endURL)]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
+    [HDRPHelpURL("Override-Screen-Space-Reflection")]
     public class ScreenSpaceReflection : VolumeComponentWithQuality
     {
         bool UsesRayTracingQualityMode()
         {
             // The default value is set to quality. So we should be in quality if not overriden or we have an override set to quality
-            return !mode.overrideState || mode == RayTracingMode.Quality;
+            return (tracing.overrideState && tracing.value == RayCastingMode.RayTracing && (!mode.overrideState || (mode.overrideState && mode.value == RayTracingMode.Quality)));
         }
 
         bool UsesRayTracing()
         {
             var hdAsset = HDRenderPipeline.currentAsset;
-            return hdAsset != null && hdAsset.currentPlatformRenderPipelineSettings.supportRayTracing && rayTracing.overrideState && rayTracing.value;
+            return hdAsset != null && hdAsset.currentPlatformRenderPipelineSettings.supportRayTracing
+                && tracing.overrideState && tracing.value != RayCastingMode.RayMarching;
         }
 
+        #region General
         /// <summary>Enable Screen Space Reflections.</summary>
         [Tooltip("Enable Screen Space Reflections.")]
-        public BoolParameter enabled = new BoolParameter(true);
+        public BoolParameter enabled = new BoolParameter(true, BoolParameter.DisplayType.EnumPopup);
 
-        /// <summary>Screen Space Reflections Algorithm used.</summary>
-        public SSRAlgoParameter usedAlgorithm = new SSRAlgoParameter(ScreenSpaceReflectionAlgorithm.Approximation);
+        /// <summary>Enable Transparent Screen Space Reflections.</summary>
+        [Tooltip("Enable Transparent Screen Space Reflections.")]
+        public BoolParameter enabledTransparent = new BoolParameter(true, BoolParameter.DisplayType.EnumPopup);
 
         /// <summary>
-        /// Enable ray traced reflections.
         /// </summary>
-        public BoolParameter rayTracing = new BoolParameter(false);
+        [Tooltip("Controls the casting technique used to evaluate the effect.")]
+        public RayCastingModeParameter tracing = new RayCastingModeParameter(RayCastingMode.RayMarching);
 
         // Shared Data
         /// <summary>
@@ -76,6 +90,8 @@ namespace UnityEngine.Rendering.HighDefinition
             }
             set { m_MinSmoothness.value = value; }
         }
+        [SerializeField, FormerlySerializedAs("minSmoothness")]
+        private ClampedFloatParameter m_MinSmoothness = new ClampedFloatParameter(0.9f, 0.0f, 1.0f);
 
         /// <summary>
         /// Controls the smoothness value at which the smoothness-controlled fade out starts. The fade is in the range [Min Smoothness, Smoothness Fade Start]
@@ -91,11 +107,18 @@ namespace UnityEngine.Rendering.HighDefinition
             }
             set { m_SmoothnessFadeStart.value = value; }
         }
+        [SerializeField, FormerlySerializedAs("smoothnessFadeStart")]
+        private ClampedFloatParameter m_SmoothnessFadeStart = new ClampedFloatParameter(0.9f, 0.0f, 1.0f);
+        #endregion
 
+        #region Ray Marching
         /// <summary>
-        /// When enabled, SSR handles sky reflection.
+        /// When enabled, SSR handles sky reflection for opaque objects (not supported for SSR on transparent).
         /// </summary>
         public BoolParameter reflectSky = new BoolParameter(true);
+
+        /// <summary>Screen Space Reflections Algorithm used.</summary>
+        public SSRAlgoParameter usedAlgorithm = new SSRAlgoParameter(ScreenSpaceReflectionAlgorithm.Approximation);
 
         // SSR Data
         /// <summary>
@@ -114,115 +137,47 @@ namespace UnityEngine.Rendering.HighDefinition
         public ClampedFloatParameter accumulationFactor = new ClampedFloatParameter(0.75f, 0.0f, 1.0f);
 
         /// <summary>
-        /// Layer mask used to include the objects for screen space reflection.
+        /// For PBR: Controls the bias of accumulation (0 no bias, 1 bias ssr)
         /// </summary>
-        public LayerMaskParameter layerMask = new LayerMaskParameter(-1);
+        [AdditionalProperty]
+        public ClampedFloatParameter biasFactor = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
 
         /// <summary>
-        /// Controls the length of reflection rays.
+        /// Controls the likelihood history will be rejected based on the previous frame motion vectors of both the surface and the hit object in world space.
         /// </summary>
-        public float rayLength
-        {
-            get
-            {
-                if (!UsesQualitySettings() || UsesRayTracingQualityMode())
-                    return m_RayLength.value;
-                else
-                    return GetLightingQualitySettings().RTRRayLength[(int)quality.value];
-            }
-            set { m_RayLength.value = value; }
-        }
+        // If change this value, must change on ScreenSpaceReflections.compute on 'float speed = saturate((speedDst + speedSrc) * 128.0f / (...)'
+        [AdditionalProperty]
+        public FloatParameter speedRejectionParam = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
 
         /// <summary>
-        /// Clamps the exposed intensity.
+        /// Controls the upper range of speed. The faster the objects or camera are moving, the higher this number should be.
         /// </summary>
-        public float clampValue
-        {
-            get
-            {
-                if (!UsesQualitySettings() || UsesRayTracingQualityMode())
-                    return m_ClampValue.value;
-                else
-                    return GetLightingQualitySettings().RTRClampValue[(int)quality.value];
-            }
-            set { m_ClampValue.value = value; }
-        }
+        // If change this value, must change on ScreenSpaceReflections.compute on 'float speed = saturate((speedDst + speedSrc) * 128.0f / (...)'
+        [AdditionalProperty]
+        public ClampedFloatParameter speedRejectionScalerFactor = new ClampedFloatParameter(0.2f, 0.001f, 1f);
 
         /// <summary>
-        /// Enable denoising on the ray traced reflections.
+        /// When enabled, history can be partially rejected for moving objects which gives a smoother transition. When disabled, history is either kept or totally rejected.
         /// </summary>
-        public bool denoise
-        {
-            get
-            {
-                if (!UsesQualitySettings() || UsesRayTracingQualityMode())
-                    return m_Denoise.value;
-                else
-                    return GetLightingQualitySettings().RTRDenoise[(int)quality.value];
-            }
-            set { m_Denoise.value = value; }
-        }
+        [AdditionalProperty]
+        public BoolParameter speedSmoothReject = new BoolParameter(false);
 
         /// <summary>
-        /// Controls the radius of reflection denoiser.
+        /// When enabled, speed rejection used world space motion of the reflecting surface.
         /// </summary>
-        public int denoiserRadius
-        {
-            get
-            {
-                if (!UsesQualitySettings() || UsesRayTracingQualityMode())
-                    return m_DenoiserRadius.value;
-                else
-                    return GetLightingQualitySettings().RTRDenoiserRadius[(int)quality.value];
-            }
-            set { m_DenoiserRadius.value = value; }
-        }
-        /// <summary>
-        /// Controls which version of the effect should be used.
-        /// </summary>
-        public RayTracingModeParameter mode = new RayTracingModeParameter(RayTracingMode.Quality);
-
-        // Performance
-        /// <summary>
-        /// Controls the size of the upscale radius.
-        /// </summary>
-        public int upscaleRadius
-        {
-            get
-            {
-                if (!UsesQualitySettings())
-                    return m_UpscaleRadius.value;
-                else
-                    return GetLightingQualitySettings().RTRUpScaleRadius[(int)quality.value];
-            }
-            set { m_UpscaleRadius.value = value; }
-        }
+        [AdditionalProperty]
+        public BoolParameter speedSurfaceOnly = new BoolParameter(true);
 
         /// <summary>
-        /// Defines if the effect should be evaluated at full resolution.
+        /// When enabled, speed rejection used world space motion of the hit surface by the SSR.
         /// </summary>
-        public bool fullResolution
-        {
-            get
-            {
-                if (!UsesQualitySettings())
-                    return m_FullResolution.value;
-                else
-                    return GetLightingQualitySettings().RTRFullResolution[(int)quality.value];
-            }
-            set { m_FullResolution.value = value; }
-        }
+        [AdditionalProperty]
+        public BoolParameter speedTargetOnly = new BoolParameter(true);
 
-
-        // Quality
         /// <summary>
-        /// Number of samples for reflections.
+        /// When enabled, world space speed from Motion vector is used to reject samples.
         /// </summary>
-        public ClampedIntParameter sampleCount = new ClampedIntParameter(1, 1, 32);
-        /// <summary>
-        /// Number of bounces for reflection rays.
-        /// </summary>
-        public ClampedIntParameter bounceCount = new ClampedIntParameter(1, 1, 8);
+        public BoolParameter enableWorldSpeedRejection = new BoolParameter(false);
 
         /// <summary>
         /// Sets the maximum number of steps HDRP uses for raytracing. Affects both correctness and performance.
@@ -239,36 +194,189 @@ namespace UnityEngine.Rendering.HighDefinition
             set { m_RayMaxIterations.value = value; }
         }
 
-        [SerializeField, FormerlySerializedAs("minSmoothness")]
-        private ClampedFloatParameter m_MinSmoothness = new ClampedFloatParameter(0.9f, 0.0f, 1.0f);
-
-        [SerializeField, FormerlySerializedAs("smoothnessFadeStart")]
-        private ClampedFloatParameter m_SmoothnessFadeStart = new ClampedFloatParameter(0.9f, 0.0f, 1.0f);
-
         [SerializeField, FormerlySerializedAs("rayMaxIterations")]
-        private IntParameter m_RayMaxIterations = new IntParameter(32);
+        private MinIntParameter m_RayMaxIterations = new MinIntParameter(64, 0);
+        #endregion
 
+        #region Ray Tracing
+        /// <summary>
+        /// Controls which sources are used to fallback on when the traced ray misses.
+        /// </summary>
+        [FormerlySerializedAs("fallbackHierachy")]
+        [AdditionalProperty]
+        public RayTracingFallbackHierachyParameter rayMiss = new RayTracingFallbackHierachyParameter(RayTracingFallbackHierachy.ReflectionProbesAndSky);
+
+        /// <summary>
+        /// Controls the fallback hierarchy for lighting the last bounce.
+        /// </summary>
+        [AdditionalProperty]
+        public RayTracingFallbackHierachyParameter lastBounceFallbackHierarchy = new RayTracingFallbackHierachyParameter(RayTracingFallbackHierachy.ReflectionProbesAndSky);
+
+        /// <summary>
+        /// Controls the dimmer applied to the ambient and legacy light probes.
+        /// </summary>
+        [Tooltip("Controls the dimmer applied to the ambient and legacy light probes.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter ambientProbeDimmer = new ClampedFloatParameter(1.0f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Layer mask used to include the objects for screen space reflection.
+        /// </summary>
+        public LayerMaskParameter layerMask = new LayerMaskParameter(-1);
+
+        /// <summary>
+        /// Defines the LOD Bias for sampling all the textures.
+        /// </summary>
+        public ClampedFloatParameter textureLodBias = new ClampedFloatParameter(1.0f, 0.0f, 7.0f);
+
+        /// <summary>
+        /// Controls the length of reflection rays in meters.
+        /// </summary>
+        public float rayLength
+        {
+            get
+            {
+                if (!UsesQualitySettings() || UsesRayTracingQualityMode())
+                    return m_RayLength.value;
+                else
+                    return GetLightingQualitySettings().RTRRayLength[(int)quality.value];
+            }
+            set { m_RayLength.value = value; }
+        }
         [SerializeField, FormerlySerializedAs("rayLength")]
         private MinFloatParameter m_RayLength = new MinFloatParameter(50.0f, 0.01f);
 
+        /// <summary>
+        /// Clamps the exposed intensity, this only affects reflections on opaque objects.
+        /// </summary>
+        public float clampValue
+        {
+            get
+            {
+                return m_ClampValue.value;
+            }
+            set { m_ClampValue.value = value; }
+        }
         [SerializeField, FormerlySerializedAs("clampValue")]
-        [Tooltip("Controls the clamp of intensity.")]
-        private ClampedFloatParameter m_ClampValue = new ClampedFloatParameter(1.0f, 0.001f, 10.0f);
+        [Tooltip("Clamps the exposed intensity, this only affects reflections on opaque objects.")]
+        private MinFloatParameter m_ClampValue = new MinFloatParameter(100.0f, 0.001f);
 
-        [SerializeField, FormerlySerializedAs("upscaleRadius")]
-        [Tooltip("Upscale Radius")]
-        private ClampedIntParameter m_UpscaleRadius = new ClampedIntParameter(2, 2, 6);
-
-        [SerializeField, FormerlySerializedAs("fullResolution")]
-        [Tooltip("Full Resolution")]
-        private BoolParameter m_FullResolution = new BoolParameter(false);
-
+        /// <summary>
+        /// Enable denoising on the ray traced reflections.
+        /// </summary>
+        public bool denoise
+        {
+            get
+            {
+                if (!UsesQualitySettings() || UsesRayTracingQualityMode())
+                    return m_Denoise.value;
+                else
+                    return GetLightingQualitySettings().RTRDenoise[(int)quality.value];
+            }
+            set { m_Denoise.value = value; }
+        }
         [SerializeField, FormerlySerializedAs("denoise")]
         [Tooltip("Denoise the ray-traced reflection.")]
         private BoolParameter m_Denoise = new BoolParameter(true);
 
-        [SerializeField, FormerlySerializedAs("denoiserRadius")]
+        /// <summary>
+        /// Controls the radius of reflection denoiser.
+        /// </summary>
+        public float denoiserRadius
+        {
+            get
+            {
+                if (!UsesQualitySettings() || UsesRayTracingQualityMode())
+                    return m_DenoiserRadius.value;
+                else
+                    return GetLightingQualitySettings().RTRDenoiserRadiusDimmer[(int)quality.value];
+            }
+            set { m_DenoiserRadius.value = value; }
+        }
+        [SerializeField]
         [Tooltip("Controls the radius of the ray traced reflection denoiser.")]
-        private ClampedIntParameter m_DenoiserRadius = new ClampedIntParameter(8, 1, 32);
+        private ClampedFloatParameter m_DenoiserRadius = new ClampedFloatParameter(0.75f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Controls the anti-flickering strength of the reflection denoiser.
+        /// </summary>
+        public float denoiserAntiFlickeringStrength
+        {
+            get
+            {
+                if (!UsesQualitySettings() || UsesRayTracingQualityMode())
+                    return m_DenoiserAntiFlickeringStrength.value;
+                else
+                    return GetLightingQualitySettings().RTRDenoiserAntiFlicker[(int)quality.value];
+            }
+            set { m_DenoiserAntiFlickeringStrength.value = value; }
+        }
+        [SerializeField]
+        [Tooltip("Controls the anti-flickering strength of the reflection denoiser.")]
+        private ClampedFloatParameter m_DenoiserAntiFlickeringStrength = new ClampedFloatParameter(1.0f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Controls which version of the effect should be used.
+        /// </summary>
+        public RayTracingModeParameter mode = new RayTracingModeParameter(RayTracingMode.Quality);
+
+        /// <summary>
+        /// Defines if the effect should be evaluated at full resolution.
+        /// </summary>
+        public bool fullResolution
+        {
+            get
+            {
+                if (!UsesQualitySettings())
+                    return m_FullResolution.value;
+                else
+                    return GetLightingQualitySettings().RTRFullResolution[(int)quality.value];
+            }
+            set { m_FullResolution.value = value; }
+        }
+        [SerializeField, FormerlySerializedAs("fullResolution")]
+        [Tooltip("Full Resolution")]
+        private BoolParameter m_FullResolution = new BoolParameter(false);
+
+        // Quality
+        /// <summary>
+        /// Number of samples for reflections.
+        /// </summary>
+        public ClampedIntParameter sampleCount = new ClampedIntParameter(1, 1, 32);
+        /// <summary>
+        /// Number of bounces for reflection rays.
+        /// </summary>
+        public ClampedIntParameter bounceCount = new ClampedIntParameter(1, 1, 8);
+
+        /// <summary>
+        /// Sets the maximum number of steps HDRP uses for mixed tracing. Affects both correctness and performance.
+        /// </summary>
+        public int rayMaxIterationsRT
+        {
+            get
+            {
+                if (!UsesQualitySettings())
+                    return m_RayMaxIterationsRT.value;
+                else
+                    return GetLightingQualitySettings().RTRRayMaxIterations[(int)quality.value];
+            }
+            set { m_RayMaxIterationsRT.value = value; }
+        }
+
+        [SerializeField, FormerlySerializedAs("rayMaxIterations")]
+        private MinIntParameter m_RayMaxIterationsRT = new MinIntParameter(48, 0);
+
+        /// <summary>
+        /// Controls which rendering layer mask to prioritize when sampling probes for indirect diffuse in reflections.
+        /// </summary>
+        [Tooltip("Controls which APV rendering layer mask to sample from. If no probes in proximity are from the specified layer or the feature is disabled for the Baking Set, any surrounding probes will be sampled.")]
+        [AdditionalProperty]
+        public RenderingLayerMaskParameter adaptiveProbeVolumesLayerMask = new RenderingLayerMaskParameter(UnityEngine.RenderingLayerMask.defaultRenderingLayerMask);
+        #endregion
+
+        internal static bool RayTracingActive(ScreenSpaceReflection volume)
+        {
+            return volume.tracing.value != RayCastingMode.RayMarching;
+        }
     }
 }

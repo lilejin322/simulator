@@ -25,6 +25,8 @@ Shader "Simulator/PointCloud/SolidRender"
             struct v2f
             {
                 float4 Position : SV_POSITION;
+                // Metal rasterizes points at an undefined size unless the shader sets one
+                float PointSize : PSIZE;
                 // float2 Depth : DEPTH;
                 nointerpolation float4 Color : COLOR;
                 nointerpolation float Height : HEIGHT;
@@ -37,6 +39,7 @@ Shader "Simulator/PointCloud/SolidRender"
                 v2f Output;
                 Output.Color = PointCloudUnpack(pt.Color);
                 Output.Position = mul(_PointCloudMVP, float4(pt.Position, 1));
+                Output.PointSize = 1;
                 // Output.Depth = Output.Position.zw;
                 Output.Height = pt.Position.y;
                 return Output;

@@ -30,10 +30,12 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         {
             base.CreatePropertyGUI();
 
+            bool hasDiffusionProfile = (systemData.surfaceType != SurfaceType.Transparent && stackLitData.subsurfaceScattering) || stackLitData.transmission;
+
             // StackLit specific properties:
 
             AddProperty("Base Color Parametrization", () => stackLitData.baseParametrization, (newValue) => stackLitData.baseParametrization = newValue);
-            if (stackLitData.baseParametrization == StackLit.BaseParametrization.SpecularColor)
+            if (stackLitData.baseParametrization == StackLit.BaseParametrization.SpecularColor && (!hasDiffusionProfile || !stackLitData.useProfileIOR))
             {
                 AddProperty("Energy Conserving Specular", () => stackLitData.energyConservingSpecular, (newValue) => stackLitData.energyConservingSpecular = newValue, 1);
             }
@@ -51,6 +53,8 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             if (systemData.surfaceType != SurfaceType.Transparent)
                 AddProperty("Subsurface Scattering", () => stackLitData.subsurfaceScattering, (newValue) => stackLitData.subsurfaceScattering = newValue, 1);
             AddProperty("Transmission", () => stackLitData.transmission, (newValue) => stackLitData.transmission = newValue, 1);
+            if (hasDiffusionProfile)
+                AddProperty("Use IOR From Diffusion Profile", () => stackLitData.useProfileIOR, (newValue) => stackLitData.useProfileIOR = newValue, 1);
 
             // SpecularOcclusion from SSAO
             if (stackLitData.devMode)
@@ -64,7 +68,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 
             // SpecularOcclusion from input AO (baked or data-based SO)
             EnumField specularOcclusionFromInputAOField;
-            if(stackLitData.devMode)
+            if (stackLitData.devMode)
             {
                 specularOcclusionFromInputAOField = new EnumField(StackLitData.SpecularOcclusionBaseMode.DirectFromAO);
                 specularOcclusionFromInputAOField.value = stackLitData.dataBasedSpecularOcclusionBaseMode;
@@ -96,22 +100,9 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                 AddProperty("Specular Occlusion Bent Cone Fixup", () => stackLitData.specularOcclusionConeFixupMethod != StackLitData.SpecularOcclusionConeFixupMethod.Off, (newValue) =>
                 {
                     stackLitData.specularOcclusionConeFixupMethod = newValue ? StackLitData.SpecularOcclusionConeFixupMethod.BoostAndTilt
-                                                        : StackLitData.SpecularOcclusionConeFixupMethod.Off;
+                        : StackLitData.SpecularOcclusionConeFixupMethod.Off;
                 }, 0);
             }
-            
-            // Misc Cont.
-            // Advanced Options
-            context.AddLabel("Advanced Options", 0);
-            AddProperty("Anisotropy For Area Lights", () => stackLitData.anisotropyForAreaLights, (newValue) => stackLitData.anisotropyForAreaLights = newValue, 1);
-
-            // Per Punctual/Directional Lights
-            context.AddLabel("Per Punctual/Directional Lights:", 1);
-            if (stackLitData.coat)
-                AddProperty("Base Layer Uses Refracted Angles", () => stackLitData.shadeBaseUsingRefractedAngles, (newValue) => stackLitData.shadeBaseUsingRefractedAngles = newValue, 2);
-            if (stackLitData.coat || stackLitData.iridescence)
-                AddProperty("Recompute Stack & Iridescence", () => stackLitData.recomputeStackPerLight, (newValue) => stackLitData.recomputeStackPerLight = newValue, 2);
-            AddProperty("Honor Per Light Max Smoothness", () => stackLitData.honorPerLightMinRoughness, (newValue) => stackLitData.honorPerLightMinRoughness = newValue, 2);
 
             // Debug
             // Uncomment to show the dev mode UI:

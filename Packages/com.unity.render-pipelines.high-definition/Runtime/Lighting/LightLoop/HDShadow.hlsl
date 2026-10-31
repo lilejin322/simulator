@@ -17,13 +17,17 @@
 
 # include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/Shadow/HDShadowContext.hlsl"
 
+// Normal light loop is guaranteed to be scalar, but not always we sample shadows with said guarantee. In those cases we define SHADOW_DATA_NOT_GUARANTEED_SCALAR to skip the forcing into scalar.
+#define FORCE_SHADOW_SCALAR_READ !defined(SHADOW_DATA_NOT_GUARANTEED_SCALAR) && !defined(SHADER_API_XBOXONE) && !defined(SHADER_API_GAMECORE) && (defined(PLATFORM_SUPPORTS_WAVE_INTRINSICS) && !defined(LIGHTLOOP_DISABLE_TILE_AND_CLUSTER))
+
+
 // normalWS is the vertex normal if available or shading normal use to bias the shadow position
-float GetDirectionalShadowAttenuation(HDShadowContext shadowContext, float2 positionSS, float3 positionWS, float3 normalWS, int shadowDataIndex, float3 L)
+float GetDirectionalShadowAttenuation(inout HDShadowContext shadowContext, float2 positionSS, float3 positionWS, float3 normalWS, int shadowDataIndex, float3 L)
 {
 #if SHADOW_AUTO_FLIP_NORMAL
     normalWS *= FastSign(dot(normalWS, L));
 #endif
-#if defined(SHADOW_ULTRA_LOW) || defined(SHADOW_LOW) || defined(SHADOW_MEDIUM)
+#if defined(DIRECTIONAL_SHADOW_ULTRA_LOW) || defined(DIRECTIONAL_SHADOW_LOW) || defined(DIRECTIONAL_SHADOW_MEDIUM)
     return EvalShadow_CascadedDepth_Dither(shadowContext, _ShadowmapCascadeAtlas, s_linear_clamp_compare_sampler, positionSS, positionWS, normalWS, shadowDataIndex, L);
 #else
     return EvalShadow_CascadedDepth_Blend(shadowContext, _ShadowmapCascadeAtlas, s_linear_clamp_compare_sampler, positionSS, positionWS, normalWS, shadowDataIndex, L);
@@ -32,7 +36,7 @@ float GetDirectionalShadowAttenuation(HDShadowContext shadowContext, float2 posi
 
 float GetPunctualShadowAttenuation(HDShadowContext shadowContext, float2 positionSS, float3 positionWS, float3 normalWS, int shadowDataIndex, float3 L, float L_dist, bool pointLight, bool perspecive)
 {
-#if !defined(SHADER_API_XBOXONE) && !defined(SHADER_API_GAMECORE) && (defined(PLATFORM_SUPPORTS_WAVE_INTRINSICS) && !defined(LIGHTLOOP_DISABLE_TILE_AND_CLUSTER))
+#if FORCE_SHADOW_SCALAR_READ
     shadowDataIndex = WaveReadLaneFirst(shadowDataIndex);
 #endif
 
@@ -45,10 +49,11 @@ float GetPunctualShadowAttenuation(HDShadowContext shadowContext, float2 positio
 
     if (pointLight)
     {
-        sd.rot0 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot0;
-        sd.rot1 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot1;
-        sd.rot2 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot2;
-        sd.atlasOffset = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].atlasOffset;
+        const int cubeFaceOffset = CubeMapFaceID(-L);
+        sd.rot0 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot0;
+        sd.rot1 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot1;
+        sd.rot2 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot2;
+        sd.atlasOffset = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].atlasOffset;
     }
 
     if (sd.isInCachedAtlas > 0) // This is a scalar branch.
@@ -61,9 +66,9 @@ float GetPunctualShadowAttenuation(HDShadowContext shadowContext, float2 positio
     }
 }
 
-float GetPunctualShadowClosestDistance(HDShadowContext shadowContext, SamplerState sampl, real3 positionWS, int shadowDataIndex, float3 L, float3 lightPositionWS, bool pointLight)
+float GetPunctualShadowClosestDistance(HDShadowContext shadowContext, SamplerState sampl, real3 positionWS, int shadowDataIndex, float3 L, float3 lightPositionWS, bool pointLight, bool perspective)
 {
-#if !defined(SHADER_API_XBOXONE) && !defined(SHADER_API_GAMECORE) && (defined(PLATFORM_SUPPORTS_WAVE_INTRINSICS) && !defined(LIGHTLOOP_DISABLE_TILE_AND_CLUSTER))
+#if FORCE_SHADOW_SCALAR_READ
     shadowDataIndex = WaveReadLaneFirst(shadowDataIndex);
 #endif
 
@@ -73,20 +78,21 @@ float GetPunctualShadowClosestDistance(HDShadowContext shadowContext, SamplerSta
 
     if (pointLight)
     {
-        sd.shadowToWorld = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].shadowToWorld;
-        sd.atlasOffset = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].atlasOffset;
-        sd.rot0 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot0;
-        sd.rot1 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot1;
-        sd.rot2 = shadowContext.shadowDatas[shadowDataIndex + CubeMapFaceID(-L)].rot2;
+        const int cubeFaceOffset = CubeMapFaceID(-L);
+        sd.shadowToWorld = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].shadowToWorld;
+        sd.atlasOffset = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].atlasOffset;
+        sd.rot0 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot0;
+        sd.rot1 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot1;
+        sd.rot2 = shadowContext.shadowDatas[shadowDataIndex + cubeFaceOffset].rot2;
     }
 
     if (sd.isInCachedAtlas > 0) // This is a scalar branch.
     {
-        return EvalShadow_SampleClosestDistance_Punctual(sd, _CachedShadowmapAtlas, sampl, positionWS, L, lightPositionWS);
+        return EvalShadow_SampleClosestDistance_Punctual(sd, _CachedShadowmapAtlas, sampl, positionWS, L, lightPositionWS, perspective);
     }
     else
     {
-        return EvalShadow_SampleClosestDistance_Punctual(sd, _ShadowmapAtlas, sampl, positionWS, L, lightPositionWS);
+        return EvalShadow_SampleClosestDistance_Punctual(sd, _ShadowmapAtlas, sampl, positionWS, L, lightPositionWS, perspective);
     }
 }
 
@@ -94,7 +100,7 @@ float GetRectAreaShadowAttenuation(HDShadowContext shadowContext, float2 positio
 {
     // We need to disable the scalarization here on xbox due to bad code generated by FXC for the eye shader.
     // This shouldn't have an enormous impact since with Area lights we are already exploded in VGPR by this point.
-#if !defined(SHADER_API_XBOXONE) && !defined(SHADER_API_GAMECORE) && (defined(PLATFORM_SUPPORTS_WAVE_INTRINSICS) && !defined(LIGHTLOOP_DISABLE_TILE_AND_CLUSTER))
+#if FORCE_SHADOW_SCALAR_READ
     shadowDataIndex = WaveReadLaneFirst(shadowDataIndex);
 #endif
     HDShadowData sd = shadowContext.shadowDatas[shadowDataIndex];

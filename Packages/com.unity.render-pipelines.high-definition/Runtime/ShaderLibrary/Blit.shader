@@ -4,157 +4,24 @@ Shader "Hidden/HDRP/Blit"
 
         #pragma target 4.5
         #pragma editor_sync_compilation
-        #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+        #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
         #pragma multi_compile _ DISABLE_TEXTURE2D_X_ARRAY
         #pragma multi_compile _ BLIT_SINGLE_SLICE
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
         #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
-
-        TEXTURE2D_X(_BlitTexture);
-        SamplerState sampler_PointClamp;
-        SamplerState sampler_LinearClamp;
-        SamplerState sampler_PointRepeat;
-        SamplerState sampler_LinearRepeat;
-        uniform float4 _BlitScaleBias;
-        uniform float4 _BlitScaleBiasRt;
-        uniform float _BlitMipLevel;
-        uniform float2 _BlitTextureSize;
-        uniform uint _BlitPaddingSize;
-        uniform int _BlitTexArraySlice;
-
-        struct Attributes
-        {
-            uint vertexID : SV_VertexID;
-            UNITY_VERTEX_INPUT_INSTANCE_ID
-        };
-
-        struct Varyings
-        {
-            float4 positionCS : SV_POSITION;
-            float2 texcoord   : TEXCOORD0;
-            UNITY_VERTEX_OUTPUT_STEREO
-        };
-
-        Varyings Vert(Attributes input)
-        {
-            Varyings output;
-            UNITY_SETUP_INSTANCE_ID(input);
-            UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
-            output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
-            output.texcoord   = GetFullScreenTriangleTexCoord(input.vertexID) * _BlitScaleBias.xy + _BlitScaleBias.zw;
-            return output;
-        }
-
-        Varyings VertQuad(Attributes input)
-        {
-            Varyings output;
-            UNITY_SETUP_INSTANCE_ID(input);
-            UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
-            output.positionCS = GetQuadVertexPosition(input.vertexID) * float4(_BlitScaleBiasRt.x, _BlitScaleBiasRt.y, 1, 1) + float4(_BlitScaleBiasRt.z, _BlitScaleBiasRt.w, 0, 0);
-            output.positionCS.xy = output.positionCS.xy * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f); //convert to -1..1
-            output.texcoord = GetQuadTexCoord(input.vertexID) * _BlitScaleBias.xy + _BlitScaleBias.zw;
-            return output;
-        }
-
-        Varyings VertQuadPadding(Attributes input)
-        {
-            Varyings output;
-            UNITY_SETUP_INSTANCE_ID(input);
-            UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
-
-            float2 scalePadding = ((_BlitTextureSize + float(_BlitPaddingSize)) / _BlitTextureSize);
-            float2 offsetPaddding = (float(_BlitPaddingSize) / 2.0) / (_BlitTextureSize + _BlitPaddingSize);
-
-            output.positionCS = GetQuadVertexPosition(input.vertexID) * float4(_BlitScaleBiasRt.x, _BlitScaleBiasRt.y, 1, 1) + float4(_BlitScaleBiasRt.z, _BlitScaleBiasRt.w, 0, 0);
-            output.positionCS.xy = output.positionCS.xy * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f); //convert to -1..1
-            output.texcoord = GetQuadTexCoord(input.vertexID);
-            output.texcoord = (output.texcoord - offsetPaddding) * scalePadding;
-            output.texcoord = output.texcoord * _BlitScaleBias.xy + _BlitScaleBias.zw;
-            return output;
-        }
-
-        float4 Frag(Varyings input, SamplerState s)
-        {
-        #if defined(USE_TEXTURE2D_X_AS_ARRAY) && defined(BLIT_SINGLE_SLICE)
-            return SAMPLE_TEXTURE2D_ARRAY_LOD(_BlitTexture, s, input.texcoord.xy, _BlitTexArraySlice, _BlitMipLevel);
-        #endif
-
-            UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-            return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, s, input.texcoord.xy, _BlitMipLevel);
-        }
-
-        float4 FragNearest(Varyings input) : SV_Target
-        {
-            return Frag(input, sampler_PointClamp);
-        }
-
-        float4 FragBilinear(Varyings input) : SV_Target
-        {
-            return Frag(input, sampler_LinearClamp);
-        }
-
-        float4 FragBilinearRepeat(Varyings input) : SV_Target
-        {
-            UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-            float2 uv = input.texcoord.xy;
-            return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, sampler_LinearRepeat, uv, _BlitMipLevel);
-        }
-
-        float4 FragNearestRepeat(Varyings input) : SV_Target
-        {
-            UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-            float2 uv = input.texcoord.xy;
-            return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, sampler_PointRepeat, uv, _BlitMipLevel);
-        }
-
-        float4 FragOctahedralBilinearRepeat(Varyings input) : SV_Target
-        {
-            UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-            float u = input.texcoord.x;
-            float v = input.texcoord.y;
-
-            float2 uv;
-            if (u < 0.0f)
-            {
-                if (v < 0.0f)
-                    uv = float2(1.0f + u, 1.0f + v);
-                else if (v < 1.0f)
-                    uv = float2(-u, 1.0f - v);
-                else
-                    uv = float2(1.0f + u, v - 1.0f);
-            }
-            else if (u < 1.0f)
-            {
-                if (v < 0.0f)
-                    uv = float2(1.0f - u, -v);
-                else if (v < 1.0f)
-                    uv = float2(u, v);
-                else
-                    uv = float2(1.0f - u, 2.0f - v);
-            }
-            else
-            {
-                if (v < 0.0f)
-                    uv = float2(u - 1.0f, 1.0f + v);
-                else if (v < 1.0f)
-                    uv = float2(2.0f - u, 1.0f - v);
-                else
-                    uv = float2(u - 1.0f, v - 1.0f);
-            }
-
-            return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, sampler_LinearRepeat, uv, _BlitMipLevel);
-        }
-
+        #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
     ENDHLSL
 
     SubShader
     {
+        // Note: Keep shader pass names in sync with the ShaderPassNames enum in Blitter.cs
         Tags{ "RenderPipeline" = "HDRenderPipeline" }
 
         // 0: Nearest
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "Nearest"
 
             HLSLPROGRAM
                 #pragma vertex Vert
@@ -166,6 +33,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "Bilinear"
 
             HLSLPROGRAM
                 #pragma vertex Vert
@@ -177,6 +45,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestQuad"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -188,6 +57,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuad"
 
             HLSLPROGRAM
                 #pragma vertex VertQuad
@@ -199,6 +69,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestQuadPadding"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -210,6 +81,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadPadding"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -217,10 +89,11 @@ Shader "Hidden/HDRP/Blit"
             ENDHLSL
         }
 
-        // 6: Nearest quad with padding
+        // 6: Nearest quad with padding and repeat
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestQuadPaddingRepeat"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -228,10 +101,11 @@ Shader "Hidden/HDRP/Blit"
             ENDHLSL
         }
 
-        // 7: Bilinear quad with padding
+        // 7: Bilinear quad with padding and repeat
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadPaddingRepeat"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -243,6 +117,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadPaddingOctahedral"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -255,6 +130,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "NearestQuadPaddingAlphaBlend"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -267,6 +143,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "BilinearQuadPaddingAlphaBlend"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -275,10 +152,11 @@ Shader "Hidden/HDRP/Blit"
             ENDHLSL
         }
 
-        // 11: Nearest quad with padding alpha blend (6 with alpha blend)
+        // 11: Nearest quad with padding alpha blend repeat (6 with alpha blend)
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "NearestQuadPaddingAlphaBlendRepeat"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -287,10 +165,11 @@ Shader "Hidden/HDRP/Blit"
             ENDHLSL
         }
 
-        // 12: Bilinear quad with padding alpha blend (7 with alpha blend)
+        // 12: Bilinear quad with padding alpha blend repeat (7 with alpha blend)
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "BilinearQuadPaddingAlphaBlendRepeat"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -303,6 +182,7 @@ Shader "Hidden/HDRP/Blit"
         Pass
         {
             ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "BilinearQuadPaddingAlphaBlendOctahedral"
 
             HLSLPROGRAM
                 #pragma vertex VertQuadPadding
@@ -311,6 +191,140 @@ Shader "Hidden/HDRP/Blit"
             ENDHLSL
         }
 
+        // 14. Project Cube to Octahedral 2d quad
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "CubeToOctahedral"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuad
+                #pragma fragment FragOctahedralProject
+            ENDHLSL
+        }
+
+        // 15. Project Cube to Octahedral 2d quad with luminance (grayscale), RGBA to YYYY
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "CubeToOctahedralLuminance"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuad
+                #pragma fragment FragOctahedralProjectLuminance
+            ENDHLSL
+        }
+
+        // 16. Project Cube to Octahedral 2d quad with with A to RGBA (AAAA)
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "CubeToOctahedralAlpha"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuad
+                #pragma fragment FragOctahedralProjectAlphaToRGBA
+            ENDHLSL
+        }
+
+        // 17. Project Cube to Octahedral 2d quad with with R to RGBA (RRRR)
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "CubeToOctahedralRed"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuad
+                #pragma fragment FragOctahedralProjectRedToRGBA
+            ENDHLSL
+        }
+
+        // 18. Bilinear quad with luminance (grayscale), RGBA to YYYY
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadLuminance"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuad
+                #pragma fragment FragBilinearLuminance
+            ENDHLSL
+        }
+
+        // 19. Bilinear quad with A to RGBA (AAAA)
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadAlpha"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuad
+                #pragma fragment FragBilinearAlphaToRGBA
+            ENDHLSL
+        }
+
+        // 20. Bilinear quad with R to RGBA (RRRR)
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearQuadRed"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuad
+                #pragma fragment FragBilinearRedToRGBA
+            ENDHLSL
+        }
+
+        // 21. Nearest project cube to octahedral 2d quad with padding
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestCubeToOctahedralPadding"
+
+            HLSLPROGRAM
+                #pragma multi_compile_local _ BLIT_DECODE_HDR
+                #pragma vertex VertQuadPadding
+                #pragma fragment FragOctahedralProjectNearestRepeat
+            ENDHLSL
+        }
+
+        // 22. Bilinear project cube to octahedral 2d quad with padding
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "BilinearCubeToOctahedralPadding"
+
+            HLSLPROGRAM
+                #pragma multi_compile_local _ BLIT_DECODE_HDR
+                #pragma vertex VertQuadPadding
+                #pragma fragment FragOctahedralProjectBilinearRepeat
+            ENDHLSL
+        }
+
+        // 23: Nearest quad with padding (for OctahedralTexture)
+        Pass
+        {
+            ZWrite Off ZTest Always Blend Off Cull Off
+            Name "NearestQuadPaddingOctahedral"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuadPadding
+                #pragma fragment FragOctahedralNearestRepeat
+            ENDHLSL
+        }
+
+        // 24: Nearest quad with padding alpha blend (for OctahedralTexture) (23 with alpha blend)
+        Pass
+        {
+            ZWrite Off ZTest Always Blend DstColor Zero Cull Off
+            Name "NearestQuadPaddingAlphaBlendOctahedral"
+
+            HLSLPROGRAM
+                #pragma vertex VertQuadPadding
+                #pragma fragment FragOctahedralNearestRepeat
+                #define WITH_ALPHA_BLEND
+            ENDHLSL
+        }
     }
 
     Fallback Off

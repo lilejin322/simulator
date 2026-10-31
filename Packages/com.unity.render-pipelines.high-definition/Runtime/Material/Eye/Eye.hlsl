@@ -2,7 +2,9 @@
 // SurfaceData and BSDFData
 //-----------------------------------------------------------------------------
 // SurfaceData is defined in Eye.cs which generates Eye.cs.hlsl
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Eye/EyeUtils.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Eye/Eye.cs.hlsl"
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Eye/EyeCausticLUT.hlsl"
 // Those define allow to include desired SSS/Transmission functions
 #define MATERIAL_INCLUDE_SUBSURFACESCATTERING
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/SubsurfaceScattering/SubsurfaceScattering.hlsl"
@@ -160,7 +162,14 @@ BSDFData ConvertSurfaceDataToBSDFData(uint2 positionSS, SurfaceData surfaceData)
 
     bsdfData.roughness = ClampRoughnessForAnalyticalLights(PerceptualRoughnessToRoughness(bsdfData.perceptualRoughness));
 
+    bsdfData.irisPlaneOffset = surfaceData.irisPlaneOffset;
+    bsdfData.irisRadius = surfaceData.irisRadius;
+    bsdfData.causticIntensity = surfaceData.causticIntensity;
+    bsdfData.causticBlend = surfaceData.causticBlend;
+
     ApplyDebugToBSDFData(bsdfData);
+
+
 
     return bsdfData;
 }
@@ -228,13 +237,13 @@ void GetBSDFDataDebug(uint paramId, BSDFData bsdfData, inout float3 result, inou
             float3 vsDiffuseNormal = TransformWorldToViewDir(bsdfData.diffuseNormalWS);
             result = IsNormalized(vsDiffuseNormal) ?  vsDiffuseNormal * 0.5 + 0.5 : float3(1.0, 0.0, 0.0);
             break;
-        } 
+        }
     case DEBUGVIEW_EYE_BSDFDATA_GEOMETRIC_NORMAL_VIEW_SPACE:
         {
             float3 vsGeomNormal = TransformWorldToViewDir(bsdfData.geomNormalWS);
             result = IsNormalized(vsGeomNormal) ?  vsGeomNormal * 0.5 + 0.5 : float3(1.0, 0.0, 0.0);
             break;
-        } 
+        }
     case DEBUGVIEW_EYE_BSDFDATA_IOR:
         result = saturate((bsdfData.IOR - 1.0) / 1.5).xxx;
         break;
@@ -266,7 +275,8 @@ struct PreLightData
 
     float3 specularFGD;              // Store preintegrated BSDF for both specular and diffuse
     float  diffuseFGD;
-
+    //caustic lookup
+    float2 irisPlanePosition; //position on iris plane, ie -1 left/bottom, 1 right/top
     // Area lights (17 VGPRs)
     // TODO: 'orthoBasisViewNormal' is just a rotation around the normal and should thus be just 1x VGPR.
     float3x3 orthoBasisViewDiffuseNormal;
@@ -308,22 +318,24 @@ PreLightData GetPreLightData(float3 V, PositionInputs posInput, inout BSDFData b
     preLightData.iblR = reflect(-V, iblN);
 
     // Area light
-    // UVs for sampling the LUTs
-    float theta = FastACosPos(clampedNdotV); // For Area light - UVs for sampling the LUTs
-    float2 uv = Remap01ToHalfTexelCoord(float2(bsdfData.perceptualRoughness, theta * INV_HALF_PI), LTC_LUT_SIZE);
-
-    // Note we load the matrix transpose (avoid to have to transpose it in shader)
-    preLightData.ltcTransformDiffuse = k_identity3x3;
-
-    // Get the inverse LTC matrix for GGX
-    // Note we load the matrix transpose (avoid to have to transpose it in shader)
-    preLightData.ltcTransformSpecular = 0.0;
-    preLightData.ltcTransformSpecular._m22 = 1.0;
-    preLightData.ltcTransformSpecular._m00_m02_m11_m20 = SAMPLE_TEXTURE2D_ARRAY_LOD(_LtcData, s_linear_clamp_sampler, uv, LTC_GGX_MATRIX_INDEX, 0);
+    preLightData.ltcTransformDiffuse  = k_identity3x3;
+    preLightData.ltcTransformSpecular = SampleLtcMatrix(bsdfData.perceptualRoughness, clampedNdotV, LTCLIGHTINGMODEL_GGX);
 
     // Construct a right-handed view-dependent orthogonal basis around the normal
     preLightData.orthoBasisViewDiffuseNormal = GetOrthoBasisViewNormal(V, bsdfData.diffuseNormalWS, dot(V, bsdfData.diffuseNormalWS));
     preLightData.orthoBasisViewNormal = GetOrthoBasisViewNormal(V, N, preLightData.NdotV);
+
+    //for caustic lookup
+    if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_EYE_CAUSTIC_FROM_LUT))
+    {
+        float3 posOS = TransformWorldToObject(posInput.positionWS);
+        float3 refrOS = TransformWorldToObjectDir(refract(-V, N, 1.0 / bsdfData.IOR));
+
+        float t = max(posOS.z - bsdfData.irisPlaneOffset, 0.f) / max(-refrOS.z, 1e-5f);
+
+        float3 irisPositionOS = posOS + refrOS * t;
+        preLightData.irisPlanePosition = irisPositionOS.xy / bsdfData.irisRadius;
+    }
 
     return preLightData;
 }
@@ -455,18 +467,32 @@ float ComputeCaustic(float3 V, float3 positionOS, float3 lightDirOS, BSDFData bs
 
 // This is a test coming from Heretic demo. It is way more expensive
 // and is sometimes better, sometime not than the "else" codee and don't support caustic.
-void LightEyeTransform(PositionInputs posInput, BSDFData bsdfData, inout float3 positionRWS, inout float3 forward, inout float3 right, inout float3 up)
+void LightEyeTransform(PositionInputs posInput, BSDFData bsdfData, inout LightData lightData)
 {
-    float3 L = normalize(positionRWS - posInput.positionWS);
+    float3 L = normalize(lightData.positionRWS - posInput.positionWS);
     float3 refractL = -refract(-L, bsdfData.geomNormalWS, 1.0 / bsdfData.IOR);
 
     float3 axis = normalize(cross(L, refractL));
-    float angle = lerp(0.0, acos(dot(L, refractL)), bsdfData.mask.x);
 
-    positionRWS = Rotate(posInput.positionWS, positionRWS, axis, angle);
-    forward = Rotate(float3(0, 0, 0), forward, axis, angle);
-    right = Rotate(float3(0, 0, 0), right, axis, angle);
-    up = Rotate(float3(0, 0, 0), up, axis, angle);
+    float angle = acos(dot(L, refractL));
+
+    lightData.positionRWS = Rotate(posInput.positionWS, lightData.positionRWS, axis, angle);
+    lightData.forward = Rotate(float3(0, 0, 0), lightData.forward, axis, angle);
+    lightData.right = Rotate(float3(0, 0, 0), lightData.right, axis, angle);
+    lightData.up = Rotate(float3(0, 0, 0), lightData.up, axis, angle);
+}
+void LightEyeTransform(PositionInputs posInput, BSDFData bsdfData, inout DirectionalLightData lightData)
+{
+    float3 L = -lightData.forward;
+    float3 refractL = -refract(-L, bsdfData.geomNormalWS, 1.0 / bsdfData.IOR);
+
+    float3 axis = normalize(cross(L, refractL));
+
+    float angle = acos(dot(L, refractL));
+
+    lightData.forward = Rotate(float3(0, 0, 0), lightData.forward, axis, angle);
+    lightData.right = Rotate(float3(0, 0, 0), lightData.right, axis, angle);
+    lightData.up = Rotate(float3(0, 0, 0), lightData.up, axis, angle);
 }
 //-----------------------------------------------------------------------------
 // EvaluateBSDF_Directional
@@ -482,13 +508,20 @@ DirectLighting EvaluateBSDF_Directional(LightLoopContext lightLoopContext,
 
     if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_EYE_CINEMATIC))
     {
+        float c = bsdfData.mask.x;
+        if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_EYE_CAUSTIC_FROM_LUT))
+        {
+            float3 lightPosOS = TransformWorldToObjectDir(-lightData.forward) * 1000.f;
+            c = ComputeCausticFromLUT(preLightData.irisPlanePosition, bsdfData.irisPlaneOffset, lightPosOS, bsdfData.causticIntensity);
+        }
         // Evaluate a second time the light but for a different position and for diffuse only.
-        LightEyeTransform(posInput, bsdfData, lightData.positionRWS, lightData.forward, lightData.right, lightData.up);
+        LightEyeTransform(posInput, bsdfData, lightData);
 
         DirectLighting dlIris = ShadeSurface_Directional(   lightLoopContext, posInput, builtinData,
                                                             preLightData, lightData, bsdfData, V);
 
-        dl.diffuse = lerp(dl.diffuse, dlIris.diffuse, bsdfData.mask.x);
+        float3 caustic = ApplyCausticToDiffuse(dlIris.diffuse, c, bsdfData.mask.x, bsdfData.causticBlend);
+        dl.diffuse = (1.f - bsdfData.mask.x) * dl.diffuse + caustic;
     }
     else
     {
@@ -515,13 +548,19 @@ DirectLighting EvaluateBSDF_Punctual(LightLoopContext lightLoopContext,
 
     if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_EYE_CINEMATIC))
     {
+        float c = bsdfData.mask.x;
+        if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_EYE_CAUSTIC_FROM_LUT))
+        {
+            c = ComputeCausticFromLUT(preLightData.irisPlanePosition, bsdfData.irisPlaneOffset, TransformWorldToObject(lightData.positionRWS), bsdfData.causticIntensity);
+        }
         // Evaluate a second time the light but for a different position and for diffuse only.
-        LightEyeTransform(posInput, bsdfData, lightData.positionRWS, lightData.forward, lightData.right, lightData.up);
+        LightEyeTransform(posInput, bsdfData, lightData);
 
         DirectLighting dlIris = ShadeSurface_Punctual(  lightLoopContext, posInput, builtinData,
                                                         preLightData, lightData, bsdfData, V);
 
-        dl.diffuse = lerp(dl.diffuse, dlIris.diffuse, bsdfData.mask.x);
+        float3 caustic = ApplyCausticToDiffuse(dlIris.diffuse, c, bsdfData.mask.x, bsdfData.causticBlend);
+        dl.diffuse = (1.f - bsdfData.mask.x) * dl.diffuse + caustic;
     }
     else
     {
@@ -535,157 +574,123 @@ DirectLighting EvaluateBSDF_Punctual(LightLoopContext lightLoopContext,
 }
 
 //-----------------------------------------------------------------------------
-// EvaluateBSDF_Line
+// EvaluateBSDF_Area - Approximation with Linearly Transformed Cosines
 //-----------------------------------------------------------------------------
 
-DirectLighting EvaluateBSDF_Line(   LightLoopContext lightLoopContext,
-                                    float3 V, PositionInputs posInput,
-                                    PreLightData preLightData, LightData lightData, BSDFData bsdfData, BuiltinData builtinData)
+DirectLighting EvaluateBSDF_Area2(LightLoopContext lightLoopContext,
+    float3 V, PositionInputs posInput,
+    PreLightData preLightData, LightData lightData,
+    BSDFData bsdfData, BuiltinData builtinData)
 {
     DirectLighting lighting;
     ZERO_INITIALIZE(DirectLighting, lighting);
 
-    // TODO
-
-    return lighting;
-}
-
-//-----------------------------------------------------------------------------
-// EvaluateBSDF_Rect
-//-----------------------------------------------------------------------------
-
-DirectLighting EvaluateBSDF_Rect(   LightLoopContext lightLoopContext,
-                                    float3 V, PositionInputs posInput,
-                                    PreLightData preLightData, LightData lightData, BSDFData bsdfData, BuiltinData builtinData)
-{
-    DirectLighting lighting;
-    ZERO_INITIALIZE(DirectLighting, lighting);
-
-    float3 positionWS = posInput.positionWS;
+    const bool isRectLight = lightData.lightType == GPULIGHTTYPE_RECTANGLE; // static
 
 #if SHADEROPTIONS_BARN_DOOR
-    // Apply the barn door modification to the light data
-    RectangularLightApplyBarnDoor(lightData, positionWS);
-#endif
-
-    float3 unL = lightData.positionRWS - positionWS;
-
-    if (dot(lightData.forward, unL) < 0.0001)
+    if (isRectLight)
     {
-
-         // Rotate the light direction into the light space.
-        float3x3 lightToWorld = float3x3(lightData.right, lightData.up, -lightData.forward);
-        unL = mul(unL, transpose(lightToWorld));
-
-         // TODO: This could be precomputed.
-        float halfWidth = lightData.size.x * 0.5;
-        float halfHeight = lightData.size.y * 0.5;
-
-         // Define the dimensions of the attenuation volume.
-        // TODO: This could be precomputed.
-        float range = lightData.range;
-        float3 invHalfDim = rcp(float3(range + halfWidth,
-                                    range + halfHeight,
-                                    range));
-
-         // Compute the light attenuation.
-# ifdef ELLIPSOIDAL_ATTENUATION
-        // The attenuation volume is an axis-aligned ellipsoid s.t.
-        // r1 = (r + w / 2), r2 = (r + h / 2), r3 = r.
-        float intensity = EllipsoidalDistanceAttenuation(unL, invHalfDim,
-                                                        lightData.rangeAttenuationScale,
-                                                        lightData.rangeAttenuationBias);
-#else
-        // The attenuation volume is an axis-aligned box s.t.
-        // hX = (r + w / 2), hY = (r + h / 2), hZ = r.
-        float intensity = BoxDistanceAttenuation(unL, invHalfDim,
-                                                    lightData.rangeAttenuationScale,
-                                                    lightData.rangeAttenuationBias);
+        RectangularLightApplyBarnDoor(lightData, posInput.positionWS);
+    }
 #endif
 
-        // Terminate if the shaded point is too far away.
-        if (intensity != 0.0)
+    // Translate the light s.t. the shaded point is at the origin of the coordinate system.
+    float3 unL = lightData.positionRWS - posInput.positionWS;
+
+    // These values could be precomputed on CPU to save VGPR or ALU.
+    float halfLength = lightData.size.x * 0.5;
+    float halfHeight = lightData.size.y * 0.5; // = 0 for a line light
+
+    float intensity = PillowWindowing(unL, lightData.right, lightData.up, halfLength, halfHeight,
+                                      lightData.rangeAttenuationScale, lightData.rangeAttenuationBias);
+
+    // Make sure the light is front-facing (and has a non-zero effective area).
+    intensity *= (isRectLight && dot(unL, lightData.forward) >= 0) ? 0 : 1;
+
+    bool isVisible = true;
+
+    // Raytracing shadow algorithm require to evaluate lighting without shadow, so it defined SKIP_RASTERIZED_AREA_SHADOWS
+    // This is only present in Lit Material as it is the only one using the improved shadow algorithm.
+#ifndef SKIP_RASTERIZED_AREA_SHADOWS
+    if (isRectLight && intensity > 0)
+    {
+        SHADOW_TYPE shadow = EvaluateShadow_RectArea(lightLoopContext, posInput, lightData, builtinData, bsdfData.normalWS, normalize(lightData.positionRWS), length(lightData.positionRWS));
+        lightData.color.rgb *= ComputeShadowColor(shadow, lightData.shadowTint, lightData.penumbraTint);
+
+        isVisible = Max3(lightData.color.r, lightData.color.g, lightData.color.b) > 0;
+    }
+#endif
+
+    // Terminate if the shaded point is occluded or is too far away.
+    if (isVisible && intensity > 0)
+    {
+        float4 ltcValue;
+
+        // ----- 1. Evaluate the diffuse part -----
+
+        // Rotate the light vectors into the local coordinate system.
+        // Note: we don't have the same normal for diffuse and specular.
+        float3 centerDiff = mul(preLightData.orthoBasisViewDiffuseNormal, unL);
+        float3 rightDiff  = mul(preLightData.orthoBasisViewDiffuseNormal, lightData.right);
+        float3 upDiff     = mul(preLightData.orthoBasisViewDiffuseNormal, lightData.up);
+
+        ltcValue = EvaluateLTC_Area(isRectLight, centerDiff, rightDiff, upDiff, halfLength, halfHeight,
+                                #ifdef USE_DIFFUSE_LAMBERT_BRDF
+                                    k_identity3x3, 1.0f,
+                                #else
+                                    // LTC light cookies appear broken unless diffuse roughness is set to 1.
+                                    transpose(preLightData.ltcTransformDiffuse), /*bsdfData.perceptualRoughness*/ 1.0f,
+                                #endif
+                                    lightData.cookieMode, lightData.cookieScaleOffset);
+
+        ltcValue.a *= intensity * lightData.diffuseDimmer;
+
+        // We don't multiply by 'bsdfData.diffuseColor' here. It's done only once in PostEvaluateBSDF().
+        lighting.diffuse += ltcValue.rgb * ltcValue.a;
+
+        // ----- 2. Evaluate the specular part -----
+
+        // Rotate the light vectors into the local coordinate system.
+        // Note: we don't have the same normal for diffuse and specular.
+        float3 centerSpec = mul(preLightData.orthoBasisViewNormal, unL);
+        float3 rightSpec  = mul(preLightData.orthoBasisViewNormal, lightData.right);
+        float3 upSpec     = mul(preLightData.orthoBasisViewNormal, lightData.up);
+
+        ltcValue = EvaluateLTC_Area(isRectLight, centerSpec, rightSpec, upSpec, halfLength, halfHeight,
+                                    transpose(preLightData.ltcTransformSpecular), bsdfData.perceptualRoughness,
+                                    lightData.cookieMode, lightData.cookieScaleOffset);
+
+        ltcValue.a *= intensity * lightData.specularDimmer;
+
+        // We need to multiply by the magnitude of the integral of the BRDF
+        // ref: http://advances.realtimerendering.com/s2016/s2016_ltc_fresnel.pdf
+        lighting.specular += ltcValue.rgb * ltcValue.a;
+
+        // We need to multiply by the magnitude of the integral of the BRDF
+        // ref: http://advances.realtimerendering.com/s2016/s2016_ltc_fresnel.pdf
+        lighting.diffuse  *= lightData.color * preLightData.diffuseFGD;
+        lighting.specular *= lightData.color * preLightData.specularFGD;
+
+        // ----- 3. Debug display -----
+
+    #ifdef DEBUG_DISPLAY
+        if (_DebugLightingMode == DEBUGLIGHTINGMODE_LUX_METER)
         {
-            lightData.diffuseDimmer *= intensity;
-            lightData.specularDimmer *= intensity;
+            ltcValue = EvaluateLTC_Area(isRectLight, centerDiff, rightDiff, upDiff, halfLength, halfHeight,
+                                        k_identity3x3, 1.0f,
+                                        lightData.cookieMode, lightData.cookieScaleOffset);
 
-             // Translate the light s.t. the shaded point is at the origin of the coordinate system.
-            lightData.positionRWS -= positionWS;
+            ltcValue.a *= intensity * lightData.diffuseDimmer;
 
-             float4x3 lightVerts;
-
-             // TODO: some of this could be precomputed.
-            lightVerts[0] = lightData.positionRWS + lightData.right * -halfWidth + lightData.up * -halfHeight; // LL
-            lightVerts[1] = lightData.positionRWS + lightData.right * -halfWidth + lightData.up *  halfHeight; // UL
-            lightVerts[2] = lightData.positionRWS + lightData.right *  halfWidth + lightData.up *  halfHeight; // UR
-            lightVerts[3] = lightData.positionRWS + lightData.right *  halfWidth + lightData.up * -halfHeight; // LR
-
-             // Note: We don't have the same normal for diffuse and specular
-            // Rotate the endpoints into the local coordinate system.
-            float4x3 lightVertsDiff  = mul(lightVerts, transpose(preLightData.orthoBasisViewDiffuseNormal));
-
-             float3 ltcValue;
-
-             // Evaluate the diffuse part
-            // Polygon irradiance in the transformed configuration.
-            float4x3 LD = mul(lightVertsDiff, preLightData.ltcTransformDiffuse);
-            ltcValue = PolygonIrradiance(LD);
-            ltcValue *= lightData.diffuseDimmer;
-
-             // Only apply cookie if there is one
-            if (lightData.cookieMode != COOKIEMODE_NONE)
-            {
-                // Compute the cookie data for the diffuse term
-                float3 formFactorD = PolygonFormFactor(LD);
-                ltcValue *= SampleAreaLightCookie(lightData.cookieScaleOffset, LD, formFactorD);
-            }
-
-            // We don't multiply by 'bsdfData.diffuseColor' here. It's done only once in PostEvaluateBSDF().
-            // See comment for specular magnitude, it apply to diffuse as well
-            lighting.diffuse = preLightData.diffuseFGD * ltcValue;
-
-            // Evaluate the specular part
-            float4x3 lightVertsSpec = mul(lightVerts, transpose(preLightData.orthoBasisViewNormal));
-
-            // Polygon irradiance in the transformed configuration.
-            float4x3 LS = mul(lightVertsSpec, preLightData.ltcTransformSpecular);
-            ltcValue = PolygonIrradiance(LS);
-            ltcValue *= lightData.specularDimmer;
-
-            // Only apply cookie if there is one
-            if (lightData.cookieMode != COOKIEMODE_NONE)
-            {
-                // Compute the cookie data for the specular term
-                float3 formFactorS = PolygonFormFactor(LS);
-                ltcValue *= SampleAreaLightCookie(lightData.cookieScaleOffset, LS, formFactorS, bsdfData.perceptualRoughness);
-            }
-
-            // We need to multiply by the magnitude of the integral of the BRDF
-            // ref: http://advances.realtimerendering.com/s2016/s2016_ltc_fresnel.pdf
-            // This value is what we store in specularFGD, so reuse it
-            lighting.specular += preLightData.specularFGD * ltcValue;
-
-            SHADOW_TYPE shadow = EvaluateShadow_RectArea(lightLoopContext, posInput, lightData, builtinData, bsdfData.normalWS, normalize(lightData.positionRWS), length(lightData.positionRWS));
-            lightData.color.rgb *= ComputeShadowColor(shadow, lightData.shadowTint, lightData.penumbraTint);
-
-             // Save ALU by applying 'lightData.color' only once.
-            lighting.diffuse *= lightData.color;
-            lighting.specular *= lightData.color;
-
- #ifdef DEBUG_DISPLAY
-            if (_DebugLightingMode == DEBUGLIGHTINGMODE_LUX_METER)
-            {
-                // Only lighting, not BSDF
-                // Apply area light on lambert then multiply by PI to cancel Lambert
-                lighting.diffuse = PolygonIrradiance(mul(lightVerts, k_identity3x3));
-                lighting.diffuse *= PI * lightData.diffuseDimmer;
-            }
-#endif
+            // Only lighting, not BSDF
+            lighting.diffuse  = lightData.color * ltcValue.rgb * ltcValue.a;
+            // Apply area light on Lambert then multiply by PI to cancel Lambert
+            lighting.diffuse *= PI;
         }
-
+    #endif
     }
 
-     return lighting;
+    return lighting;
 }
 
 DirectLighting EvaluateBSDF_Area(LightLoopContext lightLoopContext,
@@ -693,19 +698,26 @@ DirectLighting EvaluateBSDF_Area(LightLoopContext lightLoopContext,
     PreLightData preLightData, LightData lightData,
     BSDFData bsdfData, BuiltinData builtinData)
 {
+    DirectLighting dl = EvaluateBSDF_Area2(lightLoopContext, V, posInput, preLightData, lightData, bsdfData, builtinData);
+
+    //diffuse with refracted light direction (if cinematic eye)
     if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_EYE_CINEMATIC))
     {
-        LightEyeTransform(posInput, bsdfData, lightData.positionRWS, lightData.forward, lightData.right, lightData.up);
+        float c = bsdfData.mask.x;
+        if (HasFlag(bsdfData.materialFeatures, MATERIALFEATUREFLAGS_EYE_CAUSTIC_FROM_LUT))
+        {
+            c = ComputeCausticFromLUT(preLightData.irisPlanePosition, bsdfData.irisPlaneOffset, TransformWorldToObject(lightData.positionRWS), bsdfData.causticIntensity);
+        }
+
+        LightEyeTransform(posInput, bsdfData, lightData);
+
+        DirectLighting dl2 = EvaluateBSDF_Area2(lightLoopContext, V, posInput, preLightData, lightData, bsdfData, builtinData);
+
+        float3 caustic = ApplyCausticToDiffuse(dl2.diffuse, c, bsdfData.mask.x, bsdfData.causticBlend);
+        dl.diffuse = (1.f - bsdfData.mask.x) * dl.diffuse + caustic;
     }
 
-    if (lightData.lightType == GPULIGHTTYPE_TUBE)
-    {
-        return EvaluateBSDF_Line(lightLoopContext, V, posInput, preLightData, lightData, bsdfData, builtinData);
-    }
-    else
-    {
-        return EvaluateBSDF_Rect(lightLoopContext, V, posInput, preLightData, lightData, bsdfData, builtinData);
-    }
+    return dl;
 }
 
 //-----------------------------------------------------------------------------

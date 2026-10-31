@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Copyright (c) 2019 LG Electronics, Inc.
  *
  * This software contains code licensed as described in LICENSE.
@@ -24,7 +24,7 @@ Shader "Simulator/LidarPointCloud"
             HLSLPROGRAM
 
             #pragma vertex Vert
-            #pragma geometry Geom
+            #pragma target 4.5
             #pragma fragment Frag
 
             #include "UnityCG.cginc"
@@ -39,41 +39,28 @@ Shader "Simulator/LidarPointCloud"
 
             struct g2f
             {
-                float4 position : POSITION;
+                float4 position : SV_POSITION;
             };
 
-            float4 Vert(uint id : SV_VertexID) : POINT
+            g2f Vert(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
             {
-                return _PointCloud[id];
-            }
-
-            [maxvertexcount(4)]
-            void Geom(point float4 vertex[1]: POINT, inout TriangleStream<g2f> stream)
-            {
-                float3 pos = vertex[0].xyz;
-                if (dot(pos, pos) == 0) return;
-
-                float4 world = mul(_LocalToWorld, float4(pos, 1.0));
-                float4 clip = UnityWorldToClipPos(world.xyz);
-
-                float2 scale = _Size * clip.w / _ScreenParams.xy;
-
-                float2 offsets[] = {
-                    float2(-1, -1),
-                    float2(1, -1),
-                    float2(-1, 1),
-                    float2(1, 1),
-                };
-
-                UNITY_UNROLL
-                for (int i = 0; i < 4; i++)
+                float3 pos = _PointCloud[instanceID].xyz;
+                g2f output;
+                if (dot(pos, pos) == 0)
                 {
-                    g2f vertex;
-                    vertex.position.xy = clip.xy + scale * offsets[i];
-                    vertex.position.z = 1.1f * clip.z;
-                    vertex.position.w = clip.w;
-                    stream.Append(vertex);
+                    output.position = float4(2, 2, 2, 1);
+                    return output;
                 }
+                float4 world = mul(_LocalToWorld, float4(pos, 1));
+                float4 clip = UnityWorldToClipPos(world.xyz);
+                const float2 offsets[6] = {
+                    float2(-1,-1), float2(1,-1), float2(-1,1),
+                    float2(-1,1), float2(1,-1), float2(1,1)
+                };
+                output.position = clip;
+                output.position.xy += _Size * clip.w / _ScreenParams.xy * offsets[vertexID];
+                output.position.z = 1.1 * clip.z;
+                return output;
             }
 
             float4 Frag(g2f input) : SV_Target

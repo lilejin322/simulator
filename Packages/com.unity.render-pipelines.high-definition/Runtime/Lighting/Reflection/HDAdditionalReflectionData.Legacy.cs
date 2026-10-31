@@ -11,7 +11,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             get
             {
-                if(m_LegacyProbe == null || m_LegacyProbe.Equals(null))
+                if (m_LegacyProbe == null || m_LegacyProbe.Equals(null))
                 {
                     m_LegacyProbe = GetComponent<ReflectionProbe>();
                 }
@@ -61,10 +61,16 @@ namespace UnityEngine.Rendering.HighDefinition
             // Force the legacy system to not update the probe
             cubeProbe.mode = ReflectionProbeMode.Custom;
             cubeProbe.refreshMode = ReflectionProbeRefreshMode.ViaScripting;
-#if UNITY_2020_2_OR_NEWER
             if (m_ProbeSettings.mode == ProbeSettings.Mode.Realtime)
                 cubeProbe.renderDynamicObjects = true;
-#endif
+
+            // Also update the importance
+            cubeProbe.importance = importance;
+        }
+
+        internal bool ReflectionProbeIsEnabled()
+        {
+            return reflectionProbe.enabled;
         }
     }
 }

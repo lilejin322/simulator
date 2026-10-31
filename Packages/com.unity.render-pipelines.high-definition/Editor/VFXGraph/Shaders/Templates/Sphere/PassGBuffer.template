@@ -1,25 +1,26 @@
 Pass
-{		
+{
+    Name "GBuffer"
 	Tags { "LightMode"="GBuffer" }
-	
+
     ${VFXStencilGBuffer}
-		
 	HLSLPROGRAM
 	#pragma target 4.5
-	
-	#pragma multi_compile _ LIGHT_LAYERS
+
+	#pragma multi_compile _ RENDERING_LAYERS
 	#pragma multi_compile _ DEBUG_DISPLAY
-	
+    #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+
 	#define UNITY_MATERIAL_LIT
-		
-	${VFXIncludeRP("VFXLitVaryings.template")}		
-		
+
+	${VFXIncludeRP("VFXLitVaryings.template")}
+
 	struct ps_input
 	{
-		float4 pos : SV_POSITION;
-		
+		SV_POSITION_QUALIFIERS float4 pos : SV_POSITION;
+
 		${VFXHDRPLitDeclareVaryings}
-		
+
 		float2 uv : TEXCOORD1;
 		float3 posWS : TEXCOORD2;
 		float4 sphereInfo : TEXCOORD3;
@@ -45,10 +46,11 @@ ${VFXEnd}
 	${VFXIncludeRP("VFXLit.template")}
 					
 	#pragma fragment frag
-	void frag(ps_input i, OUTPUT_GBUFFER(outGBuffer), out float oDepth : SV_DepthLessEqual)
+	void frag(ps_input i, OUTPUT_GBUFFER(outGBuffer), out float oDepth : DEPTH_OFFSET_SEMANTIC)
 	{
 		UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
 		VFXTransformPSInputs(i);
+		VFX_FRAG_SETUP_INSTANCE_ID(i);
 		float3 normalWS;
 		VFXUVData uvData = (VFXUVData)0;
 		VFXClipSphereAndGetDepthOffsetAndNormal(oDepth, normalWS, i);		

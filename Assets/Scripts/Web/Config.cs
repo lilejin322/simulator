@@ -19,7 +19,6 @@ using Simulator.Sensors;
 using Simulator.Utilities;
 using UnityEditor;
 using UnityEngine;
-using VirtualFileSystem;
 using YamlDotNet.Serialization;
 
 namespace Simulator.Web
@@ -31,14 +30,12 @@ namespace Simulator.Web
         public static string ApiHost = "localhost";
         public static int ApiPort = 8181;
 
-        public static string CloudUrl = "https://wise.svlsimulator.com";
-        public static string CloudProxy;
+        // Start an API Only simulation as soon as the simulator is ready, so Python API clients can connect
+        public static bool StartApiOnly = true;
         public static string SessionGUID;
         public static string SimID;
 
         public static bool Headless = false;
-
-        public static bool RetryForever = false;
 
         public static string Root;
         public static string PersistentDataPath;
@@ -91,9 +88,11 @@ namespace Simulator.Web
 #endif
         private static void Initialize()
         {
-            Root = Path.Combine(Application.dataPath, "..");
+            // On macOS dataPath is simulator.app/Contents; keep config beside the app.
+            Root = Path.GetFullPath(Path.Combine(Application.dataPath,
+                Application.platform == RuntimePlatform.OSXPlayer ? "../.." : ".."));
             PersistentDataPath = Application.persistentDataPath;
-            PersistentDataPath += "-" + CloudAPI.GetInfo().version;
+            PersistentDataPath += "-" + SimulatorVersion;
 
             AssetService = new AssetService();
 
@@ -131,59 +130,25 @@ namespace Simulator.Web
             AssetBundle.UnloadAllAssetBundles(false);
         }
 
-        public static void RegenerateSimID()
+        public static string SimulatorVersion
         {
-            SimID = Guid.NewGuid().ToString();
-            ClientSettingsService csservice = new ClientSettingsService();
-            csservice.SetSimID(SimID);
-        }
-
-        public delegate void AssetLoadFunc(Manifest manifest, VfsEntry dir);
-
-        public static void CheckDir(VfsEntry dir, AssetLoadFunc loadFunc)
-        {
-            if (dir == null)
+            get
             {
-                return;
-            }
-
-            var manifestFile = dir.Find("manifest.json");
-            if (manifestFile != null && manifestFile.IsFile)
-            {
-                Debug.Log($"found manifest at {manifestFile.Path}");
-                using (var reader = new StreamReader(manifestFile.SeekableStream()))
+                var buildVersion = Application.version;
+#if UNITY_EDITOR
+                var devSettings = (Simulator.Editor.DevelopmentSettingsAsset)AssetDatabase.LoadAssetAtPath("Assets/Resources/Editor/DeveloperSettings.asset", typeof(Simulator.Editor.DevelopmentSettingsAsset));
+                if (devSettings != null && !string.IsNullOrWhiteSpace(devSettings.VersionOverride))
                 {
-                    try
-                    {
-                        if (reader == null)
-                        {
-                            Debug.Log("no reader cannot open stream");
-                        }
-                        Manifest manifest;
-                        try
-                        {
-                            var buffer = reader.ReadToEnd();
-                            manifest = Newtonsoft.Json.JsonConvert.DeserializeObject<Manifest>(buffer);
-                        }
-                        catch
-                        {
-                            throw new Exception("Out of date AssetBundle, rebuild or download latest AssetBundle.");
-                        }
-                        loadFunc(manifest, dir);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogWarning($"failed to load asset from {manifestFile.Path}");
-                        Debug.LogException(ex);
-                    }
+                    buildVersion = devSettings.VersionOverride;
                 }
-            }
-            else
-            {
-                foreach (var entry in dir)
+#endif
+                var buildInfo = Resources.Load<BuildInfo>("BuildInfo");
+                if (buildInfo != null && !string.IsNullOrWhiteSpace(buildInfo.Version))
                 {
-                    CheckDir(entry, loadFunc);
+                    buildVersion = buildInfo.Version;
                 }
+
+                return buildVersion;
             }
         }
 
@@ -258,486 +223,14 @@ namespace Simulator.Web
         public static void LoadExternalAssets()
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var dir = Path.Combine(Application.dataPath, "..", "AssetBundles");
-            Debug.Log("Pre-loading Assetbundles from root path " + dir);
-            var vfs = VfsEntry.makeRoot(dir);
 
-            // descend into each known dir looking for only specific asset types. todo: add asset type to manifest?
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.Controllable)), LoadControllablePlugin);
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.Bridge)), LoadBridgePlugin); // NOTE: bridges must be loaded before sensor plugins
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.Sensor)), LoadSensorPlugin);
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.NPC)), LoadNPCAsset);
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.Pedestrian)), LoadPedestrianAsset);
+            // Every simulation may use NPCs, pedestrians and controllables; maps, vehicles, sensors and bridges are
+            // registered when a simulation uses them.
+            BuiltinControllableCatalog.Register();
+            BuiltinNpcCatalog.Register();
+            BuiltinPedestrianCatalog.Register();
+
             Debug.Log($"Loaded NPCs behaviours: {NPCBehaviours.Count}  NPC models: {NPCVehicles.Count}  Pedestrians: {Pedestrians.Count} Controllables: {Controllables.Count} Bridges: {BridgePlugins.All.Count } Sensors: {Sensors.Count} in {sw.Elapsed}");
-        }
-
-        private static Assembly LoadAssembly(VfsEntry dir, string name)
-        {
-            var dll = dir.Find(name);
-            if (dll == null)
-            {
-                return null;
-            }
-            byte[] buffer = new byte[dll.Size];
-            dll.GetStream().Read(buffer, 0, (int)dll.Size);
-            return Assembly.Load(buffer);
-        }
-
-
-        public static void LoadBridgePlugin(Manifest manifest, VfsEntry dir)
-        {
-#if UNITY_EDITOR
-            if (EditorPrefs.GetBool("Simulator/Developer Debug Mode", false) == true)
-            {
-                Assembly bridgesAssembly = null;
-                if (File.Exists(Path.Combine(BundleConfig.ExternalBase, "Bridges", manifest.assetName, $"{manifest.assetName}.cs")))
-                {
-                    if (bridgesAssembly == null) bridgesAssembly = Assembly.Load("Simulator.Bridges");
-                    foreach (Type ty in bridgesAssembly.GetTypes())
-                    {
-                        if (typeof(IBridgeFactory).IsAssignableFrom(ty) && !ty.IsAbstract && ty.GetCustomAttribute<BridgeNameAttribute>().Name == manifest.bridgeType)
-                        {
-                            Debug.LogWarning($"Loading {manifest.bridgeType} ({manifest.assetGuid}) in Developer Debug Mode. If you wish to use this bridge plugin from WISE, disable Developer Debug Mode in Simulator->Developer Debug Mode or remove the bridge from Assets/External/Bridges");
-                            var bridgeFactory = Activator.CreateInstance(ty) as IBridgeFactory;
-                            BridgePlugins.Add(bridgeFactory);
-
-                            LoadedAssets.Add(manifest);
-                        }
-                    }
-                    return;
-                }
-            }
-#endif
-
-            if (manifest.assetFormat != BundleConfig.Versions[BundleConfig.BundleTypes.Bridge])
-            {
-                throw new Exception($"Manifest version mismatch, expected {BundleConfig.Versions[BundleConfig.BundleTypes.Bridge]}, got {manifest.assetFormat}");
-            }
-
-            var pluginSource = LoadAssembly(dir, $"{manifest.assetName}.dll");
-            foreach (Type ty in pluginSource.GetTypes())
-            {
-
-                if (typeof(IBridgeFactory).IsAssignableFrom(ty) && !ty.IsAbstract)
-                {
-                    var bridgeFactory = Activator.CreateInstance(ty) as IBridgeFactory;
-                    BridgePlugins.Add(bridgeFactory);
-                    LoadedAssets.Add(manifest);
-                }
-            }
-        }
-
-        public static void LoadSensorPlugin(Manifest manifest, VfsEntry dir)
-        {
-#if UNITY_EDITOR
-            if (EditorPrefs.GetBool("Simulator/Developer Debug Mode", false) == true)
-            {
-                if (File.Exists(Path.Combine(BundleConfig.ExternalBase, "Sensors", manifest.assetName, $"{manifest.assetName}.prefab")))
-                {
-                    Debug.LogWarning($"Loading {manifest.assetName} ({manifest.assetGuid}) in Developer Debug Mode. If you wish to use this sensor plugin from WISE, disable Developer Debug Mode in Simulator->Developer Debug Mode or remove the sensor from Assets/External/Sensors");
-                    var path = Path.Combine(BundleConfig.ExternalBase, "Sensors", manifest.assetName, $"{manifest.assetName}.prefab");
-                    var prefab = (GameObject)AssetDatabase.LoadAssetAtPath(path, typeof(GameObject));
-                    if (prefab == null)
-                    {
-                        Debug.LogWarning("prefab is null for " + path);
-                    }
-                    SensorPrefabs.Add(prefab.GetComponent<SensorBase>());
-                    var sensorConfig = SensorTypes.GetConfig(prefab.GetComponent<SensorBase>());
-                    sensorConfig.AssetGuid = manifest.assetGuid;
-                    Sensors.Add(sensorConfig);
-                    LoadedAssets.Add(manifest);
-                    if (!SensorTypeLookup.ContainsKey(manifest.assetGuid))
-                    {
-                        SensorTypeLookup.Add(manifest.assetGuid, prefab.GetComponent<SensorBase>());
-                    }
-
-                    var pluginType = prefab.GetComponent<SensorBase>().GetDataBridgePlugin();
-                    if (pluginType != null)
-                    {
-                        var sensorBridgePlugin = Activator.CreateInstance(pluginType) as ISensorBridgePlugin;
-                        foreach (var kv in BridgePlugins.All)
-                        {
-                            sensorBridgePlugin.Register(kv.Value);
-                        }
-                    }
-
-                    return;
-                }
-            }
-#endif
-            if (SensorTypeLookup.ContainsKey(manifest.assetGuid))
-            {
-                return;
-            }
-
-            if (manifest.assetFormat != BundleConfig.Versions[BundleConfig.BundleTypes.Sensor])
-            {
-                throw new Exception($"Manifest version mismatch, expected {BundleConfig.Versions[BundleConfig.BundleTypes.Sensor]}, got {manifest.assetFormat}");
-            }
-
-            if (Sensors.FirstOrDefault(s => s.AssetGuid == manifest.assetGuid) != null)
-            {
-                return;
-            }
-
-            Assembly pluginSource = LoadAssembly(dir, $"{manifest.assetName}.dll");
-            foreach (Type ty in pluginSource.GetTypes())
-            {
-                if (typeof(ISensorBridgePlugin).IsAssignableFrom(ty) && !ty.IsAbstract)
-                {
-                    var sensorBridgePlugin = Activator.CreateInstance(ty) as ISensorBridgePlugin;
-                    foreach (var kv in BridgePlugins.All)
-                    {
-                        sensorBridgePlugin.Register(kv.Value);
-                    }
-                }
-            }
-
-            string platform = SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows ? "windows" : "linux";
-            var pluginStream = dir.Find($"{manifest.assetGuid}_sensor_main_{platform}").SeekableStream();
-            AssetBundle pluginBundle = AssetBundle.LoadFromStream(pluginStream);
-            var pluginAssets = pluginBundle.GetAllAssetNames();
-
-            var texDir = dir.Find($"{manifest.assetGuid}_sensor_textures");
-            if (texDir != null)
-            {
-                var texStream = dir.Find($"{manifest.assetGuid}_sensor_textures").SeekableStream();
-                var textureBundle = AssetBundle.LoadFromStream(texStream, 0, 1 << 20);
-                if (!AssetBundle.GetAllLoadedAssetBundles().Contains(textureBundle))
-                {
-                    textureBundle.LoadAllAssets();
-                }
-            }
-
-            SensorBase pluginBase = pluginBundle.LoadAsset<GameObject>(pluginAssets[0]).GetComponent<SensorBase>();
-            SensorConfig config = SensorTypes.GetConfig(pluginBase);
-            config.AssetGuid = manifest.assetGuid;
-            Sensors.Add(config);
-            SensorPrefabs.Add(pluginBase);
-            LoadedAssets.Add(manifest);
-            if (!SensorTypeLookup.ContainsKey(manifest.assetGuid))
-            {
-                SensorTypeLookup.Add(manifest.assetGuid, pluginBase);
-            }
-        }
-
-        public static void LoadControllablePlugin(Manifest manifest, VfsEntry dir)
-        {
-            if (manifest.assetFormat != BundleConfig.Versions[BundleConfig.BundleTypes.Controllable])
-            {
-                throw new Exception($"manifest version mismatch, expected {BundleConfig.Versions[BundleConfig.BundleTypes.Controllable]}, got {manifest.assetFormat}");
-            }
-
-            Assembly pluginSource = LoadAssembly(dir, $"{manifest.assetName}.dll");
-
-            string platform = SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows ? "windows" : "linux";
-            var pluginStream = dir.Find($"{manifest.assetGuid}_controllable_main_{platform}").SeekableStream();
-            AssetBundle pluginBundle = AssetBundle.LoadFromStream(pluginStream);
-            var pluginAssets = pluginBundle.GetAllAssetNames();
-
-            var texDir = dir.Find($"{manifest.assetGuid}_controllable_textures");
-            if (texDir != null)
-            {
-                var texStream = dir.Find($"{manifest.assetGuid}_controllable_textures").SeekableStream();
-                var textureBundle = AssetBundle.LoadFromStream(texStream, 0, 1 << 20);
-                if (!AssetBundle.GetAllLoadedAssetBundles().Contains(textureBundle))
-                {
-                    textureBundle.LoadAllAssets();
-                }
-            }
-
-            var prefabName = $"{manifest.assetName}.prefab";
-            //Find a prefab with main asset name ignoring the characters case
-            var mainPrefabName = pluginAssets.First(name => name.IndexOf(prefabName, StringComparison.InvariantCultureIgnoreCase) >= 0);
-            var controllable = pluginBundle.LoadAsset<GameObject>(mainPrefabName).GetComponent<IControllable>();
-
-#if UNITY_EDITOR
-            if (EditorPrefs.GetBool("Simulator/Developer Debug Mode", false) == true)
-            {
-                if (File.Exists(Path.Combine(BundleConfig.ExternalBase, "Controllables", manifest.assetName, $"{manifest.assetName}.prefab")))
-                {
-                    var prefab = (GameObject)AssetDatabase.LoadAssetAtPath(Path.Combine(BundleConfig.ExternalBase, "Controllables", manifest.assetName, $"{manifest.assetName}.prefab"), typeof(GameObject));
-                    Controllables.Add(manifest.assetName, prefab.GetComponent<IControllable>());
-
-                    var controllableAssets = new List<GameObject>();
-                    foreach (var pluginAsset in pluginAssets)
-                    {
-                        if (pluginAsset == mainPrefabName)
-                            continue;
-                        controllableAssets.Add(pluginBundle.LoadAsset<GameObject>(pluginAsset));
-                    }
-                    ControllableAssets.Add(manifest.assetName, controllableAssets);
-                    LoadedAssets.Add(manifest);
-
-                    return;
-                }
-            }
-#endif
-
-            Controllables.Add(manifest.assetName, controllable);
-            var additionalAssets = new List<GameObject>();
-            foreach (var pluginAsset in pluginAssets)
-            {
-                if (pluginAsset == mainPrefabName)
-                    continue;
-                additionalAssets.Add(pluginBundle.LoadAsset<GameObject>(pluginAsset));
-            }
-            ControllableAssets.Add(manifest.assetName, additionalAssets);
-            LoadedAssets.Add(manifest);
-        }
-
-        private static void LoadNPCAsset(Manifest manifest, VfsEntry dir)
-        {
-            if (manifest.assetFormat != BundleConfig.Versions[BundleConfig.BundleTypes.NPC])
-            {
-                throw new Exception($"manifest version mismatch, expected {BundleConfig.Versions[BundleConfig.BundleTypes.NPC]}, got {manifest.assetFormat}");
-            }
-            List<Type> customManagers = new List<Type>();
-            Assembly pluginSource = LoadAssembly(dir, $"{manifest.assetName}.dll");
-            if (pluginSource != null)
-            {
-                foreach (Type ty in pluginSource.GetTypes())
-                {
-                    if (ty.IsAbstract)
-                    {
-                        continue;
-                    }
-                    if (typeof(NPCBehaviourBase).IsAssignableFrom(ty))
-                    {
-                        if (!NPCBehaviours.ContainsKey(ty.ToString()))
-                        {
-                            NPCBehaviours.Add(ty.ToString(), ty);
-                        }
-                    }
-                    else if (typeof(ICommand).IsAssignableFrom(ty))
-                    {
-                        var cmd = Activator.CreateInstance(ty) as ICommand;
-                        ApiManager.Commands.Add(cmd.Name, cmd);
-                    }
-                    else if (typeof(ICustomManager).IsAssignableFrom(ty))
-                    {
-                        customManagers.Add(ty);
-                    }
-                }
-            }
-
-            var texEntry = dir.Find($"{manifest.assetGuid}_npc_textures");
-            AssetBundle textureBundle = null;
-            if (texEntry != null)
-            {
-                var texStream = VirtualFileSystem.VirtualFileSystem.EnsureSeekable(texEntry.SeekableStream(), (int)texEntry.Size);
-                textureBundle = AssetBundle.LoadFromStream(texStream, 0, 1 << 20);
-                texStream.Close();
-                texStream.Dispose();
-            }
-
-            string platform = SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows ? "windows" : "linux";
-            var pluginEntry = dir.Find($"{manifest.assetGuid}_npc_main_{platform}");
-
-#if UNITY_EDITOR
-            if (EditorPrefs.GetBool("Simulator/Developer Debug Mode", false) == true)
-            {
-                foreach (var NPCDir in Directory.EnumerateDirectories(Path.Combine(BundleConfig.ExternalBase, BundleConfig.pluralOf(BundleConfig.BundleTypes.NPC))))
-                {
-                    var assemblyExists = true;
-                    try
-                    {
-                        // Try loading into reflection context before loading into AppDomain. If this fails, it means
-                        // there are no scripts in the assembly and it was not compiled - skip loading it.
-                        Assembly.ReflectionOnlyLoad("Simulator.NPCs");
-                    }
-                    catch
-                    {
-                        assemblyExists = false;
-                    }
-
-                    if (assemblyExists)
-                        Assembly.Load("Simulator.NPCs");
-
-                    if (File.Exists(Path.Combine(NPCDir, manifest.assetName, $"{manifest.assetName}.prefab")))
-                    {
-                        var prefab = (GameObject)AssetDatabase.LoadAssetAtPath(Path.Combine(NPCDir, manifest.assetName, $"{manifest.assetName}.prefab"), typeof(GameObject));
-                        if (prefab != null)
-                        {
-                            var meta = prefab.GetComponent<NPCMetaData>();
-                            if (meta != null)
-                            {
-                                NPCVehicles.Add(manifest.assetName, new NPCAssetData()
-                                {
-                                    Prefab = prefab,
-                                    Name = manifest.assetName,
-                                    AssetGuid = manifest.assetGuid,
-                                    NPCType = meta.SizeType,
-                                });
-                            }
-                            else
-                            {
-                                Debug.LogWarning($"NPC {manifest.assetName} missing meta info, setting default type");
-                            }
-                        }
-
-                        if (textureBundle && !AssetBundle.GetAllLoadedAssetBundles().Contains(textureBundle))
-                        {
-                            textureBundle.LoadAllAssets();
-                        }
-
-                        LoadedAssets.Add(manifest);
-                        return;
-                    }
-                }
-            }
-#endif
-
-            if (pluginEntry != null)
-            {
-                AssetBundle pluginBundle = AssetBundle.LoadFromStream(pluginEntry.SeekableStream());
-                var pluginAssets = pluginBundle.GetAllAssetNames();
-                var prefabName = $"{manifest.assetName}.prefab";
-                var mainPrefabName =
-                    pluginAssets.FirstOrDefault(name => name.IndexOf(prefabName, StringComparison.InvariantCultureIgnoreCase) >= 0);
-                if (mainPrefabName != null)
-                {
-                    GameObject prefab = pluginBundle.LoadAsset<GameObject>(mainPrefabName);
-
-                    var meta = prefab.GetComponent<NPCMetaData>();
-
-                    if (meta != null)
-                    {
-                        NPCVehicles.Add(manifest.assetName, new NPCAssetData()
-                        {
-                            Prefab = prefab,
-                            Name = manifest.assetName,
-                            AssetGuid = manifest.assetGuid,
-                            NPCType = meta.SizeType,
-                        });
-                    }
-                    else
-                    {
-                        Debug.LogWarning($"NPC {manifest.assetName} missing meta info, setting default type");
-                    }
-                }
-
-                LoadCustomManagers(customManagers, pluginBundle);
-            }
-
-            if (pluginEntry == null && pluginSource == null)
-            {
-                Debug.LogWarning("Neither assembly nor prefab found in " + manifest.assetName);
-            }
-
-            if (textureBundle && !AssetBundle.GetAllLoadedAssetBundles().Contains(textureBundle))
-            {
-                textureBundle.LoadAllAssets();
-            }
-
-            LoadedAssets.Add(manifest);
-        }
-
-        private static void LoadPedestrianAsset(Manifest manifest, VfsEntry dir)
-        {
-            if (manifest.assetFormat != BundleConfig.Versions[BundleConfig.BundleTypes.Pedestrian])
-            {
-                throw new Exception($"manifest version mismatch, expected {BundleConfig.Versions[BundleConfig.BundleTypes.Pedestrian]}, got {manifest.assetFormat}");
-            }
-
-            var texEntry = dir.Find($"{manifest.assetGuid}_pedestrian_textures");
-            AssetBundle textureBundle = null;
-            if (texEntry != null)
-            {
-                var texStream = VirtualFileSystem.VirtualFileSystem.EnsureSeekable(texEntry.SeekableStream(), (int)texEntry.Size);
-                textureBundle = AssetBundle.LoadFromStream(texStream, 0, 1 << 20);
-                texStream.Close();
-                texStream.Dispose();
-            }
-
-            string platform = SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows ? "windows" : "linux";
-            var pluginEntry = dir.Find($"{manifest.assetGuid}_pedestrian_main_{platform}");
-
-#if UNITY_EDITOR
-            if (EditorPrefs.GetBool("Simulator/Developer Debug Mode", false) == true)
-            {
-                var assemblyExists = true;
-                try
-                {
-                    // Try loading into reflection context before loading into AppDomain. If this fails, it means
-                    // there are no scripts in the assembly and it was not compiled - skip loading it.
-                    Assembly.ReflectionOnlyLoad("Simulator.Pedestrians");
-                }
-                catch
-                {
-                    assemblyExists = false;
-                }
-
-                if (assemblyExists)
-                    Assembly.Load("Simulator.Pedestrians");
-
-                foreach (var PedDir in Directory.EnumerateDirectories(Path.Combine(BundleConfig.ExternalBase, BundleConfig.pluralOf(BundleConfig.BundleTypes.Pedestrian))))
-                {
-                    if (File.Exists(Path.Combine(PedDir, manifest.assetName, $"{manifest.assetName}.prefab")))
-                    {
-                        var prefab = (GameObject)AssetDatabase.LoadAssetAtPath(Path.Combine(PedDir, manifest.assetName, $"{manifest.assetName}.prefab"), typeof(GameObject));
-
-                        Pedestrians.Add(manifest.assetName, new PedAssetData()
-                        {
-                            Prefab = prefab,
-                            Name = manifest.assetName,
-                            AssetGuid = manifest.assetGuid,
-                        });
-
-                        if (textureBundle && !AssetBundle.GetAllLoadedAssetBundles().Contains(textureBundle))
-                        {
-                            textureBundle.LoadAllAssets();
-                        }
-
-                        LoadedAssets.Add(manifest);
-                        return;
-                    }
-                }
-            }
-#endif
-
-            if (pluginEntry != null)
-            {
-                AssetBundle pluginBundle = AssetBundle.LoadFromStream(pluginEntry.SeekableStream());
-                var pluginAssets = pluginBundle.GetAllAssetNames();
-                var prefabName = $"{manifest.assetName}.prefab";
-                var mainPrefabName = pluginAssets.First(name => name.IndexOf(prefabName, StringComparison.InvariantCultureIgnoreCase) >= 0);
-                GameObject prefab = pluginBundle.LoadAsset<GameObject>(mainPrefabName);
-
-                Pedestrians.Add(manifest.assetName, new PedAssetData()
-                {
-                    Prefab = prefab,
-                    Name = manifest.assetName,
-                    AssetGuid = manifest.assetGuid,
-                });
-            }
-
-            if (pluginEntry == null)
-            {
-                Debug.LogWarning("No prefab found in " + manifest.assetName);
-            }
-
-            if (textureBundle && !AssetBundle.GetAllLoadedAssetBundles().Contains(textureBundle))
-            {
-                textureBundle.LoadAllAssets();
-            }
-
-            LoadedAssets.Add(manifest);
-        }
-
-        private static void LoadCustomManagers(List<Type> types, AssetBundle bundle)
-        {
-            var assets = bundle.GetAllAssetNames();
-            foreach (var type in types)
-            {
-                var typeName = type.Name;
-                var prefabName = assets.First(name => name.IndexOf(typeName, StringComparison.InvariantCultureIgnoreCase) >= 0);
-                if (prefabName != null)
-                {
-                    var prefab = (GameObject)bundle.LoadAsset(prefabName);
-                    CustomManagers.Add(type, prefab);
-                }
-            }
         }
 
         private class YamlConfig
@@ -746,8 +239,7 @@ namespace Simulator.Web
             public bool read_only { get; set; } = false;
             public string api_hostname { get; set; } = Config.ApiHost;
             public int api_port { get; set; } = Config.ApiPort;
-            public string cloud_url { get; set; } = Config.CloudUrl;
-            public string cloud_proxy { get; set; } = Config.CloudProxy;
+            public bool start_api_only { get; set; } = Config.StartApiOnly;
             public string data_path { get; set; } = Config.PersistentDataPath;
         }
 
@@ -757,7 +249,8 @@ namespace Simulator.Web
             {
                 try
                 {
-                    return new Deserializer().Deserialize<YamlConfig>(fs);
+                    // config files written for WISE still contain cloud_url and cloud_proxy
+                    return new DeserializerBuilder().IgnoreUnmatchedProperties().Build().Deserialize<YamlConfig>(fs);
                 }
                 catch (Exception ex)
                 {
@@ -775,8 +268,7 @@ namespace Simulator.Web
                 api_hostname = ApiHost,
                 api_port = ApiPort,
                 data_path = PersistentDataPath,
-                cloud_url = CloudUrl,
-                cloud_proxy = CloudProxy,
+                start_api_only = StartApiOnly,
                 headless = Headless
             };
         }
@@ -784,38 +276,17 @@ namespace Simulator.Web
         public static void ParseConfigFile()
         {
             var configFile = Path.Combine(Root, "config.yml");
-            if (!File.Exists(configFile))
+            var config = File.Exists(configFile) ? LoadConfigFile(configFile) : null;
+            if (config != null)
             {
-                return;
+                ApiHost = config.api_hostname ?? "localhost";
+                ApiPort = config.api_port;
+
+                PersistentDataPath = config.data_path;
+
+                StartApiOnly = config.start_api_only;
+                Headless = config.headless;
             }
-
-            var config = LoadConfigFile(configFile);
-            if (config == null)
-            {
-                return;
-            }
-
-            ApiHost = config.api_hostname ?? "localhost";
-            ApiPort = config.api_port;
-
-            PersistentDataPath = config.data_path;
-
-            CloudUrl = config.cloud_url.TrimEnd('/');
-            string cloudUrl = Environment.GetEnvironmentVariable("SIMULATOR_CLOUDURL");
-            if (!string.IsNullOrEmpty(cloudUrl))
-            {
-                CloudUrl = cloudUrl;
-            }
-
-            CloudProxy = config.cloud_proxy;
-            string cloudProxy = Environment.GetEnvironmentVariable("http_proxy") ??
-                                Environment.GetEnvironmentVariable("HTTP_PROXY");
-            if (!string.IsNullOrEmpty(cloudProxy))
-            {
-                CloudProxy = cloudProxy;
-            }
-
-            Headless = config.headless;
         }
 
         private static void ParseCommandLine()
@@ -833,13 +304,8 @@ namespace Simulator.Web
                         }
                         SimID = args[++i];
                         break;
-                    case "--cloudurl":
-                        if (i == args.Length - 1)
-                        {
-                            Debug.LogError("No value for cloud url provided!");
-                            Application.Quit(1);
-                        }
-                        CloudUrl = args[++i];
+                    case "--no-api-only":
+                        StartApiOnly = false;
                         break;
                     case "--apihost":
                         if (i == args.Length - 1)
@@ -871,9 +337,6 @@ namespace Simulator.Web
                         }
 
                         PersistentDataPath = Path.GetFullPath(args[++i]);
-                        break;
-                    case "--retryForever":
-                        RetryForever = true;
                         break;
                     default:
                         // skip unknown arguments to allow to pass default Unity Player args

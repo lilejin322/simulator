@@ -1,5 +1,13 @@
 using System;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Serialization;
+#if UNITY_EDITOR
+// TODO @ SHADERS: Enable as many of the rules (currently commented out) as make sense
+//                 once the setting asset aggregation behavior is finalized.  More fine tuning
+//                 of these rules is also desirable (current rules have been interpreted from
+//                 the variant stripping logic)
+using ShaderKeywordFilter = UnityEditor.ShaderKeywordFilter;
+#endif
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -36,6 +44,19 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
         /// <summary>
+        /// The available Probe system used.
+        /// </summary>
+        public enum LightProbeSystem
+        {
+            /// <summary>The legacy light probe system.</summary>
+            [InspectorName("Light Probe Groups")]
+            LegacyLightProbes = 0,
+            /// <summary>Adaptive Probe Volumes system.</summary>
+            AdaptiveProbeVolumes = 1,
+        }
+
+
+        /// <summary>
         /// Color Buffer format.
         /// </summary>
         public enum ColorBufferFormat
@@ -47,12 +68,30 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
         /// <summary>
+        /// Depth Buffer format.
+        /// </summary>
+        public enum DepthBufferFormat
+        {
+            /// <summary>Automatically switch between 32 and 24 bit depth depending on the platform.</summary>
+            Auto = 0,
+            /// <summary>Forces HDRP to use 32 bit depth + 8 bit stencil buffer</summary>
+            ForceD32 = GraphicsFormat.D32_SFloat_S8_UInt,
+            /// <summary>Forces HDRP to use 24 bit depth + 8 bit stencil buffer</summary>
+            ForceD24 = GraphicsFormat.D24_UNorm_S8_UInt,
+            /// <summary>Forces HDRP to use 16 bit depth + 8 bit stencil buffer. Improves performances of depth related effects but can cause Z-Fighting due to the low precision.</summary>
+            ForceD16 = GraphicsFormat.D16_UNorm_S8_UInt,
+        }
+
+        /// <summary>
         /// Custom Buffers format.
         /// </summary>
         public enum CustomBufferFormat
         {
             /// <summary>Regular R8G8B8A8 format.</summary>
-            R8G8B8A8 = GraphicsFormat.R8G8B8A8_SNorm,
+            [InspectorName("Signed R8G8B8A8")]
+            SignedR8G8B8A8 = GraphicsFormat.R8G8B8A8_SNorm,
+            /// <summary>Regular R8G8B8A8 format.</summary>
+            R8G8B8A8 = GraphicsFormat.R8G8B8A8_UNorm,
             /// <summary>R16G16B16A16 high quality HDR format.</summary>
             R16G16B16A16 = GraphicsFormat.R16G16B16A16_SFloat,
             /// <summary>R11G11B10 medium quality HDR format.</summary>
@@ -79,38 +118,43 @@ namespace UnityEngine.Rendering.HighDefinition
                 supportShadowMask = true,
                 supportSSAO = true,
                 supportSubsurfaceScattering = true,
+                subsurfaceScatteringAttenuation = true,
                 sssSampleBudget = new IntScalableSetting(new[] { (int)DefaultSssSampleBudgetForQualityLevel.Low,
                                                                  (int)DefaultSssSampleBudgetForQualityLevel.Medium,
                                                                  (int)DefaultSssSampleBudgetForQualityLevel.High }, ScalableSettingSchemaId.With3Levels),
+                sssDownsampleSteps = new IntScalableSetting(new[] { (int)DefaultSssDownsampleSteps.Low,
+                                                                    (int)DefaultSssDownsampleSteps.Medium,
+                                                                    (int)DefaultSssDownsampleSteps.High }, ScalableSettingSchemaId.With3Levels),
                 supportVolumetrics = true,
                 supportDistortion = true,
                 supportTransparentBackface = true,
                 supportTransparentDepthPrepass = true,
                 supportTransparentDepthPostpass = true,
                 colorBufferFormat = ColorBufferFormat.R11G11B10,
+                depthBufferFormat = DepthBufferFormat.Auto,
                 supportCustomPass = true,
+                supportVariableRateShading = true,
                 customBufferFormat = CustomBufferFormat.R8G8B8A8,
                 supportedLitShaderMode = SupportedLitShaderMode.DeferredOnly,
                 supportDecals = true,
                 supportDecalLayers = false,
-                decalLayerName0 = "Decal Layer default",
-                decalLayerName1 = "Decal Layer 1",
-                decalLayerName2 = "Decal Layer 2",
-                decalLayerName3 = "Decal Layer 3",
-                decalLayerName4 = "Decal Layer 4",
-                decalLayerName5 = "Decal Layer 5",
-                decalLayerName6 = "Decal Layer 6",
-                decalLayerName7 = "Decal Layer 7",
+                supportSurfaceGradient = true,
+                decalNormalBufferHP = false,
                 msaaSampleCount = MSAASamples.None,
                 supportMotionVectors = true,
-                supportRuntimeDebugDisplay = false,
                 supportRuntimeAOVAPI = false,
-                supportDitheringCrossFade = true,
                 supportTerrainHole = false,
+
+                supportComputeThickness = false,
+                computeThicknessResolution = ComputeThicknessResolution.Half,
+                computeThicknessLayerMask = 0,
+
                 planarReflectionResolution = new PlanarReflectionAtlasResolutionScalableSetting(new[] { PlanarReflectionAtlasResolution.Resolution256,
-                                                                                PlanarReflectionAtlasResolution.Resolution1024,
-                                                                                PlanarReflectionAtlasResolution.Resolution2048 },
-                                                                                ScalableSettingSchemaId.With3Levels),
+                                                                                                        PlanarReflectionAtlasResolution.Resolution1024,
+                                                                                                        PlanarReflectionAtlasResolution.Resolution2048 }, ScalableSettingSchemaId.With3Levels),
+                cubeReflectionResolution = new ReflectionProbeResolutionScalableSetting(new[] { CubeReflectionResolution.CubeReflectionResolution128,
+                                                                                                CubeReflectionResolution.CubeReflectionResolution256,
+                                                                                                CubeReflectionResolution.CubeReflectionResolution512 }, ScalableSettingSchemaId.With3Levels),
                 lightLoopSettings = GlobalLightLoopSettings.NewDefault(),
                 hdShadowInitParams = HDShadowInitParameters.NewDefault(),
                 decalSettings = GlobalDecalSettings.NewDefault(),
@@ -122,20 +166,38 @@ namespace UnityEngine.Rendering.HighDefinition
                 lightingQualitySettings = GlobalLightingQualitySettings.NewDefault(),
                 lightSettings = LightSettings.NewDefault(),
 
+                // Water Properties
+                supportWater = false,
+                waterSimulationResolution = WaterSimulationResolution.Medium128,
+                supportWaterExclusion = true,
+                supportWaterHorizontalDeformation = false,
+
+                supportWaterDecals = true,
+                waterDecalAtlasSize = WaterAtlasSize.AtlasSize1024,
+                maximumWaterDecalCount = 48,
+
+                waterScriptInteractionsMode = WaterScriptInteractionsMode.GPUReadback,
+                waterFullCPUSimulation = false,
+                waterCausticsMeshResolution = WaterCausticsMeshResolution.Medium256,
+
+                supportScreenSpaceLensFlare = true,
+                supportDataDrivenLensFlare = true,
                 supportRayTracing = false,
+                supportVFXRayTracing = false,
                 supportedRayTracingMode = SupportedRayTracingMode.Both,
                 lodBias = new FloatScalableSetting(new[] { 1.0f, 1, 1 }, ScalableSettingSchemaId.With3Levels),
                 maximumLODLevel = new IntScalableSetting(new[] { 0, 0, 0 }, ScalableSettingSchemaId.With3Levels),
-                lightLayerName0 = "Light Layer default",
-                lightLayerName1 = "Light Layer 1",
-                lightLayerName2 = "Light Layer 2",
-                lightLayerName3 = "Light Layer 3",
-                lightLayerName4 = "Light Layer 4",
-                lightLayerName5 = "Light Layer 5",
-                lightLayerName6 = "Light Layer 6",
-                lightLayerName7 = "Light Layer 7",
-                supportProbeVolume = false,
-                probeVolumeSettings = GlobalProbeVolumeSettings.@default,
+                lightProbeSystem = LightProbeSystem.AdaptiveProbeVolumes,
+                probeVolumeMemoryBudget = ProbeVolumeTextureMemoryBudget.MemoryBudgetMedium,
+                probeVolumeBlendingMemoryBudget = ProbeVolumeBlendingTextureMemoryBudget.MemoryBudgetLow,
+                supportProbeVolumeScenarios = false,
+                supportProbeVolumeScenarioBlending = true,
+                supportHighQualityLineRendering = false,
+                supportProbeVolumeGPUStreaming = false,
+                supportProbeVolumeDiskStreaming = false,
+                highQualityLineRenderingMemoryBudget = LineRendering.MemoryBudget.MemoryBudgetLow,
+                probeVolumeSHBands = ProbeVolumeSHBands.SphericalHarmonicsL1,
+                gpuResidentDrawerSettings = GlobalGPUResidentDrawerSettings.NewDefault()
             };
             return settings;
         }
@@ -153,7 +215,6 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 useContactShadow = new BoolScalableSetting(new[] { false, false, true }, ScalableSettingSchemaId.With3Levels)
             };
-
         }
 
 
@@ -169,7 +230,24 @@ namespace UnityEngine.Rendering.HighDefinition
             /// <param name="values">The values of the settings</param>
             /// <param name="schemaId">The schema of the setting.</param>
             public PlanarReflectionAtlasResolutionScalableSetting(PlanarReflectionAtlasResolution[] values, ScalableSettingSchemaId schemaId)
-            : base(values, schemaId)
+                : base(values, schemaId)
+            {
+            }
+        }
+
+        /// <summary>
+        /// Represents resolution settings for cube reflections.
+        /// </summary>
+        [Serializable]
+        public class ReflectionProbeResolutionScalableSetting : ScalableSetting<CubeReflectionResolution>
+        {
+            /// <summary>
+            /// Instantiate a new CubeReflectionResolution scalable setting.
+            /// </summary>
+            /// <param name="values">The values of the settings</param>
+            /// <param name="schemaId">The schema of the setting.</param>
+            public ReflectionProbeResolutionScalableSetting(CubeReflectionResolution[] values, ScalableSettingSchemaId schemaId)
+                : base(values, schemaId)
             {
             }
         }
@@ -186,29 +264,67 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>Support screen space global illumination.</summary>
         public bool supportSSGI;
         /// <summary>Support subsurface scattering.</summary>
+#if UNITY_EDITOR // multi_compile_fragment _ OUTPUT_SPLIT_LIGHTING
+        // [ShaderKeywordFilter.RemoveIf(true, keywordNames: "OUTPUT_SPLIT_LIGHTING")]
+#endif
         public bool supportSubsurfaceScattering;
+        /// <summary>Enable SubSurface-Scattering occlusion computation. Enabling this makes the SSS slightly more expensive but add great details to occluded zones with SSS materials.</summary>
+        public bool subsurfaceScatteringAttenuation;
         /// <summary>Sample budget for the Subsurface Scattering algorithm.</summary>
         public IntScalableSetting sssSampleBudget;
+        /// <summary>Downsample input texture for the Subsurface Scattering algorithm.</summary>
+        public IntScalableSetting sssDownsampleSteps;
         /// <summary>Support volumetric lighting.</summary>
         public bool supportVolumetrics;
+        /// <summary>Support volumetric clouds.</summary>
+        public bool supportVolumetricClouds;
         /// <summary>Support light layers.</summary>
         public bool supportLightLayers;
-        /// <summary>Name for light layer 0.</summary>
-        public string lightLayerName0;
-        /// <summary>Name for light layer 1.</summary>
-        public string lightLayerName1;
-        /// <summary>Name for light layer 2.</summary>
-        public string lightLayerName2;
-        /// <summary>Name for light layer 3.</summary>
-        public string lightLayerName3;
-        /// <summary>Name for light layer 4.</summary>
-        public string lightLayerName4;
-        /// <summary>Name for light layer 5.</summary>
-        public string lightLayerName5;
-        /// <summary>Name for light layer 6.</summary>
-        public string lightLayerName6;
-        /// <summary>Name for light layer 7.</summary>
-        public string lightLayerName7;
+        /// <summary>Enable rendering layer mask buffer.</summary>
+        public bool renderingLayerMaskBuffer;
+
+        // Water
+        /// <summary>Support Water Surfaces.</summary>
+        public bool supportWater;
+        /// <summary>Water simulation resolution</summary>
+        public WaterSimulationResolution waterSimulationResolution;
+        /// <summary>Support Water Surfaces exclusion.</summary>
+        public bool supportWaterExclusion;
+        /// <summary>Support Water Surfaces Horizontal Deformation.</summary>
+        public bool supportWaterHorizontalDeformation;
+
+        /// <summary>Support Water Surfaces deformation.</summary>
+        public bool supportWaterDecals;
+        /// <summary>Defines the resolution of the decal atlas.</summary>
+        public WaterAtlasSize waterDecalAtlasSize;
+        /// <summary>Maximum amount of visible water decals.</summary>
+        public int maximumWaterDecalCount;
+
+        /// <summary>Defines if the script interactions should simulate water on CPU or fetch simulation from the GPU.</summary>
+        [Tooltip("Defines if the script interactions should simulate water on CPU or fetch simulation from the GPU.")]
+        public WaterScriptInteractionsMode waterScriptInteractionsMode;
+        /// <summary>Defines if the CPU simulation should be evaluated at full resolution or half resolution.</summary>
+        [Tooltip("Defines if the CPU simulation should be evaluated at full resolution or half resolution.")]
+        public bool waterFullCPUSimulation;
+        /// <summary>Specifies the resolution of the mesh used to render the caustics texture. For better efficiency, this needs to be lower than the caustics resolution texture in your water surface. A higher resolution increases the number of vertices in the scene.</summary>
+        [Tooltip("Specifies the resolution of the mesh used to render the caustics texture. For better efficiency, this needs to be lower than the caustics resolution texture in your water surface. A higher resolution increases the number of vertices in the scene. .")]
+        public WaterCausticsMeshResolution waterCausticsMeshResolution;
+
+        // Compute Thickness
+        /// <summary>Sample Compute Thickness algorithm.</summary>
+        public bool supportComputeThickness;
+        /// <summary>Scale for compute thickness texture array.</summary>
+        public ComputeThicknessResolution computeThicknessResolution;
+        /// <summary>LayerMask used to render thickness.</summary>
+        public LayerMask computeThicknessLayerMask;
+
+        /// <summary>Names for rendering layers.</summary>
+        [Obsolete("This property is obsolete. Use RenderingLayerMask API and Tags & Layers project settings instead. #from(2023.3)")]
+        public string[] renderingLayerNames
+        {
+            get { return (string[])HDRenderPipelineGlobalSettings.instance.renderingLayerNames.Clone(); }
+            set { HDRenderPipelineGlobalSettings.instance.renderingLayerNames = value; }
+        }
         /// <summary>Support distortion.</summary>
         public bool supportDistortion;
         /// <summary>Support transparent backface pass.</summary>
@@ -219,64 +335,135 @@ namespace UnityEngine.Rendering.HighDefinition
         public bool supportTransparentDepthPostpass;
         /// <summary>Color buffer format.</summary>
         public ColorBufferFormat colorBufferFormat;
+        /// <summary>Depth buffer format.</summary>
+        public DepthBufferFormat depthBufferFormat;
         /// <summary>Support custom passes.</summary>
         public bool supportCustomPass;
+        /// <summary>Support variable rate shading.</summary>
+        public bool supportVariableRateShading;
         /// <summary>Custom passes buffer format.</summary>
         public CustomBufferFormat customBufferFormat;
         /// <summary>Supported Lit shader modes.</summary>
+#if UNITY_EDITOR // multi_compile_fragment _ WRITE_MSAA_DEPTH
+        // [ShaderKeywordFilter.RemoveIf(SupportedLitShaderMode.DeferredOnly, keywordNames: "WRITE_MSAA_DEPTH")]
+#endif
         public SupportedLitShaderMode supportedLitShaderMode;
         /// <summary></summary>
         public PlanarReflectionAtlasResolutionScalableSetting planarReflectionResolution;
+        /// <summary></summary>
+        public ReflectionProbeResolutionScalableSetting cubeReflectionResolution;
         // Engine
         /// <summary>Support decals.</summary>
+#if UNITY_EDITOR // multi_compile_fragment DECALS_OFF DECALS_3RT DECALS_4RT
+        // If decals are not supported, remove the multiple render target variants
+        // [ShaderKeywordFilter.RemoveIf(false, keywordNames: new string[] {"DECALS_3RT", "DECALS_4RT"})]
+        // Similar but separate rule due to the separate multi_compile_fragment _ DECAL_SURFACE_GRADIENT
+        // [ShaderKeywordFilter.RemoveIf(false, keywordNames: "DECAL_SURFACE_GRADIENT")]
+        // If decals are supported, remove the no decal variant
+        // [ShaderKeywordFilter.RemoveIf(true, keywordNames: "DECALS_OFF")]
+        // If decals are not supported, remove WRITE_DECAL_BUFFER
+        // [ShaderKeywordFilter.RemoveIf(false, keywordNames: "WRITE_DECAL_BUFFER")]
+#endif
         public bool supportDecals;
         /// <summary>Support decal Layers.</summary>
+#if UNITY_EDITOR // multi_compile _ WRITE_DECAL_BUFFER
+        // [ShaderKeywordFilter.SelectOrRemove(true, keywordNames: "WRITE_DECAL_BUFFER")]
+#endif
         public bool supportDecalLayers;
-        /// <summary>Name for decal layer 0.</summary>
-        public string decalLayerName0;
-        /// <summary>Name for decal layer 1.</summary>
-        public string decalLayerName1;
-        /// <summary>Name for decal layer 2.</summary>
-        public string decalLayerName2;
-        /// <summary>Name for decal layer 3.</summary>
-        public string decalLayerName3;
-        /// <summary>Name for decal layer 4.</summary>
-        public string decalLayerName4;
-        /// <summary>Name for decal layer 5.</summary>
-        public string decalLayerName5;
-        /// <summary>Name for decal layer 6.</summary>
-        public string decalLayerName6;
-        /// <summary>Name for decal layer 7.</summary>
-        public string decalLayerName7;
+        /// <summary>Support surface gradient for decal normal blending.</summary>
+#if UNITY_EDITOR // multi_compile_fragment _ DECAL_SURFACE_GRADIENT
+        // Remove if surface gradient is not supported
+        // [ShaderKeywordFilter.RemoveIf(true, keywordNames: "DECAL_SURFACE_GRADIENT")]
+#endif
+        public bool supportSurfaceGradient;
+        /// <summary>High precision normal buffer.</summary>
+        public bool decalNormalBufferHP;
+        /// <summary>Support High Quality Line Rendering.</summary>
+        public bool supportHighQualityLineRendering;
+        /// <summary>High Quality Line Rendering Memory Budget.</summary>
+        public LineRendering.MemoryBudget highQualityLineRenderingMemoryBudget;
 
-        /// <summary>Number of samples when using MSAA.</summary>
+        /// <summary>Default Number of samples when using MSAA.</summary>
         public MSAASamples msaaSampleCount;
         /// <summary>Support MSAA.</summary>
+        [Obsolete("#from(2021.2)")]
         public bool supportMSAA => msaaSampleCount != MSAASamples.None;
 
         // Returns true if the output of the rendering passes support an alpha channel
-        internal bool supportsAlpha => colorBufferFormat == ColorBufferFormat.R16G16B16A16;
+        internal bool SupportsAlpha()
+        {
+            return CoreUtils.IsSceneFilteringEnabled() || (colorBufferFormat == ColorBufferFormat.R16G16B16A16);
+        }
 
         /// <summary>Support motion vectors.</summary>
         public bool supportMotionVectors;
+
+        // Post Processing
+        /// <summary>Support Screen Space Lens Flare.</summary>
+        public bool supportScreenSpaceLensFlare;
+        /// <summary>Support Data Driven Lens Flare.</summary>
+        public bool supportDataDrivenLensFlare;
+
         /// <summary>Support runtime debug display.</summary>
-        public bool supportRuntimeDebugDisplay;
+        [Obsolete("Use HDRenderPipelineGlobalSettings.instance.stripDebugVariants) instead. #from(2023.1)")]
+        public bool supportRuntimeDebugDisplay
+        {
+            get => !HDRenderPipelineGlobalSettings.instance.m_StripDebugVariants;
+            set => HDRenderPipelineGlobalSettings.instance.m_StripDebugVariants = !value;
+        }
+
+        internal bool supportProbeVolume => (lightProbeSystem == LightProbeSystem.AdaptiveProbeVolumes);
+        [FormerlySerializedAs("supportProbeVolume")]
+        [Obsolete("Use lightProbeSystem instead #from(2023.2)")]
+        internal bool oldSupportProbeVolume;
+
+        /// <summary> Support LOD Dithering Cross-Fade/// </summary>
+        [Obsolete("This setting has no effect, use LOD Quality Setting instead #from(2023.2)")]
+        public bool supportDitheringCrossFade;
+
         /// <summary>Support runtime AOV API.</summary>
         public bool supportRuntimeAOVAPI;
-        /// <summary>Support dithered cross-fade.</summary>
-        public bool supportDitheringCrossFade;
+
         /// <summary>Support terrain holes.</summary>
         public bool supportTerrainHole;
-        /// <summary>Support Probe Volumes.</summary>
-        [SerializeField] internal bool supportProbeVolume;
+        /// <summary>Determines what system to use.</summary>
+#if UNITY_EDITOR // multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+        // [ShaderKeywordFilter.SelectIf(LightProbeSystem.ProbeVolumes, new string[] {"PROBE_VOLUMES_L1", "PROBE_VOLUMES_L2"})]
+        // [ShaderKeywordFilter.RemoveIf(LightProbeSystem.LegacyLightProbes, keywordNames: new string[] {"PROBE_VOLUMES_L1", "PROBE_VOLUMES_L2"})]
+#endif
+        public LightProbeSystem lightProbeSystem;
+        [SerializeField]
+        internal LightProbeSystem oldLightProbeSystem;
+
+        /// <summary>Probe Volume Memory Budget.</summary>
+        public ProbeVolumeTextureMemoryBudget probeVolumeMemoryBudget;
+        /// <summary>Support GPU Streaming for Probe Volumes.</summary>
+        [FormerlySerializedAs("supportProbeVolumeStreaming")]
+        public bool supportProbeVolumeGPUStreaming;
+        /// <summary>Support Disk Streaming for Probe Volumes.</summary>
+        public bool supportProbeVolumeDiskStreaming;
+        /// <summary>Probe Volumes SH Bands.</summary>
+#if UNITY_EDITOR // multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+        // [ShaderKeywordFilter.RemoveIf(ProbeVolumeSHBands.SphericalHarmonicsL1, keywordNames: "PROBE_VOLUMES_L2")]
+        // [ShaderKeywordFilter.RemoveIf(ProbeVolumeSHBands.SphericalHarmonicsL2, keywordNames: "PROBE_VOLUMES_L1")]
+#endif
+        public ProbeVolumeSHBands probeVolumeSHBands;
+        /// <summary>Support Scenarios for Probe Volumes.</summary>
+        public bool supportProbeVolumeScenarios;
+        /// <summary>Support Scenarios for Probe Volumes.</summary>
+        public bool supportProbeVolumeScenarioBlending;
+        /// <summary>Probe Volume Memory Budget for scenario blending.</summary>
+        public ProbeVolumeBlendingTextureMemoryBudget probeVolumeBlendingMemoryBudget;
+
         /// <summary>Support ray tracing.</summary>
         public bool supportRayTracing;
+        /// <summary> Support ray tracing of VFXs.</summary>
+        public bool supportVFXRayTracing;
+
         /// <summary>Support ray tracing mode.</summary>
         public SupportedRayTracingMode supportedRayTracingMode;
 
-        /// <summary>Global Probe Volume settings.</summary>
-        [SerializeField] internal GlobalProbeVolumeSettings probeVolumeSettings;
-		/// <summary>Global light loop settings.</summary>
+        /// <summary>Global light loop settings.</summary>
         public GlobalLightLoopSettings lightLoopSettings;
         /// <summary>Global shadows settings.</summary>
         public HDShadowInitParameters hdShadowInitParams;
@@ -303,9 +490,66 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>Global lighting quality settings.</summary>
         public GlobalLightingQualitySettings lightingQualitySettings;
 
-    #pragma warning disable 618 // Type or member is obsolete
-        [Obsolete("For data migration")]
+        /// <summary>Global macro batcher settings.</summary>
+        [FormerlySerializedAs("macroBatcherSettings")] public GlobalGPUResidentDrawerSettings gpuResidentDrawerSettings;
+
+#pragma warning disable 618 // Type or member is obsolete
+        [Obsolete("For data migration. #from(2021.1)")]
         internal bool m_ObsoleteincreaseSssSampleCount;
-    #pragma warning restore 618
+
+        [SerializeField]
+        [FormerlySerializedAs("lightLayerName0"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteLightLayerName0;
+        [SerializeField]
+        [FormerlySerializedAs("lightLayerName1"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteLightLayerName1;
+        [SerializeField]
+        [FormerlySerializedAs("lightLayerName2"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteLightLayerName2;
+        [SerializeField]
+        [FormerlySerializedAs("lightLayerName3"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteLightLayerName3;
+        [SerializeField]
+        [FormerlySerializedAs("lightLayerName4"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteLightLayerName4;
+        [SerializeField]
+        [FormerlySerializedAs("lightLayerName5"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteLightLayerName5;
+        [SerializeField]
+        [FormerlySerializedAs("lightLayerName6"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteLightLayerName6;
+        [SerializeField]
+        [FormerlySerializedAs("lightLayerName7"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteLightLayerName7;
+
+        [SerializeField]
+        [FormerlySerializedAs("decalLayerName0"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteDecalLayerName0;
+        [SerializeField]
+        [FormerlySerializedAs("decalLayerName1"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteDecalLayerName1;
+        [SerializeField]
+        [FormerlySerializedAs("decalLayerName2"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteDecalLayerName2;
+        [SerializeField]
+        [FormerlySerializedAs("decalLayerName3"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteDecalLayerName3;
+        [SerializeField]
+        [FormerlySerializedAs("decalLayerName4"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteDecalLayerName4;
+        [SerializeField]
+        [FormerlySerializedAs("decalLayerName5"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteDecalLayerName5;
+        [SerializeField]
+        [FormerlySerializedAs("decalLayerName6"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteDecalLayerName6;
+        [SerializeField]
+        [FormerlySerializedAs("decalLayerName7"), Obsolete("Moved to HDGlobal Settings. #from(2021.2)")]
+        internal string m_ObsoleteDecalLayerName7;
+
+        [SerializeField]
+        [FormerlySerializedAs("supportRuntimeDebugDisplay"), Obsolete("Moved to HDGlobal Settings. #from(2022.1)")]
+        internal bool m_ObsoleteSupportRuntimeDebugDisplay;
+#pragma warning restore 618
     }
 }

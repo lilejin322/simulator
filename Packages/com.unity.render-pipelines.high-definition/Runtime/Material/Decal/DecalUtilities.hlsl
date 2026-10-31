@@ -1,7 +1,32 @@
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Decal/Decal.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Decal/DecalPrepassBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoop.cs.hlsl"
+#if defined(PATH_TRACING_CLUSTERED_DECALS)
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RayTracingLightCluster.hlsl"
+#else
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoopDef.hlsl"
+#endif
+#ifndef SURFACE_GRADIENT
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/NormalSurfaceGradient.hlsl"
+#endif
 
 DECLARE_DBUFFER_TEXTURE(_DBufferTexture);
+
+#define USE_CLUSTERED_DECALLIST ((defined(_SURFACE_TYPE_TRANSPARENT) && defined(HAS_LIGHTLOOP)) || defined(WATER_SURFACE_GBUFFER) || defined(PATH_TRACING_CLUSTERED_DECALS))
+
+float ComputeDecalTextureLOD(float2 dpdx, float2 dpdy)
+{
+    float lod = ComputeTextureLOD(dpdx, dpdy, _DecalAtlasResolution, 0.5);
+#if defined(SHADEROPTIONS_GLOBAL_MIP_BIAS) && (SHADEROPTIONS_GLOBAL_MIP_BIAS != 0)
+    lod += _GlobalMipBias;
+#endif
+#if (SHADERPASS != SHADERPASS_PATH_TRACING) && defined(PATH_TRACING_CLUSTERED_DECALS)
+    lod += _RayTracingLodBias; // Because SAMPLE_TEXTURE2D_LOD doesn't take this into account
+#endif
+    return lod;
+}
+
+#if USE_CLUSTERED_DECALLIST
 
 // In order that the lod for with transpartent decal better match the lod for opaque decal
 // We use ComputeTextureLOD with bias == 0.5
@@ -34,17 +59,14 @@ void EvalDecalMask( PositionInputs posInput, float3 vtxNormal, float3 positionRW
 
         // Angle fade is disabled if decal layers isn't enabled for consistency with DBuffer Decal
         // The test against _EnableDecalLayers is done here to refresh realtime as AngleFade is cached data and need a decal refresh to be updated.
-        if (angleFade.y < 0.0f && _EnableDecalLayers) // if angle fade is enabled
+        if (angleFade.x > 0.0f && _EnableDecalLayers) // if angle fade is enabled
         {
             float3 decalNormal = float3(decalData.normalToWorld[0].z, decalData.normalToWorld[1].z, decalData.normalToWorld[2].z);
-            float dotAngle = dot(vtxNormal, decalNormal);
-            // See equation in DecalSystem.cs - simplified to a madd mul add here
-            float angleFadeFactor = saturate(angleFade.x + angleFade.y * (dotAngle * (dotAngle - 2.0)));
-            fadeFactor *= angleFadeFactor;
+            fadeFactor *= DecodeAngleFade(dot(vtxNormal, decalNormal), angleFade);
         }
 
-        float albedoMapBlend = fadeFactor;
-        float maskMapBlend = fadeFactor;
+        float albedoMapBlend;
+        float maskMapBlend = fadeFactor * decalData.scalingBlueMaskMap;
 
         // Albedo
         // We must always sample diffuse texture due to opacity that can affect everything)
@@ -62,8 +84,8 @@ void EvalDecalMask( PositionInputs posInput, float3 vtxNormal, float3 positionRW
                 float2 sampleDiffuse = clamp(positionDS.xz * decalData.diffuseScaleBias.xy + decalData.diffuseScaleBias.zw, diffuseMin, diffuseMax);
                 float2 sampleDiffuseDdx = positionDSDdx.xz * decalData.diffuseScaleBias.xy; // factor in the atlas scale
                 float2 sampleDiffuseDdy = positionDSDdy.xz * decalData.diffuseScaleBias.xy;
-                float  lodDiffuse = ComputeTextureLOD(sampleDiffuseDdx, sampleDiffuseDdy, _DecalAtlasResolution, 0.5);
-               
+                float  lodDiffuse = ComputeDecalTextureLOD(sampleDiffuseDdx, sampleDiffuseDdy);
+
                 src *= SAMPLE_TEXTURE2D_LOD(_DecalAtlas2D, _trilinear_clamp_sampler_DecalAtlas2D, sampleDiffuse, lodDiffuse);
             }
 
@@ -99,23 +121,20 @@ void EvalDecalMask( PositionInputs posInput, float3 vtxNormal, float3 positionRW
 
                 float2 sampleMaskDdx = positionDSDdx.xz * decalData.maskScaleBias.xy;
                 float2 sampleMaskDdy = positionDSDdy.xz * decalData.maskScaleBias.xy;
-                float  lodMask = ComputeTextureLOD(sampleMaskDdx, sampleMaskDdy, _DecalAtlasResolution, 0.5);
+                float  lodMask = ComputeDecalTextureLOD(sampleMaskDdx, sampleMaskDdy);
 
                 src = SAMPLE_TEXTURE2D_LOD(_DecalAtlas2D, _trilinear_clamp_sampler_DecalAtlas2D, sampleMask, lodMask);
-                src.z *= decalData.scalingBAndRemappingM.y; // Blue channel (opacity)
                 maskMapBlend *= src.z; // store before overwriting with smoothness
                 #ifdef DECALS_4RT
-                src.x = lerp(decalData.scalingBAndRemappingM.z, decalData.scalingBAndRemappingM.w, src.x); // Remap Metal
+                src.x = lerp(decalData.remappingMetallic.x, decalData.remappingMetallic.y, src.x); // Remap Metal
                 src.y = lerp(decalData.remappingAOS.x, decalData.remappingAOS.y, src.y); // Remap AO
                 #endif
                 src.z = lerp(decalData.remappingAOS.z, decalData.remappingAOS.w, src.w); // Remap Smoothness
             }
             else
             {
-                src.z = decalData.scalingBAndRemappingM.y; // Blue channel (opacity)
-                maskMapBlend *= src.z; // store before overwriting with smoothness
                 #ifdef DECALS_4RT
-                src.x = decalData.scalingBAndRemappingM.z; // Metal
+                src.x = decalData.remappingMetallic.x; // Metal
                 src.y = decalData.remappingAOS.x; // AO
                 #endif
                 src.z = decalData.remappingAOS.z; // Smoothness
@@ -138,8 +157,10 @@ void EvalDecalMask( PositionInputs posInput, float3 vtxNormal, float3 positionRW
         // Normal
         if (affectFlags & 2)
         {
-            float3 normalTS;
-
+            float4 src = float4(0.0, 0.0, 0.0, 0.0);
+            float3 normalTS = float3(0.0, 0.0, 1.0);
+            float normalAlpha = 0.0f;
+            
             // We use scaleBias value to now if we have init a texture. 0 mean a texture is bound
             bool normalTextureBound = (decalData.normalScaleBias.x > 0) && (decalData.normalScaleBias.y > 0);
             if (normalTextureBound)
@@ -150,17 +171,32 @@ void EvalDecalMask( PositionInputs posInput, float3 vtxNormal, float3 positionRW
                 float2 sampleNormal = clamp(positionDS.xz * decalData.normalScaleBias.xy + decalData.normalScaleBias.zw, normalMin, normalMax);
                 float2 sampleNormalDdx = positionDSDdx.xz * decalData.normalScaleBias.xy;
                 float2 sampleNormalDdy = positionDSDdy.xz * decalData.normalScaleBias.xy;
-                float  lodNormal = ComputeTextureLOD(sampleNormalDdx, sampleNormalDdy, _DecalAtlasResolution, 0.5);
-                normalTS = UnpackNormalmapRGorAG(SAMPLE_TEXTURE2D_LOD(_DecalAtlas2D, _trilinear_clamp_sampler_DecalAtlas2D, sampleNormal, lodNormal));
-            }
-            else
-            {
-                normalTS = float3(0.0, 0.0, 1.0);
+                float  lodNormal = ComputeDecalTextureLOD(sampleNormalDdx, sampleNormalDdy);
+
+                real4 atlasData = SAMPLE_TEXTURE2D_LOD(_DecalAtlas2D, _trilinear_clamp_sampler_DecalAtlas2D, sampleNormal, lodNormal);
+                normalAlpha = atlasData.b;
+
+                #ifdef DECAL_SURFACE_GRADIENT
+                float3x3 tangentToWorld = transpose((float3x3)decalData.normalToWorld);
+                float2 deriv = UnpackDerivativeNormalRGorAG(atlasData);
+                src.xyz = SurfaceGradientFromTBN(deriv, tangentToWorld[0], tangentToWorld[1]);
+                #else
+                normalTS = UnpackNormalMapRGorAG(atlasData);
+                #endif
             }
 
-            float4 src;
-            src.xyz = mul((float3x3)decalData.normalToWorld, normalTS) * 0.5 + 0.5; // The " * 0.5 + 0.5" mimic what is happening when calling EncodeIntoDBuffer()
-            src.w = (decalData.blendParams.x == 1.0) ? maskMapBlend : albedoMapBlend;
+            #ifndef DECAL_SURFACE_GRADIENT
+            src.xyz = mul((float3x3)decalData.normalToWorld, normalTS);
+            #else
+            src.xyz *= -1; // see EncodeIntoDBuffer for why we flip
+            #endif
+
+            src.xyz = src.xyz * 0.5 + 0.5; // Mimic what is happening when calling EncodeIntoDBuffer()
+            bool normalMapAlpha = decalData.sampleNormalAlpha == 1.0f;
+            if (normalMapAlpha)
+                src.w = normalAlpha;
+            else
+                src.w = (decalData.blendParams.x == 1.0) ? maskMapBlend : albedoMapBlend;
 
             // Accumulate in dbuffer (mimic what ROP are doing)
             DBuffer1.xyz = src.xyz * src.w + DBuffer1.xyz * (1.0 - src.w);
@@ -169,27 +205,13 @@ void EvalDecalMask( PositionInputs posInput, float3 vtxNormal, float3 positionRW
     }
 }
 
-#if defined(_SURFACE_TYPE_TRANSPARENT) && defined(HAS_LIGHTLOOP) // forward transparent using clustered decals
-DecalData FetchDecal(uint start, uint i)
-{
-#ifndef LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
-    int j = FetchIndex(start, i);
-#else
-    int j = start + i;
-#endif
-    return _DecalDatas[j];
-}
-
 DecalData FetchDecal(uint index)
 {
     return _DecalDatas[index];
 }
-#endif
 
-DecalSurfaceData GetDecalSurfaceData(PositionInputs posInput, float3 vtxNormal, inout float alpha)
+void GetDecalSurfaceDataFromCluster(PositionInputs posInput, float3 vtxNormal, uint meshRenderingDecalLayer, inout float alpha, out DecalSurfaceData decalSurfaceData)
 {
-#if defined(_SURFACE_TYPE_TRANSPARENT) && defined(HAS_LIGHTLOOP)  // forward transparent using clustered decals
-    uint decalCount, decalStart;
     DBufferType0 DBuffer0 = float4(0.0, 0.0, 0.0, 1.0);
     DBufferType1 DBuffer1 = float4(0.5, 0.5, 0.5, 1.0);
     DBufferType2 DBuffer2 = float4(0.0, 0.0, 0.0, 1.0);
@@ -199,25 +221,37 @@ DecalSurfaceData GetDecalSurfaceData(PositionInputs posInput, float3 vtxNormal, 
     float2 DBuffer3 = float2(1.0, 1.0);
 #endif
 
-#ifndef LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
+    uint decalCount = _DecalCount;
+    uint decalStart = 0;
+
+#if defined(PATH_TRACING_CLUSTERED_DECALS)
+    uint decalEnd, cellIndex;
+    GetLightCountAndStartCluster(posInput.positionWS, LIGHTCATEGORY_DECAL, decalStart, decalEnd, cellIndex);
+        
+    decalCount = decalEnd - decalStart;
+    // we disable fast path scalarization in the path tracer due to PS5 compilation issues
+    uint decalStartLane0 = cellIndex;
+    bool fastPath = false;
+#elif !defined(LIGHTLOOP_DISABLE_TILE_AND_CLUSTER) && USE_CLUSTERED_DECALLIST
     GetCountAndStart(posInput, LIGHTCATEGORY_DECAL, decalStart, decalCount);
 
     // Fast path is when we all pixels in a wave are accessing same tile or cluster.
     uint decalStartLane0;
     bool fastPath = IsFastPath(decalStart, decalStartLane0);
-
-#else // LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
-    decalCount = _DecalCount;
-    decalStart = 0;
+#else
+    bool fastPath = true;
 #endif
 
     float3 positionRWS = posInput.positionWS;
 
     // get world space ddx/ddy for adjacent pixels to be used later in mipmap lod calculation
+#if defined(PATH_TRACING_CLUSTERED_DECALS)
+    float3 positionRWSDdx = 0;
+    float3 positionRWSDdy = 0;
+#else
     float3 positionRWSDdx = ddx(positionRWS);
     float3 positionRWSDdy = ddy(positionRWS);
-
-    uint decalLayerMask = GetMeshRenderingDecalLayer();
+#endif 
 
     // Scalarized loop. All decals that are in a tile/cluster touched by any pixel in the wave are loaded (scalar load), only the ones relevant to current thread/pixel are processed.
     // For clarity, the following code will follow the convention: variables starting with s_ are wave uniform (meant for scalar register),
@@ -226,20 +260,23 @@ DecalSurfaceData GetDecalSurfaceData(PositionInputs posInput, float3 vtxNormal, 
     // Note that the above is valid only if wave intriniscs are supported.
     uint v_decalListOffset = 0;
     uint v_decalIdx = decalStart;
-    while (v_decalListOffset < decalCount)
-    {
-#ifndef LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
-        v_decalIdx = FetchIndex(decalStart, v_decalListOffset);
+#if NEED_TO_CHECK_HELPER_LANE
+    // On some platform helper lanes don't behave as we'd expect, therefore we prevent them from entering the loop altogether.
+    bool isHelperLane = WaveIsHelperLane();
+    while (!isHelperLane && v_decalListOffset < decalCount)
 #else
-        v_decalIdx = decalStart + v_decalListOffset;
-#endif // LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
+    while (v_decalListOffset < decalCount)
+#endif
+    {
+#if defined(PATH_TRACING_CLUSTERED_DECALS)
+        v_decalIdx = GetLightClusterCellLightByIndex(cellIndex, decalStart + v_decalListOffset);
+#else
+        v_decalIdx = FetchIndex(decalStart, v_decalListOffset);
+#endif
 
         uint s_decalIdx = ScalarizeElementIndex(v_decalIdx, fastPath);
         if (s_decalIdx == -1)
             break;
-
-        DecalData s_decalData = FetchDecal(s_decalIdx);
-        bool isRejected = (s_decalData.decalLayerMask & decalLayerMask) == 0;
 
         // If current scalar and vector decal index match, we process the decal. The v_decalListOffset for current thread is increased.
         // Note that the following should really be ==, however, since helper lanes are not considered by WaveActiveMin, such helper lanes could
@@ -247,32 +284,72 @@ DecalSurfaceData GetDecalSurfaceData(PositionInputs posInput, float3 vtxNormal, 
         if (s_decalIdx >= v_decalIdx)
         {
             v_decalListOffset++;
+
+            DecalData s_decalData = FetchDecal(s_decalIdx);
+            bool isRejected = _EnableDecalLayers && (s_decalData.decalLayerMask & meshRenderingDecalLayer) == 0;
             if (!isRejected)
                 EvalDecalMask(posInput, vtxNormal, positionRWSDdx, positionRWSDdy, s_decalData, DBuffer0, DBuffer1, DBuffer2, DBuffer3, alpha);
         }
-
     }
-#else // Opaque - used DBuffer
+
+    DECODE_FROM_DBUFFER(DBuffer, decalSurfaceData);
+}
+#endif // USE_CLUSTERED_DECALLIST
+
+void GetDecalSurfaceDataFromDBuffer(PositionInputs posInput, out DecalSurfaceData decalSurfaceData)
+{
     FETCH_DBUFFER(DBuffer, _DBufferTexture, int2(posInput.positionSS.xy));
+    DECODE_FROM_DBUFFER(DBuffer, decalSurfaceData);
+}
+
+DecalSurfaceData GetDecalSurfaceData(PositionInputs posInput, float3 vtxNormal, uint meshRenderingDecalLayer, inout float alpha)
+{
+    DecalSurfaceData decalSurfaceData;
+    
+#if USE_CLUSTERED_DECALLIST // forward transparent, deferred water, and raytracing use clustered decals
+    GetDecalSurfaceDataFromCluster(posInput, vtxNormal, meshRenderingDecalLayer, alpha, decalSurfaceData);
+#else // Opaque - use DBuffer
+    GetDecalSurfaceDataFromDBuffer(posInput, decalSurfaceData);
 #endif
 
-    DecalSurfaceData decalSurfaceData;
-    DECODE_FROM_DBUFFER(DBuffer, decalSurfaceData);
+    return decalSurfaceData;
+}
+
+DecalSurfaceData GetDecalSurfaceData(PositionInputs posInput, FragInputs input, uint decalLayer, inout float alpha)
+{
+    float3 vtxNormal = input.tangentToWorld[2];
+    DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, vtxNormal, decalLayer, alpha);
+
+#if !defined(DECAL_SURFACE_GRADIENT) && defined(_DOUBLESIDED_ON)
+    // 'doubleSidedConstants' is float3(-1, -1, -1) in flip mode and float3(1, 1, -1) in mirror mode.
+    // It's float3(1, 1, 1) in the none mode.
+    float flipSign = input.isFrontFace ? 1.0 : _DoubleSidedConstants.x;
+    decalSurfaceData.normalWS.xy *= flipSign;
+#endif
 
     return decalSurfaceData;
 }
 
 DecalSurfaceData GetDecalSurfaceData(PositionInputs posInput, FragInputs input, inout float alpha)
 {
-    float3 vtxNormal = input.tangentToWorld[2];
-    DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, vtxNormal, alpha);
+    return GetDecalSurfaceData(posInput, input, GetMeshRenderingLayerMask(), alpha);
+}
 
-#ifdef _DOUBLESIDED_ON
-    // 'doubleSidedConstants' is float3(-1, -1, -1) in flip mode and float3(1, 1, -1) in mirror mode.
-    // It's float3(1, 1, 1) in the none mode.
-    float3 flipSign = input.isFrontFace ? float3(1.0, 1.0, 1.0) : _DoubleSidedConstants.xyz;
-    decalSurfaceData.normalWS.xyz *= flipSign;
-#endif // _DOUBLESIDED_ON
+// There are two variants of this function depending on if we are using surface gradients or not
+void ApplyDecalToSurfaceNormal(DecalSurfaceData decalSurfaceData, inout float3 normalWS)
+{
+    // Always test the normal as we can have decompression artifact
+    if (decalSurfaceData.normalWS.w < 1.0)
+        normalWS.xyz = SafeNormalize(normalWS.xyz * decalSurfaceData.normalWS.w + decalSurfaceData.normalWS.xyz);
+}
 
-    return decalSurfaceData;
+void ApplyDecalToSurfaceNormal(DecalSurfaceData decalSurfaceData, float3 vtxNormal, inout float3 normalTS)
+{
+    // Always test the normal as we can have decompression artifact
+    float3 addValue = float3(0.0,0.0,0.0);
+    if (decalSurfaceData.normalWS.w < 1.0)
+    {
+        addValue = SurfaceGradientFromVolumeGradient (vtxNormal, decalSurfaceData.normalWS.xyz);
+    }
+    normalTS += addValue;
 }

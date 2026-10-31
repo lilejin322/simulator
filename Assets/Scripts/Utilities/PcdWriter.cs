@@ -34,12 +34,12 @@ namespace Simulator.Utilities
             Write($"COUNT 1 1 1 1\n");
             Write($"WIDTH ");
             CountOffset1 = Stream.Position;
-            Write($"##########\n");
+            Write($"          \n");
             Write($"HEIGHT 1\n");
             Write($"VIEWPOINT 0 0 0 1 0 0 0\n");
             Write($"POINTS ");
             CountOffset2 = Stream.Position;
-            Write($"##########\n");
+            Write($"          \n");
             Write($"DATA binary\n");
         }
 

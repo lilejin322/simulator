@@ -1,5 +1,5 @@
 //
-// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit / Render Pipeline / Generate Shader Includes ] instead
+// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit > Rendering > Generate Shader Includes ] instead
 //
 
 #ifndef SHADERVARIABLESXR_CS_HLSL
@@ -14,6 +14,7 @@ GLOBAL_CBUFFER_START(ShaderVariablesXR, b1)
     float4x4 _XRViewProjMatrix[2];
     float4x4 _XRInvViewProjMatrix[2];
     float4x4 _XRNonJitteredViewProjMatrix[2];
+    float4x4 _XRNonJitteredInvViewProjMatrix[2];
     float4x4 _XRPrevViewProjMatrix[2];
     float4x4 _XRPrevInvViewProjMatrix[2];
     float4x4 _XRPrevViewProjMatrixNoCameraTrans[2];

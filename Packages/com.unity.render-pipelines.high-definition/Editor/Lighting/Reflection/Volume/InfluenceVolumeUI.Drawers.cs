@@ -82,7 +82,7 @@ namespace UnityEditor.Rendering.HighDefinition
                 Vector3 blendNormalPositive = serialized.boxBlendNormalDistancePositive.vector3Value;
                 Vector3 blendNormalNegative = serialized.boxBlendNormalDistanceNegative.vector3Value;
                 Vector3 size = serialized.boxSize.vector3Value;
-                for(int i = 0; i<3; ++i)
+                for (int i = 0; i < 3; ++i)
                 {
                     size[i] = Mathf.Max(0f, size[i]);
                 }
@@ -114,7 +114,6 @@ namespace UnityEditor.Rendering.HighDefinition
                     serialized.boxBlendNormalDistancePositive.vector3Value = serialized.boxBlendNormalDistanceNegative.vector3Value = Vector3.one * serialized.editorSimplifiedModeBlendNormalDistance.floatValue;
                 }
             }
-            HDProbeUI.Drawer_ToolBarButton(HDProbeUI.ToolBar.InfluenceShape, owner, GUILayout.Width(28f), GUILayout.MinHeight(22f));
             EditorGUILayout.EndHorizontal();
 
             GUILayout.Space(EditorGUIUtility.standardVerticalSpacing);
@@ -123,14 +122,12 @@ namespace UnityEditor.Rendering.HighDefinition
 
             EditorGUILayout.BeginHorizontal();
             Drawer_AdvancedBlendDistance(serialized, false, maxFadeDistance, blendDistanceContent);
-            HDProbeUI.Drawer_ToolBarButton(HDProbeUI.ToolBar.Blend, owner, GUILayout.ExpandHeight(true), GUILayout.Width(28f), GUILayout.MinHeight(22f), GUILayout.MaxHeight((advanced ? 2 : 1) * (EditorGUIUtility.singleLineHeight + 3)));
             EditorGUILayout.EndHorizontal();
 
             if (drawNormal)
             {
                 EditorGUILayout.BeginHorizontal();
                 Drawer_AdvancedBlendDistance(serialized, true, maxFadeDistance, blendNormalDistanceContent);
-                HDProbeUI.Drawer_ToolBarButton(HDProbeUI.ToolBar.NormalBlend, owner, GUILayout.ExpandHeight(true), GUILayout.Width(28f), GUILayout.MinHeight(22f), GUILayout.MaxHeight((advanced ? 2 : 1) * (EditorGUIUtility.singleLineHeight + 3)));
                 EditorGUILayout.EndHorizontal();
             }
 
@@ -163,7 +160,7 @@ namespace UnityEditor.Rendering.HighDefinition
             if (serialized.editorAdvancedModeEnabled.boolValue)
             {
                 if (!(Mathf.Approximately(Vector3.SqrMagnitude(blendDistancePositive.vector3Value - editorAdvancedModeBlendDistancePositive.vector3Value), 0f)
-                    && Mathf.Approximately(Vector3.SqrMagnitude(blendDistanceNegative.vector3Value - editorAdvancedModeBlendDistanceNegative.vector3Value), 0f)))
+                      && Mathf.Approximately(Vector3.SqrMagnitude(blendDistanceNegative.vector3Value - editorAdvancedModeBlendDistanceNegative.vector3Value), 0f)))
                 {
                     blendDistancePositive.vector3Value = editorAdvancedModeBlendDistancePositive.vector3Value;
                     blendDistanceNegative.vector3Value = editorAdvancedModeBlendDistanceNegative.vector3Value;
@@ -217,8 +214,13 @@ namespace UnityEditor.Rendering.HighDefinition
         static void Drawer_SectionShapeSphere(SerializedInfluenceVolume serialized, Editor owner, bool drawOffset, bool drawNormal)
         {
             EditorGUILayout.BeginHorizontal();
+            EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(serialized.sphereRadius, radiusContent);
-            HDProbeUI.Drawer_ToolBarButton(HDProbeUI.ToolBar.InfluenceShape, owner, GUILayout.Width(28f), GUILayout.MinHeight(22f));
+            if (EditorGUI.EndChangeCheck())
+            {
+                if (serialized.sphereRadius.floatValue < serialized.sphereBlendDistance.floatValue)
+                    serialized.sphereBlendDistance.floatValue = serialized.sphereRadius.floatValue;
+            }
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space();
@@ -231,7 +233,6 @@ namespace UnityEditor.Rendering.HighDefinition
             {
                 serialized.sphereBlendDistance.floatValue = Mathf.Clamp(serialized.sphereBlendDistance.floatValue, 0, maxBlendDistance);
             }
-            HDProbeUI.Drawer_ToolBarButton(HDProbeUI.ToolBar.Blend, owner, GUILayout.ExpandHeight(true), GUILayout.Width(28f), GUILayout.MinHeight(22f), GUILayout.MaxHeight(EditorGUIUtility.singleLineHeight + 3));
             EditorGUILayout.EndHorizontal();
 
             if (drawNormal)
@@ -243,7 +244,6 @@ namespace UnityEditor.Rendering.HighDefinition
                 {
                     serialized.sphereBlendNormalDistance.floatValue = Mathf.Clamp(serialized.sphereBlendNormalDistance.floatValue, 0, maxBlendDistance);
                 }
-                HDProbeUI.Drawer_ToolBarButton(HDProbeUI.ToolBar.NormalBlend, owner, GUILayout.ExpandHeight(true), GUILayout.Width(28f), GUILayout.MinHeight(22f), GUILayout.MaxHeight(EditorGUIUtility.singleLineHeight + 3));
                 EditorGUILayout.EndHorizontal();
             }
         }

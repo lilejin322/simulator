@@ -7,8 +7,9 @@ namespace UnityEngine.Rendering.HighDefinition
     /// This component setups gradient sky for rendering.
     /// </summary>
     [VolumeComponentMenu("Sky/Gradient Sky")]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
     [SkyUniqueID((int)SkyType.Gradient)]
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Override-Gradient-Sky" + Documentation.endURL)]
+    [HDRPHelpURL("create-a-gradient-sky")]
     public class GradientSky : SkySettings
     {
         /// <summary>Top color of the gradient sky.</summary>
@@ -22,7 +23,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public ColorParameter bottom = new ColorParameter(Color.white, true, false, true);
         /// <summary>Size of the horizon (middle color.</summary>
         [Tooltip("Sets the size of the horizon (Middle color).")]
-        public FloatParameter gradientDiffusion = new FloatParameter(1);
+        public MinFloatParameter gradientDiffusion = new MinFloatParameter(1, 0.0f);
 
         /// <summary>
         /// Returns the hash code of the gradient sky parameters.
@@ -34,22 +35,10 @@ namespace UnityEngine.Rendering.HighDefinition
 
             unchecked
             {
-#if UNITY_2019_3 // In 2019.3, when we call GetHashCode on a VolumeParameter it generate garbage (due to the boxing of the generic parameter)
-                hash = hash * 23 + bottom.value.GetHashCode();
-                hash = hash * 23 + top.value.GetHashCode();
-                hash = hash * 23 + middle.value.GetHashCode();
-                hash = hash * 23 + gradientDiffusion.value.GetHashCode();
-
-                hash = hash * 23 + bottom.overrideState.GetHashCode();
-                hash = hash * 23 + top.overrideState.GetHashCode();
-                hash = hash * 23 + middle.overrideState.GetHashCode();
-                hash = hash * 23 + gradientDiffusion.overrideState.GetHashCode();
-#else
                 hash = hash * 23 + bottom.GetHashCode();
                 hash = hash * 23 + top.GetHashCode();
                 hash = hash * 23 + middle.GetHashCode();
                 hash = hash * 23 + gradientDiffusion.GetHashCode();
-#endif
             }
 
             return hash;

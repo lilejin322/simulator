@@ -60,7 +60,7 @@ namespace Simulator.Sensors
             VerifyBuffer(lineCount);
             buffer.SetData((List<Line>)sensor.GetType().GetField("linesToRender").GetValue(sensor), 0, 0, lineCount);
             CoreUtils.SetRenderTarget(ctx.cmd, ctx.cameraColorBuffer, ctx.cameraDepthBuffer, ClearFlag.None);
-            ctx.cmd.DrawProcedural(Matrix4x4.identity, lineMaterial, 0, MeshTopology.Points, lineCount);
+            ctx.cmd.DrawProcedural(Matrix4x4.identity, lineMaterial, 0, MeshTopology.Triangles, 6, lineCount);
         }
         
         protected override void Cleanup()

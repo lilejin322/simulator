@@ -18,7 +18,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         public bool TryUpgradeFromMasterNode(IMasterNode1 masterNode, out Dictionary<BlockFieldDescriptor, int> blockMap)
         {
             blockMap = null;
-            switch(masterNode)
+            switch (masterNode)
             {
                 case UnlitMasterNode1 unlitMasterNode:
                     UpgradeUnlitMasterNode(unlitMasterNode, out blockMap);
@@ -38,7 +38,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 
             // Set data
             systemData.surfaceType = (SurfaceType)unlitMasterNode.m_SurfaceType;
-            systemData.blendMode = HDSubShaderUtilities.UpgradeLegacyAlphaModeToBlendMode((int)unlitMasterNode.m_AlphaMode);
+            systemData.blendingMode = HDSubShaderUtilities.UpgradeLegacyAlphaModeToBlendMode((int)unlitMasterNode.m_AlphaMode);
             // Previous master node wasn't having any renderingPass. Assign it correctly now.
             systemData.renderQueueType = systemData.surfaceType == SurfaceType.Opaque ? HDRenderQueue.RenderQueueType.Opaque : HDRenderQueue.RenderQueueType.Transparent;
             systemData.doubleSidedMode = unlitMasterNode.m_TwoSided ? DoubleSidedMode.Enabled : DoubleSidedMode.Disabled;
@@ -66,7 +66,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 
             // Set data
             systemData.surfaceType = (SurfaceType)hdUnlitMasterNode.m_SurfaceType;
-            systemData.blendMode = HDSubShaderUtilities.UpgradeLegacyAlphaModeToBlendMode((int)hdUnlitMasterNode.m_AlphaMode);
+            systemData.blendingMode = HDSubShaderUtilities.UpgradeLegacyAlphaModeToBlendMode((int)hdUnlitMasterNode.m_AlphaMode);
             systemData.renderQueueType = HDRenderQueue.MigrateRenderQueueToHDRP10(hdUnlitMasterNode.m_RenderingPass);
             // Patch rendering pass in case the master node had an old configuration
             if (systemData.renderQueueType == HDRenderQueue.RenderQueueType.Background)
@@ -83,7 +83,6 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             builtinData.distortion = hdUnlitMasterNode.m_Distortion;
             builtinData.distortionMode = hdUnlitMasterNode.m_DistortionMode;
             builtinData.distortionDepthTest = hdUnlitMasterNode.m_DistortionDepthTest;
-            builtinData.alphaToMask = hdUnlitMasterNode.m_AlphaToMask;
             builtinData.addPrecomputedVelocity = hdUnlitMasterNode.m_AddPrecomputedVelocity;
 
             unlitData.distortionOnly = hdUnlitMasterNode.m_DistortionOnly;

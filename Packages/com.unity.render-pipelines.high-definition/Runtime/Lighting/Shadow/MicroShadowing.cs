@@ -6,24 +6,22 @@ namespace UnityEngine.Rendering.HighDefinition
     /// A volume component that holds settings for the Micro Shadows effect.
     /// </summary>
     [Serializable, VolumeComponentMenu("Shadowing/Micro Shadows")]
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Override-Micro-Shadows" + Documentation.endURL)]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
+    [HDRPHelpURLAttribute("Override-Micro-Shadows")]
+    [DisplayInfo(name = "Micro Shadows")]
     public class MicroShadowing : VolumeComponent
     {
         /// <summary>
         /// When enabled, HDRP processes Micro Shadows for this Volume.
         /// </summary>
         [Tooltip("Enables micro shadows for directional lights.")]
-        public BoolParameter enable = new BoolParameter(false);
+        [DisplayInfo(name = "State")]
+        public BoolParameter enable = new BoolParameter(false, BoolParameter.DisplayType.EnumPopup);
 
         /// <summary>
         /// Controls the opacity of the micro shadows.
         /// </summary>
         [Tooltip("Controls the opacity of the micro shadows.")]
         public ClampedFloatParameter opacity = new ClampedFloatParameter(1.0f, 0.0f, 1.0f);
-
-        MicroShadowing()
-        {
-            displayName = "Micro Shadows";
-        }
     }
 }

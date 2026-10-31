@@ -1,5 +1,5 @@
 //
-// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit / Render Pipeline / Generate Shader Includes ] instead
+// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit > Rendering > Generate Shader Includes ] instead
 //
 
 #ifndef DECAL_CS_HLSL
@@ -8,6 +8,14 @@
 // UnityEngine.Rendering.HighDefinition.Decal+DBufferMaterial:  static fields
 //
 #define DBUFFERMATERIAL_COUNT (4)
+
+//
+// UnityEngine.Rendering.HighDefinition.Decal+DecalAtlasTextureType:  static fields
+//
+#define DECALATLASTEXTURETYPE_DIFFUSE (0)
+#define DECALATLASTEXTURETYPE_NORMAL (1)
+#define DECALATLASTEXTURETYPE_MASK (2)
+#define DECALATLASTEXTURETYPE_COUNT (3)
 
 // Generated from UnityEngine.Rendering.HighDefinition.Decal+DecalSurfaceData
 // PackingRules = Exact
@@ -31,7 +39,9 @@ struct DecalData
     float4 maskScaleBias;
     float4 baseColor;
     float4 remappingAOS;
-    float4 scalingBAndRemappingM;
+    float2 remappingMetallic;
+    float scalingBlueMaskMap;
+    float sampleNormalAlpha;
     float3 blendParams;
     uint decalLayerMask;
 };

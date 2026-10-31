@@ -1,107 +1,323 @@
 <h1 align="center">SVL Simulator:  An Autonomous Vehicle Simulator</h1>
 
 <div align="center">
-<a href="https://github.com/lgsvl/simulator/releases/latest">
-<img src="https://img.shields.io/github/release-pre/lgsvl/simulator.svg" alt="Github release" /></a>
-<a href="">
-<img src="https://img.shields.io/github/downloads/lgsvl/simulator/total.svg" alt="Release downloads" /></a>
+<a href="https://github.com/lilejin322/simulator/releases/latest">
+<img src="https://img.shields.io/github/release-pre/lilejin322/simulator.svg" alt="GitHub release" /></a>
+<a href="https://github.com/lilejin322/simulator/releases">
+<img src="https://img.shields.io/github/downloads/lilejin322/simulator/total.svg" alt="Release downloads" /></a>
 </div>
 <div align="center">
   <h4>
-    <a href="https://svlsimulator.com" style="text-decoration: none">
-    Website</a>
+    <a href="https://github.com/lilejin322/simulator/" style="text-decoration: none">
+    Repository</a>
     <span> | </span>
-    <a href="https://svlsimulator.com/docs" style="text-decoration: none">
-    Documentation</a>
+    <a href="#building-from-source" style="text-decoration: none">
+    Build instructions</a>
     <span> | </span>
-    <a href="https://github.com/lgsvl/simulator/releases/latest" style="text-decoration: none">
+    <a href="https://github.com/lilejin322/simulator/releases/latest" style="text-decoration: none">
     Download</a>
   </h4>
 </div>
 
-## Sunsetting SVL Simulator
+![SVL Simulator Offline Version](./Docs/lgsvl.png)
 
-### LG has made the difficult decision to suspend active development of SVL Simulator, as of January 1, 2022.
+## Overview
 
-There are no plans for any new or bugfix releases of SVL Simulator in 2022. There will be no new source code changes pushed to GitHub, and there will be no reviews or merging of Pull Requests submitted on GitHub for SVL Simulator or any of its related plug-ins. There will be no new simulator assets built and shared nor updates made to existing assets by the SVL Simulator team.
+This fork of SVL Simulator runs without the WISE cloud service. Maps, vehicles, sensors, bridges, NPCs, pedestrians
+and controllables are compiled into the simulator from source. The simulator starts an API Only simulation by
+default and accepts connections from `lgsvl` PythonAPI 2021.3 on port 8181. Existing WISE asset IDs, including those
+in `lgsvl.wise.DefaultAssets`, are preserved for API compatibility.
 
-We will make a reasonable effort to keep the [wise.svlsimulator.com](https://wise.svlsimulator.com) website up and running through at least Thursday, June 30, 2022, and will also maintain the [SVLSimulator.com](https://SVLSimulator.com) web site including the [simulator documentation](https://www.svlsimulator.com/docs/) pages through at least Thursday, June 30, 2022.
+Asset sources are distributed separately from this repository in the Hugging Face dataset
+[lilejin322/svl-content](https://huggingface.co/datasets/lilejin322/svl-content), one `<category>/<folder>.tar.gz` per
+source. The build script downloads the selected sources from the dataset's `mac` branch into `Assets/` before
+building. Runtime asset bundles are not used.
 
-At this time we do not plan to remove the [SVL Simulator source code](https://github.com/lgsvl/simulator) (and related plug-in) projects from GitHub. The open source project and source code will remain available for anyone who wants to build (or modify) SVL Simulator.
+### Branches
 
-We apologize for any inconvenience this may cause and appreciate your understanding.
+- `main`: this project on Unity 6000.6.7f1; `build.sh` fetches its asset sources from the `main` branch of the content
+  dataset.
+- `mac`: this project on Unity 6000.6.7f1 for macOS as well as Linux; `build.sh` fetches its asset sources from the
+  `mac` branch of the content dataset.
+- `unity-2020`: the Unity 2020.3.48f1 version this one was upgraded from; its `build.sh` fetches the dataset's
+  `unity-2020` branch.
+- `assets`: the original workflow, which downloads prebuilt asset bundles instead of building the sources in.
 
-Sincerely,
+## Building from source
 
-The SVL Simulator team
+### Requirements
 
-<br/>
+- Linux x86_64, or macOS 12+ (Apple Silicon or Intel), with Bash.
+- Unity **6000.6.7f1** (Unity 6.6) with build support for your host platform, matching [`ProjectVersion.txt`](ProjectSettings/ProjectVersion.txt).
+- A GPU and driver with Vulkan support on Linux, or Metal support on macOS.
+- Git and Git LFS to clone the repository and retrieve its binary files.
+- `curl` for fetching asset sources.
 
-### Questions
+### Build and start
 
-##### **Q: Will SVL Simulator run locally without the [wise.svlsimulator.com](https://wise.svlsimulator.com) web site?**
+Clone the repository with Git LFS enabled. From the repository root, edit
+[`build-assets.yaml`](build-assets.yaml) to select assets, then build the player for your host platform:
 
-A: The latest released version of SVL (2021.3) requires the use of the WISE (web user interface) cloud service to download assets, configure simulation clusters, and create and launch simulations. It may be possible to remove this dependency (e.g. in a fork; see below) and then build and launch a local simulator instance.
+```bash
+./build.sh
+```
 
-##### **Q: Will LG release the source code for the WISE (web user interface) cloud service?**
+The script locates the required Unity version in Unity Hub or unity CLI installation directories. For a custom
+installation path, set `UNITY` to the editor executable:
 
-A: There are no plans at this time to release the source code for WISE.
+```bash
+UNITY=/path/to/Editor/Unity ./build.sh
+```
 
-##### **Q: Would LG be interested in transferring the SVL Simulator project to someone interested in taking over the project?**
+The default output directory is `build/`; logs are written to `Logs/build-linux64.log` or `Logs/build-macos.log`. A successful
+build creates `build/config.yml` from [`config.yml.template`](config.yml.template) if no configuration exists.
+On Linux, start the player with a window or in headless mode:
 
-A: There are no plans at this time to transfer the SVL Simulator project (or the WISE cloud service).
+```bash
+./build/simulator
+# Or run without a window:
+./run-headless.sh
+```
 
-##### **Q: Will the Simulator Software License Agreement be changed?**
+### macOS
 
-A: There are no plans at this time to change the [Simulator Software License Agreement](https://github.com/lgsvl/simulator/blob/master/LICENSE).
+```bash
+./build.sh
+./build/simulator.app/Contents/MacOS/SVLSimulator
+```
 
-##### **Q: Can users share source code changes and forks of SVL Simulator?**
+The default manifest enables 227 sources. `ROS2ForUnitySVLBridge_50cb9eb3` remains disabled because its upstream
+native ROS 2 / ros2cs runtime and generated messages are missing and are not ported to macOS. The 43 vehicle
+configurations referencing that bridge cannot run; choose a configuration using an available bridge. The other
+ROS 2 TCP bridge is a different integration and does not replace it automatically.
 
-A: As a GitHub project, anyone is able to create their own fork; in fact, there are already over 500 such forks of the [SVL Simulator project](https://github.com/lgsvl/simulator). Users can then make changes and even submit pull requests back to the original (parent) project. While we have no plans to review or merge such changes into the main project, users are free to review open PRs and create their own local build from their own or any other public fork.
+Unity Hub's standard macOS editor directory and its configured secondary installation directory are discovered
+without a user-specific path. `UNITY` can override discovery. `config.yml` stays beside `simulator.app`.
 
-##### **Q: Can users share new builds of SVL Simulator?**
+The macOS player targets both Intel and Apple Silicon. The JPEG, PNG and LASzip plugins are universal arm64/x86_64
+libraries in `Assets/Plugins/<plugin>/macOS/`, built from the same upstream releases as the Linux ones by the
+`build-macos.sh` next to each plugin's `build.sh`. They link only to system libraries. SQLite uses macOS's system
+library.
 
-A: The [Simulator Software License Agreement](https://github.com/lgsvl/simulator/blob/master/LICENSE) allows you to “modify or create derivative works of the Licensed Materials” and only restricts their commercial use. Therefore, it is ok for users to share new builds of SVL Simulator as long as such builds are not sold or otherwise used for commercial purposes.
+The Jaguar2015XE package on the dataset's `mac` branch includes `ExampleFMU_macos.dylib`, its recovered ExampleFMU
+built from the included C source as a universal macOS library. Other FMUs require their own macOS binaries; Linux
+`.so` and Windows `.dll` binaries cannot be used as Mac plugins. The recovered model is a simple controller used with
+Unity vehicle physics, not a validated production vehicle dynamics model.
 
-##### **Q: What about the SVL Simulator Premium product and/or cloud simulation service?**
+Line, wireframe box, LiDAR debug points and HDRP circle point-cloud rendering use vertex-stage triangle expansion
+to support Metal. The LiDAR sensor sources on the dataset's `mac` branch draw their points this way, and read the
+depth cubemap at the texel center (`Assets/Shaders/CubemapTexelCenter.hlsl`) so that a beam at exactly 0° elevation
+reads the same row on every GPU.
 
-A: There are no plans at this time to offer a SVL Simulator Premium product or cloud service.
+Video recording on Mac additionally needs `ffmpeg` on `PATH`, or `FFMPEG_PATH` set to its executable. Launch from
+a terminal to inherit those environment variables.
+macOS builds are locally ad-hoc signed again after copying raw point-cloud data into the app, so its resource
+seal includes those files. Distributing a notarized application is a separate release step.
 
-##### **Q: Can users still post technical questions on GitHub?**
+Python API clients can then connect to `localhost:8181`. See [Runtime configuration](#runtime-configuration) for
+API and startup settings, or [Docker](#docker) for container deployment.
 
-A: Technical questions may be posted to the [SVL Simulator Issues](https://github.com/lgsvl/simulator/issues) page on GitHub but may not be answered by the SVL Simulator team. We encourage users to help each other with questions or issues that are posted.
+`build.sh` runs the editor in batch mode without graphics (`-nographics`); shaders are compiled for the player's
+graphics APIs without a GPU.
 
-##### **Q: What if there are other questions not addressed in this document?**
+### macOS checks
 
-A: Other questions may be posted to the [SVL Simulator Issues](https://github.com/lgsvl/simulator/issues) page on GitHub.
+With the project closed in the editor, run the project rendering tests using the Unity executable in `UNITY`.
+They cover procedural rendering, point-buffer memory and contents, point size, lens distortion, segmentation
+colors and point-cloud export. The rendering checks require Metal; do not use `-nographics`. Select only the
+project test assembly; HDRP package tests can modify project tags and volume profiles:
 
-<br/>
+```bash
+"$UNITY" -batchmode -projectPath "$PWD" -runTests -testPlatform EditMode \
+  -assemblyNames Simulator.Rendering.Tests -testResults "$PWD/Logs/macos-render-tests.xml" \
+  -logFile "$PWD/Logs/macos-render-tests.log"
+```
 
------- 
-# Project README
+### Asset selection
 
-## Stay Informed
+[`build-assets.yaml`](build-assets.yaml) selects source folders in seven categories: maps, vehicles, sensors,
+bridges, NPCs, pedestrians and controllables. Each exact folder name has a `true` / `false` switch. The default
+manifest enables the available sources and disables plugins marked as unavailable. For example:
 
-Check out our latest [news](https://www.svlsimulator.com/news/) and subscribe to our [mailing list](http://eepurl.com/htlRjH) to get the latest updates.
+```yaml
+version: 1
+maps:
+  BorregasAve_4552b7ac: true
+  CubeTown_0eefb0f6: true
+  CubeTown_0595d9d3: false
+```
 
+The example is an excerpt: `vehicles`, `sensors`, `bridges`, `npcs`, `pedestrians` and `controllables` use the same
+format. Missing entries or categories are disabled; use `{}` for an empty category. New sources are disabled until
+explicitly added as `true`. Folder names are exact, including the GUID suffix: `CubeTown` does not select all seven
+versions. An enabled source that is missing or not ready, a duplicate YAML key, an unknown category, or a value other
+than literal `true` / `false` fails the build. Disabled sources need not be installed.
 
-## Introduction
+`./build.sh build-small --assets path/to/assets.yaml` selects an alternate manifest and output directory. The
+`Simulator/Build...` editor menu uses the default manifest but does not download asset sources. Run
+`./build.sh --fetch-only` to prepare missing sources before building in the editor. Successful builds include the
+input `build-assets.yaml` and a
+`build-assets.resolved.json` listing the selected source folders and full assetGuids. The editor's full catalogs are
+restored after building, including on failure.
 
-LG Electronics America R&D Lab has developed an HDRP Unity-based multi-robot simulator for autonomous vehicle developers. 
-We provide an out-of-the-box solution which can meet the needs of developers wishing to focus on testing their autonomous vehicle algorithms. 
-It currently has integration with The Autoware Foundation's [Autoware.auto](https://gitlab.com/autowarefoundation/autoware.auto/AutowareAuto) and Baidu's [Apollo](https://github.com/ApolloAuto/apollo) platforms, can generate HD maps, and can be immediately used for testing and validation of a whole system with little need for custom integrations. 
-We hope to build a collaborative community among robotics and autonomous vehicle developers by open sourcing our efforts. 
+These switches control built-in asset catalogs and their player content. Unity still imports project sources and
+compiles scripts; shared resources or assets referenced directly by a selected scene/prefab remain dependencies.
+Turning a sensor or bridge off does not enable a replacement automatically: vehicle sensor configurations that need
+it cannot be used. Keep `Library/` to reuse Unity's import and compilation caches. Runtime network/window settings
+remain in `config.yml`, separate from this build manifest.
 
-*To use the simulator with Apollo 6.0 or master, first download the simulator binary, then follow our [Running with latest Apollo](https://www.svlsimulator.com/docs/system-under-test/apollo-master-instructions/) docs.*
+### Fetching sources
 
-*To use the simulator with Autoware.auto, first download the simulator binary, then follow the guide on our [Autoware.auto](https://autowarefoundation.gitlab.io/autoware.auto/AutowareAuto/lgsvl.html).*
+Before building, `./build.sh` downloads enabled sources whose folders are missing from `Assets/`. Each source is
+extracted into `Assets/<category>/<folder>/` with its `.meta` file and the category's `README.md`.
 
-For users in China, you can view our latest videos [here](https://space.bilibili.com/412295691) and download our simulator releases [here](https://pan.baidu.com/s/1M33ysJYZfi4vya41gmB0rw) (code: 6k91).
-对于中国的用户，您也可在[哔哩哔哩](https://space.bilibili.com/412295691)上观看我们最新发布的视频，从[百度网盘](https://pan.baidu.com/s/1M33ysJYZfi4vya41gmB0rw)(提取码: 6k91)上下载使用我们的仿真器。
+| Command | Behavior |
+|---------|----------|
+| `./build.sh` | Prepare missing compatibility libraries and selected asset sources, then build the player. |
+| `./build.sh --fetch-only` | Download missing selected asset sources without preparing compatibility libraries or starting Unity. |
+| `./build.sh --no-fetch` | Build using existing libraries and asset sources, with script downloads disabled. Missing dependencies cause an error. |
 
+- The dataset revision is `CONTENT_REVISION` (default `mac`, the sources for this branch; `main` holds those of the
+  `main` branch and `unity-2020` the Unity 2020.3 ones), resolved to one commit for the whole run; `CONTENT_REPO`
+  selects another dataset and `HF_ENDPOINT` another Hugging Face server. `HF_TOKEN` is sent when set, which a private
+  dataset needs.
+- Each file is checked against the hash Hugging Face reports for it (sha256 for the packages) before it is unpacked. A
+  package is unpacked next to its target and moved in place when complete, so an interrupted run leaves no partly
+  installed source; its download continues on the next run from a hidden `.<folder>.tar.gz.partial` file.
+- Installed sources are never replaced or removed, and disabled ones are not fetched. To update a source, delete its
+  folder and run `./build.sh` again.
+- A folder name that is not in the dataset fails before anything is downloaded.
 
-## Paper
-If you are using SVL Simulator for your research paper, please cite our ITSC 2020 paper:
+## Asset reference
+
+### Descriptors and sensor configurations
+
+Each asset's descriptor is its identity and configuration source:
+
+```
+Assets/Maps/<folder>/map.json
+Assets/Vehicles/<folder>/vehicle.json
+Assets/Vehicles/<folder>/SensorConfigurations/<configuration>.json
+Assets/Sensors/<folder>/sensor.json
+Assets/Bridges/<folder>/bridge.json
+```
+
+Descriptors keep `id`, `assetGuid`, `name`, source scene/prefab/type and readiness. Optional `displayName` preserves
+an existing public name when it differs from the prefab name; `description` supplies the UI description. `preferred:
+true` resolves an otherwise ambiguous display name. Existing WISE IDs remain in `id` for Python API compatibility.
+Attribution stays with the source in `attribution` and `LICENSE-3RD-PARTY`.
+
+Each vehicle's `sensorConfigurations` lists relative source paths in display order, for example:
+
+```json
+"sensorConfigurations": [
+  "SensorConfigurations/Apollo_6_0_12345678.json",
+  "SensorConfigurations/Autoware_87654321.json"
+]
+```
+
+The first entry supplies the default sensors when adding the vehicle without a configuration ID. Each referenced
+file contains its own `id`, `name`, `sensors` and `bridge`; vehicle identity is inherited from `vehicle.json`.
+Sensors retain `name`, `parent`, `type`, `transform`, `params` and the plugin identity (`id`, `type`, `assetGuid`).
+The bridge stores its `id`, `name`, `type`, `assetGuid` and optional `connectionString`. A null bridge is allowed.
+Keep IDs stable when editing a configuration so existing scripts and scenarios continue to work.
+
+`Simulator/Refresh Built-in Asset Library`, player builds and changes to these source files generate
+`Assets/Resources/BuiltinAssets.json`. This small runtime directory contains `maps`, `vehicles` (with their
+configurations) and `plugins`, limited by the build manifest during a player build. The Python API resolves ids and
+names through it. Loading then uses one generated table per kind, from assetGuid to map scene, prefab or bridge type:
+`BuiltinMaps`, `BuiltinVehicles`, `BuiltinSensors`, `BuiltinBridges`, `BuiltinNPCs`, `BuiltinPedestrians` and
+`BuiltinControllables.asset` in `Assets/Resources`. Edit the source files, not the generated files; they are not
+tracked by git.
+The initial identities and sensor presets were migrated from [SORA-SVL](https://github.com/YuqiHuai/SORA-SVL);
+see `LICENSE-3RD-PARTY` for attribution.
+
+### Maps
+
+Each map lives in `Assets/Maps/<name>_<assetGuid prefix>/`; names repeat, so folder names include the first 8
+characters of the assetGuid. Its `map.json` holds the WISE id, assetGuid, name, scene path and whether it is `ready`.
+
+`Simulator/Refresh Built-in Maps` and player builds discover these descriptors and generate
+`Assets/Resources/BuiltinMaps.asset`, which runtime map loading uses; a map not in it cannot be loaded. Python API ids
+and names resolve through each map's descriptor in the generated asset library. Each map directory also holds its `hdmaps/` and `images/`;
+Autoware vector-map archives are expanded beside their ZIPs.
+
+Point clouds belong to their map under `PointCloud/`. The editor reads that directory directly; player builds copy the
+included maps' point clouds into the player's `StreamingAssets/Maps/<assetGuid>/`.
+
+### Vehicles
+
+Each vehicle lives in `Assets/Vehicles/<name>_<assetGuid prefix>/` with its prefab, its own scripts in `Scripts/`,
+`vehicle.json` and its sensor configurations. `Simulator/Refresh Built-in Vehicles` and player builds discover the
+`vehicle.json` descriptors and generate `Assets/Resources/BuiltinVehicles.asset` for the selected vehicles. The FMU
+Jaguar, `Jaguar2015XE_6761a228`, drives through an FMU library built from C source; see its `FMU/README.md`.
+
+Three descriptors declare `runtimeOverrides`: the `2d57c96d` and `4119f973` versions of `210823_v14` lower the four
+wheel mounts by 0.25 m to keep the chassis off the road; `Truck_GM_3cce4e04` places its center of mass at
+`(0, 0.14, 0.12)` inside the small chassis, between the axles, to prevent tipping. `AgentManager` applies these
+settings once to each instance before simulation. They keep the vehicles drivable; they are not dynamics calibration.
+
+### Asset lookup
+
+Assets are looked up by WISE id, assetGuid or name. When several assets share a name, descriptors with `preferred: true`
+are preferred (the migrated defaults preserve the former SVL Content preference). A vehicle looked up by the id of one of its sensor configurations comes with that
+configuration's sensors and bridge; looked up by name it gets the sensors of its first configuration and no bridge.
+
+Assets marked `ready: false` (see `Assets/Bridges/README.md`) are not built in and cannot be used: only the
+ROS2ForUnitySVLBridge, which 43 sensor configurations use. A simulation asking for it fails with "... is not built into
+the simulator". Asset bundles are not loaded, neither ones built with `Simulator/Build...` nor the `AssetBundles` folder
+of LG releases.
+
+## Runtime configuration
+
+`config.yml` next to the simulator executable (or in the project folder when running in the Editor):
+
+```yaml
+api_hostname: "localhost"
+api_port: 8181
+start_api_only: true            # start an API Only simulation on launch
+```
+
+The command line option `--no-api-only` overrides `start_api_only`. `assets_path` in older config files is ignored.
+
+A simulator built without the asset sources has no assets and does not start the Python API: the loader screen says
+so, and in batch mode (`run-headless.sh`) the simulator exits with code 1.
+
+### Headless
+
+`run-headless.sh [path/to/simulator] [arguments...]` runs the simulator without a window: Unity batch mode, rendering
+with Vulkan on the GPU; no X server or display is needed. In batch mode, or with `headless: true`, the simulation
+renders the sensors only, not the main view.
+
+### Loader screen
+
+With `start_api_only: false` the loader screen has a Start API button next to a port field showing `api_port`, an
+"Allow remote" checkbox (listen on all network interfaces) and a "Headless" checkbox showing `headless`. What is
+chosen there applies to that run only and is not written back to `config.yml`.
+
+## Docker
+
+The runtime image packages the Linux player and its selected assets. Build the player before building the image:
+
+```bash
+./build.sh
+docker build -f Docker/Dockerfile -t svlsimulator .
+Docker/run.sh 8181 0 ~/svl-data
+```
+
+The example exposes the Python API on port 8181, selects GPU 0, and stores runtime data in `~/svl-data`.
+Container hosts need an NVIDIA driver and the NVIDIA Container Toolkit; Unity is only needed to build the player.
+See the [Docker guide](Docker/README.md) for configuration, multiple instances and bridge connections.
+
+## Project background
+
+SVL Simulator was developed by LG Electronics America R&D Lab as a Unity HDRP simulator for autonomous driving
+and robotics. LG suspended active development of the original project on January 1, 2022. This fork provides
+source-based asset packaging and operation without WISE; the original cloud-linking workflow does not apply.
+
+## Citation
+
+Research using SVL Simulator should cite the ITSC 2020 paper:
 [LGSVL Simulator: A High Fidelity Simulator for Autonomous Driving](https://arxiv.org/pdf/2005.03778)
 
 ```
@@ -113,64 +329,9 @@ If you are using SVL Simulator for your research paper, please cite our ITSC 202
 }
 ```
 
-
-
-## Getting Started
-
-You can find complete and the most up-to-date guides on our [documentation website](https://www.svlsimulator.com/docs).
-
-Running the simulator with reasonable performance and frame rate (for perception related tasks) requires a high performance desktop. Below is the recommended system for running the simulator at high quality. We are currently working on performance improvements for a better experience. 
-
-**Recommended system:**
-
-- 4 GHz Quad Core CPU
-- Nvidia GTX 1080, 8GB GPU memory
-- Windows 10 64 Bit
-
-The easiest way to get started with running the simulator is to download our [latest release](https://github.com/lgsvl/simulator/releases/latest) and run as a standalone executable.
-
-Currently, running the simulator in Windows yields better performance than running on Linux. 
-
-### Downloading and starting simulator
-
-1. Download the latest release of the SVL Simulator for your supported operating system (Windows or Linux) here: [https://github.com/lgsvl/simulator/releases/latest](https://github.com/lgsvl/simulator/releases/latest)
-2. Unzip the downloaded folder and run the executable.
-
-See the full installation guide [here](https://svlsimulator.com/docs/installation-guide/installing-simulator).
-
-### Building and running from source
-
-If you would like to customize the simulator, build simulation content, or access specific features available in [Developer Mode](https://www.svlsimulator.com/docs/running-simulations/developer-mode), you can clone the project with Unity Editor, and build the project from source.
-
-Check out our instructions for getting started with building from source [here](https://www.svlsimulator.com/docs/installation-guide/build-instructions).
-**Note:** Please checkout the "release-*" branches or release tags for stable (ready features) and "master" branch for unstable (preview of work in progress).
-
-
-## Simulator Instructions (from 2021.1 release onwards)
-
-1. After starting the simulator, you should see a button to "Link to Cloud".
-2. Use this button to link your local simulator instance to a [cluster](https://www.svlsimulator.com/docs/user-interface/web/clusters-tab) on our [web user interface](https://wise.svlsimulator.com).
-3. Now create a [random traffic](https://www.svlsimulator.com/docs/creating-scenarios/random-traffic-scenarios/) simulation. For a standard setup, select "BorregasAve" for map and "Jaguar2015XE with Apollo 5.0 sensor configuration" for vehicle. Click "Run" to begin.
-4. The vehicle should spawn inside the map environment that was selected.
-5. Read [here](https://www.svlsimulator.com/docs/user-interface/keyboard-shortcuts/) for an explanation of all current keyboard shortcuts and controls.
-6. Follow the guides on our respective [Autoware](https://github.com/lgsvl/Autoware) and [Apollo 5.0](https://github.com/lgsvl/apollo-5.0) repositories for instructions on running the platforms with the simulator.
-
-**NOTE**: If using a release older than "2021.1", please follow the instructions on our documentation [archives](https://www.svlsimulator.com/docs/archive/).
-
-### Guide to simulator functionality
-
-Look [here](https://www.svlsimulator.com/docs) for a guide to currently available functionality and features.
-
-
-
-## Contact
-
-Please feel free to provide feedback or ask questions by creating a Github issue. For inquiries about collaboration, please email us at [contact@svlsimulator.com](mailto:contact@svlsimulator.com).
-
-
-
 ## Copyright and License
 
 Copyright (c) 2019-2021 LG Electronics, Inc.
 
-This software contains code licensed as described in LICENSE.
+See [LICENSE](LICENSE) for the software license and [LICENSE-3RD-PARTY](LICENSE-3RD-PARTY) for third-party
+licenses and attribution. Asset sources also include their own attribution and license information.

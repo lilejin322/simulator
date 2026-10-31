@@ -1,5 +1,8 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
 using UnityEditor.ShaderGraph;
@@ -14,7 +17,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
     {
         // Null/Empty means no title
         protected virtual string title => null;
-        
+
         protected TargetPropertyGUIContext context;
         protected Action onChange;
         protected Action<String> registerUndo;
@@ -42,19 +45,28 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
             // Create UIElement from type:
             BaseField<Data> elem = null;
             BaseField<Enum> elemEnum = null;
+            BaseMaskField<Enum> elemMask = null;
 
             switch (getter())
             {
-                case bool b: elem = new Toggle { value = b, tooltip = displayName.tooltip } as BaseField<Data>; break;
-                case int i: elem = new IntegerField { value = i, tooltip = displayName.tooltip } as BaseField<Data>; break;
-                case float f: elem = new FloatField { value = f, tooltip = displayName.tooltip } as BaseField<Data>; break;
-                case Enum e: elemEnum = new EnumField(e) { value = e, tooltip = displayName.tooltip }; break;
+                case bool b: elem = new Toggle { value = b } as BaseField<Data>; break;
+                case int i: elem = new IntegerField { value = i, isDelayed = true } as BaseField<Data>; break;
+                case float f: elem = new FloatField { value = f, isDelayed = true } as BaseField<Data>; break;
+                case Enum e:
+                    // Enum marked with the flags attribute are represented as popups
+                    var enumType = e.GetType();
+                    if (enumType.GetCustomAttribute<FlagsAttribute>() != null)
+                        elemMask = new EnumFlagsField(e) { value = e};
+                    else
+                        elemEnum = new EnumField(e) { value = e };
+                    break;
                 default: throw new Exception($"Can't create UI field for type {getter().GetType()}, please add it if it's relevant. If you can't consider using TargetPropertyGUIContext.AddProperty instead.");
             }
 
             if (elem != null)
             {
-                context.AddProperty<Data>(displayName.text, indentLevel, elem, (evt) => {
+                context.AddProperty<Data>(displayName.text, displayName.tooltip, indentLevel, elem, (evt) =>
+                {
                     if (Equals(getter(), evt.newValue))
                         return;
 
@@ -63,9 +75,22 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
                     onChange();
                 });
             }
+            else if (elemMask != null)
+            {
+                context.AddProperty<Enum>(displayName.text, displayName.tooltip, indentLevel, elemMask, (evt) =>
+                {
+                    if (Equals(getter(), evt.newValue))
+                        return;
+
+                    registerUndo(displayName.text);
+                    setter((Data)(object)evt.newValue);
+                    onChange();
+                });
+            }
             else
             {
-                context.AddProperty<Enum>(displayName.text, indentLevel, elemEnum, (evt) => {
+                context.AddProperty<Enum>(displayName.text, displayName.tooltip, indentLevel, elemEnum, (evt) =>
+                {
                     if (Equals(getter(), evt.newValue))
                         return;
 
@@ -81,13 +106,15 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
 
         protected void AddFoldout(GUIContent content, Func<bool> getter, Action<bool> setter)
         {
-            var foldout = new Foldout() {
+            var foldout = new Foldout()
+            {
                 value = getter(),
                 text = content.text,
                 tooltip = content.tooltip
             };
 
-            foldout.RegisterValueChangedCallback((evt) => {
+            foldout.RegisterValueChangedCallback((evt) =>
+            {
                 setter(evt.newValue);
                 onChange();
             });
@@ -102,7 +129,7 @@ namespace UnityEditor.Rendering.HighDefinition.ShaderGraph
         {
             // We don't use UIElement HelpBox because it's width is not dynamic.
             int indentLevel = context.globalIndentLevel;
-            var imgui = new IMGUIContainer(() => 
+            var imgui = new IMGUIContainer(() =>
             {
                 float indentPadding = indentLevel * 15;
                 var rect = EditorGUILayout.GetControlRect(false, 42);

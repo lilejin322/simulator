@@ -1,0 +1,6 @@
+# Only the player build and Docker/ go into the image build context (see Docker/README.md)
+*
+!build/
+!Docker/
+build/*.debug
+build/config.yml

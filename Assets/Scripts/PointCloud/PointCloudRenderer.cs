@@ -443,11 +443,10 @@ namespace Simulator.PointCloud
             var height = viewportSettings.height;
             var refSize = rt.referenceSize;
 
-            var msaaSamples = ((HDRenderPipeline) RenderPipelineManager.currentPipeline).MSAASamples;
             // TODO: verify if this is still needed after updating HDRP above 10.3.2
             // In previous versions (7.3) viewport size was updated automatically - now it has to be manually managed
-            // This can have critical performance impact if new MSAA samples settings don't not match current settings
-            RTHandles.SetReferenceSize(width, height, msaaSamples);
+            // MSAA is no longer part of the RTHandle reference size since HDRP 12
+            RTHandles.SetReferenceSize(width, height);
 
             var resolution = new Vector2Int(width, height);
             var rtHandleRefSize = new Vector2Int(RTHandles.maxWidth, RTHandles.maxHeight);
@@ -491,7 +490,7 @@ namespace Simulator.PointCloud
                 CoreUtils.SetRenderTarget(cmd, rt2, rtDepth2);
                 CoreUtils.ClearRenderTarget(cmd, ClearFlag.All, Color.clear);
                 var pass = Resources.Passes.circlesDepthPrepass;
-                cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Points, GetPointCountForCamera(targetCamera));
+                cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Triangles, 6, GetPointCountForCamera(targetCamera));
             }
 
             if (ForcedFill == ForcedFillMode.HorizonAndDepth)
@@ -683,7 +682,7 @@ namespace Simulator.PointCloud
                 CoreUtils.SetRenderTarget(cmd, rtIds, depthBuffer);
 
                 var pass = Resources.Passes.circlesGBuffer;
-                cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Points, GetPointCountForCamera(targetCamera));
+                cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Triangles, 6, GetPointCountForCamera(targetCamera));
             }
         }
 
@@ -692,7 +691,7 @@ namespace Simulator.PointCloud
             SetCirclesMaterialProperties(cmd, targetCamera);
             CoreUtils.SetRenderTarget(cmd, colorBuffer, depthBuffer, cubemapFace: cubemapFace);
             var pass = Resources.Passes.lidarCircles;
-            cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Points, PointCount);
+            cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Triangles, 6, PointCount);
         }
         
         private void RenderDepthPoints(CommandBuffer cmd, HDCamera targetCamera, RTHandle colorBuffer, RTHandle depthBuffer, CubemapFace cubemapFace = CubemapFace.Unknown)
@@ -700,7 +699,7 @@ namespace Simulator.PointCloud
             SetCirclesMaterialProperties(cmd, targetCamera);
             CoreUtils.SetRenderTarget(cmd, colorBuffer, depthBuffer, cubemapFace: cubemapFace);
             var pass = Resources.Passes.depthCircles;
-            cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Points, PointCount);
+            cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Triangles, 6, PointCount);
         }
 
         private void SetCirclesMaterialProperties(CommandBuffer cmd, HDCamera targetCamera)
@@ -749,7 +748,7 @@ namespace Simulator.PointCloud
             cmd.SetGlobalVector(PointCloudShaderIDs.PointsRender.ShadowVector, shadowVector);
 
             var pass = Resources.Passes.circlesShadowcaster;
-            cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Points, pointCount);
+            cmd.DrawProcedural(Matrix4x4.identity, Resources.CirclesMaterial, pass, MeshTopology.Triangles, 6, pointCount);
         }
 
         private float GetFovReprojectionMultiplier(ViewportSettings viewportSettings)

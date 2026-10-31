@@ -1,3 +1,5 @@
+using System;
+
 namespace UnityEngine.Rendering.HighDefinition
 {
     /// <summary>
@@ -31,22 +33,61 @@ namespace UnityEngine.Rendering.HighDefinition
         RaytracedShadowHistoryValidity,
         /// <summary>Ray traced shadow history distance buffer.</summary>
         RaytracedShadowDistanceValidity,
-        /// <summary>Ray traced reflections buffer.</summary>
-        RaytracedReflection,
+        /// <summary>Ray traced reflections (xyz) and distance (w) buffer.</summary>
+        RaytracedReflectionLightingDistance,
+        /// <summary>Ray traced reflections accumulation buffer.</summary>
+        RaytracedReflectionAccumulation,
+        /// <summary>Ray traced reflections stabilization buffer.</summary>
+        RaytracedReflectionStabilization,
         /// <summary>Ray traced indirect diffuse HF buffer.</summary>
         RaytracedIndirectDiffuseHF,
         /// <summary>Ray traced indirect diffuse LF buffer.</summary>
         RaytracedIndirectDiffuseLF,
         /// <summary>Ray traced subsurface buffer.</summary>
         RayTracedSubSurface,
-        /// <summary>Path tracing buffer.</summary>
-        PathTracing,
+        /// <summary>Main path tracing output buffer.</summary>
+        PathTracingOutput,
         /// <summary>Temporal antialiasing history after DoF.</summary>
         TemporalAntialiasingPostDoF,
-        /// <summary>Number of history buffers.</summary>
-        Count, // TODO: Obsolete
-        // TODO: Move before count for 11.0
+        /// <summary>Volumetric clouds buffer 0.</summary>
+        VolumetricClouds0,
+        /// <summary>Volumetric clouds buffer 1.</summary>
+        VolumetricClouds1,
         /// <summary>Screen Space Reflection Accumulation.</summary>
-        ScreenSpaceReflectionAccumulation
+        ScreenSpaceReflectionAccumulation,
+        /// <summary>Path-traced Albedo AOV.</summary>
+        PathTracingAlbedo,
+        /// <summary>Path-traced Normal AOV.</summary>
+        PathTracingNormal,
+        /// <summary>Path-traced motion vector AOV.</summary>
+        PathTracingMotionVector,
+        /// <summary>Path-traced volumetrics scattering AOV.</summary>
+        PathTracingVolumetricFog,
+        /// <summary>Denoised path-traced frame history.</summary>
+        PathTracingDenoised,
+        /// <summary>Denoised vpath-traced volumetrics scattering frame history.</summary>
+        PathTracingVolumetricFogDenoised,
+        /// <summary>Variable rate shading.</summary>
+        Vrs,
+
+        // For retro compatibility
+        /// <summary>Main path tracing output buffer. It is recommended to use the PathTracingOutput enum value instead.</summary>
+        [Obsolete("#from(2023.3)")]
+        PathTracing = PathTracingOutput,
+        /// <summary>Path-traced Albedo AOV. It is recommended to use the PathTracingAlbedo enum value instead.</summary>
+        [Obsolete("#from(2023.3)")]
+        AlbedoAOV = PathTracingAlbedo,
+        /// <summary>Path-traced Normal AOV. It is recommended to use the PathTracingNormal enum value instead.</summary>
+        [Obsolete("#from(2023.3)")]
+        NormalAOV = PathTracingNormal,
+        /// <summary>Path-traced motion vector AOV. It is recommended to use the PathTracingMotionVector enum value instead.</summary>
+        [Obsolete("#from(2023.3)")]
+        MotionVectorAOV = PathTracingMotionVector,
+        /// <summary>Denoised path-traced frame history. It is recommended to use the PathTracingDenoised enum value instead.</summary>
+        [Obsolete("#from(2023.3)")]
+        DenoiseHistory = PathTracingDenoised,
+        /// <summary>Ray traced reflections (xyz) and distance (w) buffer. It is recommended to use RaytracedReflectionLightingDistance enum value instead.</summary>
+        [Obsolete("#from(6000.4)")]
+        RaytracedReflectionDistance = RaytracedReflectionLightingDistance
     }
 }

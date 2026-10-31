@@ -67,6 +67,8 @@ namespace UnityEngine.Rendering.HighDefinition
             // + Diffusion Profile
             [SurfaceDataAttributes("Thickness")]
             public float thickness;
+            [SurfaceDataAttributes("Transmission Mask")]
+            public Vector3 transmissionMask;
 
             // Anisotropic
             [SurfaceDataAttributes("Tangent", true)]
@@ -125,9 +127,9 @@ namespace UnityEngine.Rendering.HighDefinition
         // Init precomputed textures
         //-----------------------------------------------------------------------------
 
-        public Fabric() {}
+        public Fabric() { }
 
-        public override void Build(HDRenderPipelineAsset hdAsset, RenderPipelineResources defaultResources)
+        public override void Build(HDRenderPipeline _)
         {
             PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_CharlieAndFabricLambert);
             //LTCAreaLight.instance.Build();

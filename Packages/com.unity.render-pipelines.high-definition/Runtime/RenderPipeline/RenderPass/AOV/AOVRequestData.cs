@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine.Assertions;
-using UnityEngine.Experimental.Rendering.RenderGraphModule;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -31,7 +32,7 @@ namespace UnityEngine.Rendering.HighDefinition
     public struct AOVRequestData
     {
         /// <summary>Default frame pass settings.</summary>
-        [Obsolete("Since 2019.3, use AOVRequestData.NewDefault() instead.")]
+        [Obsolete("Use AOVRequestData.NewDefault() instead. #from(2019.3)")]
         public static readonly AOVRequestData @default = default;
         /// <summary>
         /// Instantiate a new AOV request data with default values.
@@ -43,7 +44,7 @@ namespace UnityEngine.Rendering.HighDefinition
         public static AOVRequestData NewDefault() => new AOVRequestData
         {
             m_Settings = AOVRequest.NewDefault(),
-            m_RequestedAOVBuffers = new AOVBuffers[] {},
+            m_RequestedAOVBuffers = new AOVBuffers[] { },
             m_Callback = null
         };
 
@@ -61,6 +62,9 @@ namespace UnityEngine.Rendering.HighDefinition
 
         /// <summary>Whether this frame pass is valid.</summary>
         public bool isValid => (m_RequestedAOVBuffers != null || m_CustomPassAOVBuffers != null) && (m_Callback != null || m_CallbackEx != null);
+
+        /// <summary>Whether internal rendering should be done at the same format as the user allocated AOV output buffer.</summary>
+        public bool overrideRenderFormat => m_Settings.overrideRenderFormat;
 
         /// <summary>Create a new frame pass.</summary>
         /// <param name="settings">Settings to use.</param>
@@ -153,7 +157,6 @@ namespace UnityEngine.Rendering.HighDefinition
                         Debug.LogError("Allocation for requested AOVBuffers ID: " + bufferId.ToString() + " have fail. Please ensure the callback allocator do the correct allocation.");
                     }
                 }
-                    
             }
 
             if (m_CustomPassAOVBuffers != null)
@@ -171,33 +174,21 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
-        /// <summary>Copy a camera sized texture into the texture buffers.</summary>
-        /// <param name="cmd">the command buffer to use for the copy.</param>
-        /// <param name="aovBufferId">The id of the buffer to copy.</param>
-        /// <param name="camera">The camera associated with the source texture.</param>
-        /// <param name="source">The source texture to copy</param>
-        /// <param name="targets">The target texture buffer.</param>
-        internal void PushCameraTexture(
-            CommandBuffer cmd,
-            AOVBuffers aovBufferId,
-            HDCamera camera,
-            RTHandle source,
-            List<RTHandle> targets
-        )
+        internal void OverrideBufferFormatForAOVs(ref GraphicsFormat format, List<RTHandle> aovBuffers)
         {
-            if (!isValid || m_RequestedAOVBuffers == null)
-                return;
-
-            Assert.IsNotNull(m_RequestedAOVBuffers);
-            Assert.IsNotNull(targets);
-
-            var index = Array.IndexOf(m_RequestedAOVBuffers, aovBufferId);
-            if (index == -1)
-                return;
-
-            using (new ProfilingScope(cmd, ProfilingSampler.Get(HDProfileId.AOVOutput + (int)aovBufferId)))
+            if (m_RequestedAOVBuffers == null || aovBuffers.Count == 0)
             {
-                HDUtils.BlitCameraTexture(cmd, source, targets[index]);
+                return;
+            }
+
+            var index = Array.IndexOf(m_RequestedAOVBuffers, AOVBuffers.Color);
+            if (index < 0)
+            {
+                index = Array.IndexOf(m_RequestedAOVBuffers, AOVBuffers.Output);
+            }
+            if (index >= 0)
+            {
+                format = aovBuffers[index].rt.graphicsFormat;
             }
         }
 
@@ -226,55 +217,19 @@ namespace UnityEngine.Rendering.HighDefinition
             if (index == -1)
                 return;
 
-            using (var builder = renderGraph.AddRenderPass<PushCameraTexturePassData>("Push AOV Camera Texture", out var passData, ProfilingSampler.Get(HDProfileId.AOVOutput + (int)aovBufferId)))
+            using (var builder = renderGraph.AddUnsafePass<PushCameraTexturePassData>("Push AOV Camera Texture", out var passData, ProfilingSampler.Get(HDProfileId.AOVOutput + (int)aovBufferId)))
             {
-                passData.source = builder.ReadTexture(source);
+                passData.source = source;
                 passData.target = targets[index];
 
+                builder.UseTexture(passData.source, AccessFlags.Read);
+                builder.AllowPassCulling(false);
+
                 builder.SetRenderFunc(
-                (PushCameraTexturePassData data, RenderGraphContext ctx) =>
-                {
-                    HDUtils.BlitCameraTexture(ctx.cmd, data.source, data.target);
-                });
-            }
-        }
-
-        internal void PushCustomPassTexture(
-            CommandBuffer cmd,
-            CustomPassInjectionPoint injectionPoint,
-            RTHandle cameraSource,
-            Lazy<RTHandle> customPassSource,
-            List<RTHandle> targets
-        )
-        {
-            if (!isValid || m_CustomPassAOVBuffers == null)
-                return;
-
-            Assert.IsNotNull(targets);
-
-            int index = -1;
-            for (int i = 0; i < m_CustomPassAOVBuffers.Length; ++i)
-            {
-                if (m_CustomPassAOVBuffers[i].injectionPoint == injectionPoint)
-                {
-                    index = i;
-                    break;
-                }
-            }
-
-            if (index == -1)
-                return;
-
-            if (m_CustomPassAOVBuffers[index].outputType == CustomPassAOVBuffers.OutputType.Camera)
-            {
-                HDUtils.BlitCameraTexture(cmd, cameraSource, targets[index]);
-            }
-            else
-            {
-                if (customPassSource.IsValueCreated)
-                {
-                    HDUtils.BlitCameraTexture(cmd, customPassSource.Value, targets[index]);
-                }
+                    static (PushCameraTexturePassData data, UnsafeGraphContext ctx) =>
+                    {
+                        Blitter.BlitCameraTexture(CommandBufferHelpers.GetNativeCommandBuffer(ctx.cmd), data.source, data.target);
+                    });
             }
         }
 
@@ -312,11 +267,12 @@ namespace UnityEngine.Rendering.HighDefinition
             if (index == -1)
                 return;
 
-            using (var builder = renderGraph.AddRenderPass<PushCustomPassTexturePassData>("Push Custom Pass Texture", out var passData))
+            using (var builder = renderGraph.AddUnsafePass<PushCustomPassTexturePassData>("Push Custom Pass Texture", out var passData))
             {
                 if (m_CustomPassAOVBuffers[index].outputType == CustomPassAOVBuffers.OutputType.Camera)
                 {
-                    passData.source = builder.ReadTexture(cameraSource);
+                    passData.source = cameraSource;
+                    builder.UseTexture(passData.source, AccessFlags.Read);
                     passData.customPassSource = null;
                 }
                 else
@@ -325,14 +281,17 @@ namespace UnityEngine.Rendering.HighDefinition
                 }
                 passData.target = targets[index];
 
+                builder.AllowPassCulling(false);
+
                 builder.SetRenderFunc(
-                (PushCustomPassTexturePassData data, RenderGraphContext ctx) =>
-                {
-                    if (data.customPassSource != null)
-                        HDUtils.BlitCameraTexture(ctx.cmd, data.customPassSource, data.target);
-                    else
-                        HDUtils.BlitCameraTexture(ctx.cmd, data.source, data.target);
-                });
+                    static (PushCustomPassTexturePassData data, UnsafeGraphContext ctx) =>
+                    {
+                        var natCmd = CommandBufferHelpers.GetNativeCommandBuffer(ctx.cmd);
+                        if (data.customPassSource != null)
+                            Blitter.BlitCameraTexture(natCmd, data.customPassSource, data.target);
+                        else
+                            Blitter.BlitCameraTexture(natCmd, data.source, data.target);
+                    });
             }
         }
 
@@ -383,6 +342,8 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="gameObject">The game object of the light to be rendered.</param>
         /// <returns><c>true</c> when the light must be rendered, <c>false</c> when it should be ignored.</returns>
         public bool IsLightEnabled(GameObject gameObject) => m_LightFilter == null || m_LightFilter.Contains(gameObject);
+
+        internal bool hasLightFilter => m_LightFilter != null;
 
         internal int GetHash()
         {

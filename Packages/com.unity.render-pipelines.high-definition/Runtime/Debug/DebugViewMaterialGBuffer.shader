@@ -10,7 +10,7 @@ Shader "Hidden/HDRP/DebugViewMaterialGBuffer"
 
             HLSLPROGRAM
             #pragma target 4.5
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -28,7 +28,7 @@ Shader "Hidden/HDRP/DebugViewMaterialGBuffer"
             // Note: We have fix as guidelines that we have only one deferred material (with control of GBuffer enabled). Mean a users that add a new
             // deferred material must replace the old one here. If in the future we want to support multiple layout (cause a lot of consistency problem),
             // the deferred shader will require to use multicompile.
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
 
             struct Attributes
             {
@@ -84,7 +84,9 @@ Shader "Hidden/HDRP/DebugViewMaterialGBuffer"
                 else if (bufferIndex == DEBUGVIEWGBUFFER_BAKE_DIFFUSE_LIGHTING_WITH_ALBEDO_PLUS_EMISSIVE)
                 {
                     result = builtinData.bakeDiffuseLighting;
-                    result *= GetCurrentExposureMultiplier();
+                    #define AO_IN_GBUFFER3_TAG float3((1 << 11), 1, (1 << 10))
+                    if (!all(result.xz == AO_IN_GBUFFER3_TAG.xz))
+                        result *= GetInverseCurrentExposureMultiplier();
                     needLinearToSRGB = true;
                 }
 #ifdef SHADOWS_SHADOWMASK

@@ -5,6 +5,8 @@ Shader "HDRP/Unlit"
         // Be careful, do not change the name here to _Color. It will conflict with the "fake" parameters (see end of properties) required for GI.
         [MainColor] _UnlitColor("Color", Color) = (1,1,1,1)
         [MainTexture] _UnlitColorMap("ColorMap", 2D) = "white" {}
+        [HideInInspector] _AlphaRemapMin("AlphaRemapMin", Float) = 0.0
+        [HideInInspector] _AlphaRemapMax("AlphaRemapMax", Float) = 1.0
 
         [HDR] _EmissiveColor("EmissiveColor", Color) = (0, 0, 0)
         _EmissiveColorMap("EmissiveColorMap", 2D) = "white" {}
@@ -40,25 +42,24 @@ Shader "HDRP/Unlit"
         _TransparentSortPriority("_TransparentSortPriority", Float) = 0
 
         // Blending state
-        [HideInInspector] _SurfaceType("__surfacetype", Float) = 0.0
-        [HideInInspector] _BlendMode("__blendmode", Float) = 0.0
+        _SurfaceType("__surfacetype", Float) = 0.0
+        _BlendMode("__blendmode", Float) = 0.0
         [HideInInspector] _SrcBlend("__src", Float) = 1.0
         [HideInInspector] _DstBlend("__dst", Float) = 0.0
         [HideInInspector] _AlphaSrcBlend("__alphaSrc", Float) = 1.0
         [HideInInspector] _AlphaDstBlend("__alphaDst", Float) = 0.0
-        [HideInInspector][ToggleUI]_AlphaToMaskInspectorValue("_AlphaToMaskInspectorValue", Float) = 0 // Property used to save the alpha to mask state in the inspector
-        [HideInInspector][ToggleUI]_AlphaToMask("__alphaToMask", Float) = 0
         [HideInInspector][ToggleUI] _ZWrite("__zw", Float) = 1.0
         [HideInInspector][ToggleUI] _TransparentZWrite("_TransparentZWrite", Float) = 0.0
         [HideInInspector] _CullMode("__cullmode", Float) = 2.0
-        [Enum(UnityEditor.Rendering.HighDefinition.TransparentCullMode)] _TransparentCullMode("_TransparentCullMode", Int) = 2 // Back culling by default
-        [Enum(UnityEditor.Rendering.HighDefinition.OpaqueCullMode)] _OpaqueCullMode("_OpaqueCullMode", Int) = 2 // Back culling by default
+        [Enum(UnityEngine.Rendering.HighDefinition.TransparentCullMode)] _TransparentCullMode("_TransparentCullMode", Int) = 2 // Back culling by default
+        [Enum(UnityEngine.Rendering.HighDefinition.OpaqueCullMode)] _OpaqueCullMode("_OpaqueCullMode", Int) = 2 // Back culling by default
         [HideInInspector] _ZTestModeDistortion("_ZTestModeDistortion", Int) = 8
         [Enum(UnityEngine.Rendering.CompareFunction)] _ZTestTransparent("Transparent ZTest", Int) = 4 // Less equal
         [HideInInspector] _ZTestDepthEqualForOpaque("_ZTestDepthEqualForOpaque", Int) = 4 // Less equal
 
         [ToggleUI] _EnableFogOnTransparent("Enable Fog", Float) = 0.0
         [ToggleUI] _DoubleSidedEnable("Double sided enable", Float) = 0.0
+        [Enum(Auto, 0, On, 1, Off, 2)] _DoubleSidedGIMode("Double sided GI mode", Float) = 0
 
         // Stencil state
         [HideInInspector] _StencilRef("_StencilRef", Int) = 0  // StencilUsage.Clear
@@ -87,33 +88,25 @@ Shader "HDRP/Unlit"
         [HideInInspector] _IncludeIndirectLighting("_IncludeIndirectLighting", Float) = 1.0
 
         // HACK: GI Baking system relies on some properties existing in the shader ("_MainTex", "_Cutoff" and "_Color") for opacity handling, so we need to store our version of those parameters in the hard-coded name the GI baking system recognizes.
-        _MainTex("Albedo", 2D) = "white" {}
-        _Color("Color", Color) = (1,1,1,1)
-        _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
-
-        // Debug constants must be exposed as properties so the shader is compatible
-        // with the SRP batcher
-        [HideInInspector] _UnlitColorMap_MipInfo("_UnlitColorMap_MipInfo", Vector) = (0, 0, 0, 0)
+        [HideInInspector] _MainTex("Albedo", 2D) = "white" {}
+        [HideInInspector] _Color("Color", Color) = (1,1,1,1)
+        [HideInInspector] _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
     }
 
     HLSLINCLUDE
 
     #pragma target 4.5
-    #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+    #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
     //-------------------------------------------------------------------------------------
     // Variant
     //-------------------------------------------------------------------------------------
 
     #pragma shader_feature_local _ALPHATEST_ON
-    #pragma shader_feature_local _ALPHATOMASK_ON
     // #pragma shader_feature_local _DOUBLESIDED_ON - We have no lighting, so no need to have this combination for shader, the option will just disable backface culling
 
-    #pragma shader_feature_local _EMISSIVE_COLOR_MAP
-
-    // Keyword for transparent
-    #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
-    #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+    #pragma shader_feature_local_fragment _EMISSIVE_COLOR_MAP
+    #pragma shader_feature_local_raytracing _EMISSIVE_COLOR_MAP
 
     #pragma shader_feature_local _ADD_PRECOMPUTED_VELOCITY
 
@@ -156,7 +149,7 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -194,13 +187,13 @@ Shader "HDRP/Unlit"
             }
 
             Cull[_CullMode]
-            AlphaToMask [_AlphaToMask]
+            AlphaToMask [_AlphaCutoffEnable]
 
             ZWrite On
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -214,9 +207,9 @@ Shader "HDRP/Unlit"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/Unlit.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitDepthPass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDepthOnly.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitDepthPass.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDepthOnly.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -240,13 +233,13 @@ Shader "HDRP/Unlit"
             }
 
             Cull[_CullMode]
-            AlphaToMask [_AlphaToMask]
+            AlphaToMask [_AlphaCutoffEnable]
 
             ZWrite On
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -262,8 +255,8 @@ Shader "HDRP/Unlit"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/Unlit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitSharePass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassMotionVectors.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassMotionVectors.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -279,6 +272,7 @@ Shader "HDRP/Unlit"
 
 
             Blend [_SrcBlend] [_DstBlend], [_AlphaSrcBlend] [_AlphaDstBlend]
+            Blend 1 SrcAlpha OneMinusSrcAlpha // target 1 alpha blend required for VT feedback. All other uses will pass 1.
             ZWrite [_ZWrite]
             ZTest [_ZTestDepthEqualForOpaque]
 
@@ -294,12 +288,16 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
 
             #pragma multi_compile _ DEBUG_DISPLAY
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #ifdef DEBUG_DISPLAY
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Debug/DebugDisplay.hlsl"
@@ -310,8 +308,8 @@ Shader "HDRP/Unlit"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/Unlit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitSharePass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForwardUnlit.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -320,7 +318,7 @@ Shader "HDRP/Unlit"
         }
 
         // Extracts information for lightmapping, GI (emission, albedo, ...)
-        // This pass it not used during regular rendering.
+        // This pass is not used during regular rendering.
         Pass
         {
             Name "META"
@@ -330,7 +328,7 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -340,12 +338,21 @@ Shader "HDRP/Unlit"
             // both direct and indirect lighting) will hand up in the "regular" lightmap->LIGHTMAP_ON.
 
             #define SHADERPASS SHADERPASS_LIGHT_TRANSPORT
+            #pragma shader_feature EDITOR_VISUALIZATION
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
+            // Use Unity's built-in matrices for meta pass rendering
+            #define SCENEPICKINGPASS
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/PickingSpaceTransforms.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/Unlit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitSharePass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassLightTransport.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassLightTransport.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -368,7 +375,7 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -377,7 +384,7 @@ Shader "HDRP/Unlit"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/Unlit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitDepthPass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDepthOnly.hlsl"
 
             #pragma vertex Vert
@@ -407,18 +414,22 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_DISTORTION
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/Unlit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitDistortionPass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDistortion.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/UnlitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDistortion.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -438,9 +449,16 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+            //enable GPU instancing support
+            #pragma multi_compile_instancing
+            #pragma multi_compile _ DOTS_INSTANCING_ON
             // enable dithering LOD crossfade
             #pragma multi_compile _ LOD_FADE_CROSSFADE
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_FULL_SCREEN_DEBUG
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
@@ -466,16 +484,21 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ DEBUG_DISPLAY
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_INDIRECT
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitSharePass.hlsl"
@@ -496,16 +519,21 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ DEBUG_DISPLAY
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_FORWARD
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitSharePass.hlsl"
@@ -525,8 +553,12 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_GBUFFER
 
@@ -556,17 +588,22 @@ Shader "HDRP/Unlit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #define SHADOW_LOW
             #pragma multi_compile _ TRANSPARENT_COLOR_SHADOW
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_VISIBILITY
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitSharePass.hlsl"
@@ -582,13 +619,51 @@ Shader "HDRP/Unlit"
 
         Pass
         {
+            Name "DebugDXR"
+            Tags{ "LightMode" = "DebugDXR" }
+
+            HLSLPROGRAM
+
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
+            #pragma raytracing surface_shader
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
+            #define SHADERPASS SHADERPASS_RAYTRACING_DEBUG
+
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
+
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingIntersection.hlsl"
+
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RayTracingCommon.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassRayTracingDebug.hlsl"
+
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "PathTracingDXR"
             Tags{ "LightMode" = "PathTracingDXR" }
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
+
+            #pragma multi_compile _ SENSORSDK_OVERRIDE_REFLECTANCE
+
+            // Keyword for transparent
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+
+            #ifdef SENSORSDK_OVERRIDE_REFLECTANCE
+                #define SENSORSDK_ENABLE_LIDAR
+            #endif
 
             #define SHADERPASS SHADERPASS_PATH_TRACING
 
@@ -598,8 +673,8 @@ Shader "HDRP/Unlit"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Unlit/ShaderPass/UnlitSharePass.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingIntersection.hlsl"
@@ -612,5 +687,6 @@ Shader "HDRP/Unlit"
         }
     }
 
+    FallBack "Hidden/HDRP/FallbackError"
     CustomEditor "Rendering.HighDefinition.UnlitGUI"
 }

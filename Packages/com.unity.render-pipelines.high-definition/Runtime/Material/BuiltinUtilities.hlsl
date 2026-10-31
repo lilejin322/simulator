@@ -1,26 +1,27 @@
 #ifndef __BUILTINUTILITIES_HLSL__
 #define __BUILTINUTILITIES_HLSL__
 
+#ifndef INCLUDE_ONLY_MV_FUNCTIONS
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/BuiltinGIUtilities.hlsl"
+#endif
 
-// Calculate motion vector in Clip space [-1..1]
-float2 CalculateMotionVector(float4 positionCS, float4 previousPositionCS)
+// Calculate motion vector variant for High Quality Line Rendering, which needs to divide by W much earlier in the pipeline.
+float2 CalculateMotionVector(float4 positionCS, float2 previousPositionSS)
 {
     // This test on define is required to remove warning of divide by 0 when initializing empty struct
     // TODO: Add forward opaque MRT case...
 #if (SHADERPASS == SHADERPASS_MOTION_VECTORS) || defined(_WRITE_TRANSPARENT_MOTION_VECTOR)
     // Encode motion vector
     positionCS.xy = positionCS.xy / positionCS.w;
-    previousPositionCS.xy = previousPositionCS.xy / previousPositionCS.w;
-
-    float2 motionVec = (positionCS.xy - previousPositionCS.xy);
+    float2 motionVec = (positionCS.xy - previousPositionSS);
 
 #ifdef KILL_MICRO_MOVEMENT
     motionVec.x = abs(motionVec.x) < MICRO_MOVEMENT_THRESHOLD.x ? 0 : motionVec.x;
     motionVec.y = abs(motionVec.y) < MICRO_MOVEMENT_THRESHOLD.y ? 0 : motionVec.y;
 #endif
 
-    motionVec = clamp(motionVec, -1.0f + MICRO_MOVEMENT_THRESHOLD, 1.0f - MICRO_MOVEMENT_THRESHOLD);
+    // Note: we clamp here between -2 and 2 because that's the maximum a vector from positions in clipspace can reach. (e.g. 1-(-1) = 2 /(-1)-1 = -2)
+    motionVec = clamp(motionVec.xy, -2.0f + MICRO_MOVEMENT_THRESHOLD, 2.0f - MICRO_MOVEMENT_THRESHOLD);
 
 #if UNITY_UV_STARTS_AT_TOP
     motionVec.y = -motionVec.y;
@@ -31,6 +32,14 @@ float2 CalculateMotionVector(float4 positionCS, float4 previousPositionCS)
     return float2(0.0, 0.0);
 #endif
 }
+
+// Calculate motion vector in Clip space [-1..1]
+float2 CalculateMotionVector(float4 positionCS, float4 previousPositionCS)
+{
+    return CalculateMotionVector(positionCS, previousPositionCS.xy / previousPositionCS.w);
+}
+
+#ifndef INCLUDE_ONLY_MV_FUNCTIONS
 
 // For builtinData we want to allow the user to overwrite default GI in the surface shader / shader graph.
 // So we perform the following order of operation:
@@ -47,16 +56,42 @@ void InitBuiltinData(PositionInputs posInput, float alpha, float3 normalWS, floa
     builtinData.opacity = alpha;
 
     // Use uniform directly - The float need to be cast to uint (as unity don't support to set a uint as uniform)
-    builtinData.renderingLayers = GetMeshRenderingLightLayer();
+    builtinData.renderingLayers = GetMeshRenderingLayerMask();
 
-    // Sample lightmap/probevolume/lightprobe/volume proxy
+    // Sample lightmap/lightprobe/volume proxy
     builtinData.bakeDiffuseLighting = 0.0;
     builtinData.backBakeDiffuseLighting = 0.0;
+#ifndef LIGHT_EVALUATION_SKIP_INDIRECT_DIFFUSE
     SampleBakedGI(  posInput, normalWS, backNormalWS, builtinData.renderingLayers, texCoord1.xy, texCoord2.xy,
                     builtinData.bakeDiffuseLighting, builtinData.backBakeDiffuseLighting);
+#endif
+
+    builtinData.isLightmap =
+#if defined(LIGHTMAP_ON) || defined(DYNAMICLIGHTMAP_ON)
+        1;
+#else
+        0;
+#endif
 
 #ifdef SHADOWS_SHADOWMASK
-    float4 shadowMask = SampleShadowMask(posInput.positionWS, texCoord1.xy);
+    float4 shadowMask;
+    #if !defined(LIGHTMAP_ON) && (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
+    // If we are using APV with mixed lighting on a probe-lit renderer, occlusion is stored in APV.
+    float3 unusedDiffuseLighting;
+    float3 unusedBackDiffuseLighting;
+    EvaluateAdaptiveProbeVolume(GetAbsolutePositionWS(posInput.positionWS),
+        normalWS,
+        backNormalWS,
+        GetWorldSpaceNormalizeViewDir(posInput.positionWS),
+        posInput.positionSS,
+        builtinData.renderingLayers,
+        unusedDiffuseLighting,
+        unusedBackDiffuseLighting,
+        shadowMask);
+    #else
+    // Otherwise occlusion is stored in shadowmask texture, or in unity_ProbesOcclusion for renderers lit by legacy probes.
+    shadowMask = SampleShadowMask(posInput.positionWS, texCoord1.xy);
+    #endif
     builtinData.shadowMask0 = shadowMask.x;
     builtinData.shadowMask1 = shadowMask.y;
     builtinData.shadowMask2 = shadowMask.z;
@@ -103,18 +138,8 @@ void ModifyBakedDiffuseLighting(float3 V, PositionInputs posInput, SurfaceData s
 void PostInitBuiltinData(   float3 V, PositionInputs posInput, SurfaceData surfaceData,
                             inout BuiltinData builtinData)
 {
-#if SHADEROPTIONS_PROBE_VOLUMES_EVALUATION_MODE == PROBEVOLUMESEVALUATIONMODES_LIGHT_LOOP
-    if (IsUninitializedGI(builtinData.bakeDiffuseLighting))
-        return;
-#else
-    // Apply control from the indirect lighting volume settings - This is apply here so we don't affect emissive
-    // color in case of lit deferred for example and avoid material to have to deal with it
-
-    // Note: We only apply indirect multiplier for Material pass mode, for lightloop mode, the multiplier will be apply in lightloop
-    float multiplier = GetIndirectDiffuseMultiplier(builtinData.renderingLayers);
-    builtinData.bakeDiffuseLighting *= multiplier;
-    builtinData.backBakeDiffuseLighting *= multiplier;
-#endif
+    // For APV (non lightmap case) and SSGI/RTGI/Mixed bakeDiffuseLighting is 0 and below code will not have any effect.
+    // ModifyBakedDiffuseLighting, GetIndirectDiffuseMultiplier and ApplyDebugToBuiltinData will be done in lightloop for those cases
 
 #ifdef MODIFY_BAKED_DIFFUSE_LIGHTING
 
@@ -125,7 +150,16 @@ void PostInitBuiltinData(   float3 V, PositionInputs posInput, SurfaceData surfa
         ModifyBakedDiffuseLighting(V, posInput, surfaceData, builtinData);
 
 #endif
+
+    // Apply control from the indirect lighting volume settings - This is apply here so we don't affect emissive
+    // color in case of lit deferred for example and avoid material to have to deal with it
+    // This is applied only on bakeDiffuseLighting as ModifyBakedDiffuseLighting combine both bakeDiffuseLighting and backBakeDiffuseLighting
+    float multiplier = GetIndirectDiffuseMultiplier(builtinData.renderingLayers);
+    builtinData.bakeDiffuseLighting *= multiplier;
+
     ApplyDebugToBuiltinData(builtinData);
 }
+
+#endif // INCLUDE_ONLY_MV_FUNCTIONS
 
 #endif //__BUILTINUTILITIES_HLSL__

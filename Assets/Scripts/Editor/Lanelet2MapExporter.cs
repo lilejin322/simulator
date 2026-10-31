@@ -42,8 +42,8 @@ namespace Simulator.Editor
         private MapManagerData MapAnnotationData;
         MapOrigin MapOrigin;
         List<OsmGeo> map = new List<OsmGeo>();
-        Dictionary<int, long> LineId2StartNodeId = new Dictionary<int, long>();
-        Dictionary<int, long> LineId2EndNodeId = new Dictionary<int, long>();
+        Dictionary<EntityId, long> LineId2StartNodeId = new Dictionary<EntityId, long>();
+        Dictionary<EntityId, long> LineId2EndNodeId = new Dictionary<EntityId, long>();
         Dictionary<long, Node> Id2Node = new Dictionary<long, Node>();
         HashSet<LaneData> LanesData;
         HashSet<LineData> LinesData;
@@ -314,7 +314,7 @@ namespace Simulator.Editor
             var endIdx = lineData.mapWorldPositions.Count;
             List<Node> nodes = new List<Node>();
             Node firstNode, lastNode;
-            var lineId = lineData.go.GetInstanceID();
+            var lineId = lineData.go.GetEntityId();
 
             if (isBasedOnLane)
             {
@@ -650,11 +650,11 @@ namespace Simulator.Editor
         {
             if (isSameDirection(beforeLaneData, beforeLaneLineData))
             {
-                LineId2EndNodeId[beforeLaneLineData.go.GetInstanceID()] = startNodeBasedOnLane;
+                LineId2EndNodeId[beforeLaneLineData.go.GetEntityId()] = startNodeBasedOnLane;
             }
             else
             {
-                LineId2StartNodeId[beforeLaneLineData.go.GetInstanceID()] = startNodeBasedOnLane;
+                LineId2StartNodeId[beforeLaneLineData.go.GetEntityId()] = startNodeBasedOnLane;
             }
         }
 
@@ -662,16 +662,16 @@ namespace Simulator.Editor
         {
             if (isSameDirection(afterLaneData, afterLaneLineData))
             {
-                LineId2StartNodeId[afterLaneLineData.go.GetInstanceID()] = EndNodeBasedOnLane;
+                LineId2StartNodeId[afterLaneLineData.go.GetEntityId()] = EndNodeBasedOnLane;
             }
             else
             {
-                LineId2EndNodeId[afterLaneLineData.go.GetInstanceID()] = EndNodeBasedOnLane;
+                LineId2EndNodeId[afterLaneLineData.go.GetEntityId()] = EndNodeBasedOnLane;
             }
         }
         void UpdateLineStartEnd2NodeId(LineData lineData, Way way)
         {
-            var lineId = lineData.go.GetInstanceID();
+            var lineId = lineData.go.GetEntityId();
             LineId2StartNodeId[lineId] = way.Nodes.First();
             LineId2EndNodeId[lineId] = way.Nodes.Last();
         }
@@ -1077,21 +1077,21 @@ namespace Simulator.Editor
         // Connect all lines by adjusting starting/ending points
         public static void AlignPointsInLines(HashSet<LaneData> allLanesData)
         {
-            var visitedLaneIdsEnd = new HashSet<int>(); // lanes whose end point has been visited
-            var visitedLaneIdsStart = new HashSet<int>(); // lanes whose start point has been visited
+            var visitedLaneIdsEnd = new HashSet<EntityId>(); // lanes whose end point has been visited
+            var visitedLaneIdsStart = new HashSet<EntityId>(); // lanes whose start point has been visited
             foreach (var mapLaneData in allLanesData)
             {
                 // Handle lane start connecting point
-                if (!visitedLaneIdsStart.Contains(mapLaneData.go.GetInstanceID()))
+                if (!visitedLaneIdsStart.Contains(mapLaneData.go.GetEntityId()))
                     AlignLines(visitedLaneIdsEnd, visitedLaneIdsStart, mapLaneData, true);
 
                 // Handle lane end connecting point
-                if (!visitedLaneIdsEnd.Contains(mapLaneData.go.GetInstanceID()))
+                if (!visitedLaneIdsEnd.Contains(mapLaneData.go.GetEntityId()))
                     AlignLines(visitedLaneIdsEnd, visitedLaneIdsStart, mapLaneData, false);
             }
         }
 
-        static void AlignLines(HashSet<int> visitedLaneIdsEnd, HashSet<int> visitedLaneIdsStart,
+        static void AlignLines(HashSet<EntityId> visitedLaneIdsEnd, HashSet<EntityId> visitedLaneIdsStart,
             LaneData mapLaneData, bool isStart)
         {
             var allConnectedLanesData2InOut = new Dictionary<LaneData, InOut>();
@@ -1224,7 +1224,7 @@ namespace Simulator.Editor
         {
             if (lineData.mapWorldPositions.Count == 2)
             {
-                var msg = $"Line: {lineData.go.name} instanceID: {lineData.go.GetInstanceID()} ";
+                var msg = $"Line: {lineData.go.name} instanceID: {lineData.go.GetEntityId()} ";
                 msg += "only has two points and overlapping with each other, ";
                 msg += "please check and manually adjust it.";
                 Debug.LogWarning(msg, lineData.go);
@@ -1242,14 +1242,14 @@ namespace Simulator.Editor
         }
 
         static void UpdateVisitedSets(Dictionary<LaneData, InOut> allConnectedLanesData2InOut,
-            HashSet<int> visitedLaneInstanceIdsStart, HashSet<int> visitedLaneInstanceIdsEnd)
+            HashSet<EntityId> visitedLaneInstanceIdsStart, HashSet<EntityId> visitedLaneInstanceIdsEnd)
         {
             foreach (var entry in allConnectedLanesData2InOut)
             {
                 var laneData = entry.Key;
                 var inOut = entry.Value;
-                if (inOut == InOut.In) visitedLaneInstanceIdsEnd.Add(laneData.go.GetInstanceID());
-                else visitedLaneInstanceIdsStart.Add(laneData.go.GetInstanceID());
+                if (inOut == InOut.In) visitedLaneInstanceIdsEnd.Add(laneData.go.GetEntityId());
+                else visitedLaneInstanceIdsStart.Add(laneData.go.GetEntityId());
             }
         }
 
@@ -1295,7 +1295,7 @@ namespace Simulator.Editor
                 {
                     if (allConnectedLanesData2InOut[laneData] != inOut)
                     {
-                        var message = $"Lane {laneData.go.name} {laneData.go.GetInstanceID()} is added ";
+                        var message = $"Lane {laneData.go.name} {laneData.go.GetEntityId()} is added ";
                         message += $"already and with {allConnectedLanesData2InOut[laneData]} not {inOut}";
                         Debug.LogError(message, laneData.go);
                     }

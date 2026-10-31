@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.Serialization;
 
-namespace UnityEditor.VFX
+namespace UnityEditor.VFX.HDRP
 {
     abstract class VFXAbstractDistortionOutput : VFXAbstractParticleOutput
     {
@@ -17,37 +18,20 @@ namespace UnityEditor.VFX
             NormalBased
         }
 
-        [SerializeField, VFXSetting(VFXSettingAttribute.VisibleFlags.All), Tooltip("How the distortion is handled")]
+        [SerializeField, VFXSetting(VFXSettingAttribute.VisibleFlags.Default), Tooltip("How the distortion is handled")]
         protected DistortionMode distortionMode = DistortionMode.ScreenSpace;
 
-        [SerializeField, VFXSetting(VFXSettingAttribute.VisibleFlags.All), Tooltip("Whether Distortion scales with the distance")]
+        [SerializeField, VFXSetting(VFXSettingAttribute.VisibleFlags.Default), Tooltip("Whether Distortion scales with the distance")]
         protected bool scaleByDistance = true;
 
-        public class InputPropertiesDistortionScreenSpace
+        public sealed override bool CanBeCompiled()
         {
-            [Tooltip("Distortion Map: RG for Distortion (centered on .5 gray), B for Blur Mask.")]
-            public Texture2D distortionBlurMap = null;
-            [Tooltip("Screen-Space Distortion Scale")]
-            public Vector2 distortionScale = Vector2.one;
+            return (VFXLibrary.currentSRPBinder is VFXHDRPBinder) && base.CanBeCompiled();
         }
 
-        public class InputPropertiesDistortionNormalBased
-        {
-            [Tooltip("Normal Map")]
-            public Texture2D normalMap = null;
-            [Tooltip("Smoothness Map (Alpha)")]
-            public Texture2D smoothnessMap = null;
-            [Tooltip("Alpha Mask (Alpha)")]
-            public Texture2D alphaMask = null;
-            [Tooltip("World-space Distortion Scale")]
-            public float distortionScale = 1.0f;
-        }
+        public sealed override bool supportsUV => true;
 
-        public class InputPropertiesCommon
-        {
-            [Tooltip("Distortion Blur Scale")]
-            public float blurScale = 1.0f;
-        }
+        protected sealed override bool hasAnyMap => true;
 
         protected override IEnumerable<string> filteredOutSettings
         {
@@ -56,12 +40,13 @@ namespace UnityEditor.VFX
                 foreach (var setting in base.filteredOutSettings)
                     yield return setting;
 
+                yield return "useBaseColorMap";
                 yield return "colorMapping";
                 yield return "blendMode";
                 yield return "castShadows";
                 yield return "sort";
                 yield return "useAlphaClipping";
-                yield return "excludeFromTAA";
+                yield return "excludeFromTUAndAA";
             }
         }
 
@@ -71,23 +56,40 @@ namespace UnityEditor.VFX
             base.OnEnable();
         }
 
+        protected override IEnumerable<string> untransferableSettings
+        {
+            get
+            {
+                foreach (var setting in base.untransferableSettings)
+                {
+                    yield return setting;
+                }
+                yield return "blendMode";
+            }
+        }
+
         protected override IEnumerable<VFXPropertyWithValue> inputProperties
         {
             get
             {
                 var properties = base.inputProperties;
+                foreach (var prop in properties)
+                    yield return prop;
 
                 switch (distortionMode)
                 {
                     case DistortionMode.ScreenSpace:
-                        properties = properties.Concat(PropertiesFromType("InputPropertiesDistortionScreenSpace"));
+                        yield return new VFXPropertyWithValue(new VFXProperty(GetFlipbookType(), "distortionBlurMap", new TooltipAttribute("Distortion Map: RG for Distortion (centered on .5 gray), B for Blur Mask.")), (usesFlipbook ? null : VFXResources.defaultResources.noiseTexture));
+                        yield return new VFXPropertyWithValue(new VFXProperty(typeof(Vector2), "distortionScale", new TooltipAttribute("Screen-Space Distortion Scale")), Vector2.one);
                         break;
                     case DistortionMode.NormalBased:
-                        properties = properties.Concat(PropertiesFromType("InputPropertiesDistortionNormalBased"));
+                        yield return new VFXPropertyWithValue(new VFXProperty(GetFlipbookType(), "normalMap", new TooltipAttribute("Normal Map")));
+                        yield return new VFXPropertyWithValue(new VFXProperty(GetFlipbookType(), "smoothnessMap", new TooltipAttribute("Smoothness Map (Alpha)")));
+                        yield return new VFXPropertyWithValue(new VFXProperty(GetFlipbookType(), "alphaMask", new TooltipAttribute("Alpha Mask (Alpha)")));
+                        yield return new VFXPropertyWithValue(new VFXProperty(typeof(float), "distortionScale", new TooltipAttribute("World-space Distortion Scale")));
                         break;
                 }
-
-                return properties.Concat(PropertiesFromType("InputPropertiesCommon"));
+                yield return new VFXPropertyWithValue(new VFXProperty(typeof(float), "blurScale", new TooltipAttribute("Distortion Blur Scale")));
             }
         }
 
@@ -137,7 +139,7 @@ namespace UnityEditor.VFX
                 foreach (var define in base.additionalDefines)
                     yield return define;
 
-                switch(distortionMode)
+                switch (distortionMode)
                 {
                     case DistortionMode.ScreenSpace:
                         yield return "DISTORTION_SCREENSPACE";
@@ -150,6 +152,33 @@ namespace UnityEditor.VFX
 
                 if (scaleByDistance)
                     yield return "DISTORTION_SCALE_BY_DISTANCE";
+            }
+        }
+
+        public override IEnumerable<VFXAttributeInfo> attributes
+        {
+            get
+            {
+                yield return new VFXAttributeInfo(VFXAttribute.Position, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.Alpha, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.Alive, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AxisX, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AxisY, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AxisZ, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AngleX, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AngleY, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.AngleZ, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.PivotX, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.PivotY, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.PivotZ, VFXAttributeMode.Read);
+
+                yield return new VFXAttributeInfo(VFXAttribute.Size, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.ScaleX, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.ScaleY, VFXAttributeMode.Read);
+                yield return new VFXAttributeInfo(VFXAttribute.ScaleZ, VFXAttributeMode.Read);
+
+                foreach (var attribute in flipbookAttributes)
+                    yield return attribute;
             }
         }
 

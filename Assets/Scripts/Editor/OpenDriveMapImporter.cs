@@ -1162,22 +1162,22 @@ namespace Simulator.Editor
         void DownSampleLaneLines(string roadId, int laneSectionId)
         {
             var Id2MapLane = Roads[roadId][laneSectionId];
-            var visitedLines = new HashSet<int>();
+            var visitedLines = new HashSet<EntityId>();
             foreach (var entry in Id2MapLane)
             {
                 var mapLane = entry.Value;
                 var leftLine = mapLane.leftLineBoundry;
                 var rightLine = mapLane.rightLineBoundry;
                 DownSample(mapLane);
-                if (!visitedLines.Contains(leftLine.GetInstanceID()))
+                if (!visitedLines.Contains(leftLine.GetEntityId()))
                 {
                     DownSample(leftLine);
-                    visitedLines.Add(leftLine.GetInstanceID());
+                    visitedLines.Add(leftLine.GetEntityId());
                 }
-                if (!visitedLines.Contains(rightLine.GetInstanceID()))
+                if (!visitedLines.Contains(rightLine.GetEntityId()))
                 {
                     DownSample(rightLine);
-                    visitedLines.Add(rightLine.GetInstanceID());
+                    visitedLines.Add(rightLine.GetEntityId());
                 }
             }
         }
