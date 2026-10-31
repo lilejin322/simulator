@@ -31,7 +31,7 @@ namespace Simulator.Api.Commands
         private async Task LoadMap(JSONNode args, string userMapId, int? seed = null)
         {
             var api = ApiManager.Instance;
-            MapDetailData mapData = await ConnectionManager.API.GetByIdOrName<MapDetailData>(userMapId);
+            MapDetailData mapData = await LocalAssetLibrary.GetByIdOrName<MapDetailData>(userMapId);
             var ret = await DownloadManager.GetAsset(BundleConfig.BundleTypes.Environment, mapData.AssetGuid, mapData.Name);
             api.StartCoroutine(LoadMapAssets(this, mapData, ret.LocalPath, userMapId, seed));
         }
@@ -108,6 +108,9 @@ namespace Simulator.Api.Commands
                     Loader.Instance.SimConfig.Seed = seed;
                     Loader.Instance.SimConfig.MapName = map.Name;
                     Loader.Instance.SimConfig.MapAssetGuid = map.AssetGuid;
+                    // AnalysisManager records agents added through the API in SimConfig.Agents; they belong to the
+                    // previous scene and SimulatorManager.Init must not respawn them before the scene is set up
+                    Loader.Instance.SimConfig.Agents = Array.Empty<AgentConfig>();
                 }
 
                 var sim = Loader.Instance.CreateSimulatorManager();

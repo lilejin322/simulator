@@ -1,5 +1,11 @@
+# Render only the sensors, not the main view. Always on in Unity batch mode (-batchmode, see run-headless.sh).
 headless: false
 read_only: false
+# "*" listens on all interfaces, so other machines can reach api_port. Open that port in the firewall first.
 api_hostname: "localhost"
 api_port: 8181
-cloud_url: "https://wise.preview.svlsimulator.com"
+# Local asset library: maps/, vehicles/, plugins/ bundles and metadata/*.json records.
+# Relative paths are relative to the simulator folder. Override with --assets <path> or SIMULATOR_ASSETS.
+assets_path: "LocalAssets"
+# Start an API Only simulation on launch so Python API clients can connect right away (--no-api-only disables it)
+start_api_only: true

@@ -218,13 +218,6 @@ namespace Simulator
             if (previous == newStatus)
                 return;
 
-            if (ConnectionManager.instance != null &&
-                ConnectionManager.Status != ConnectionManager.ConnectionStatus.Offline &&
-                CurrentSimulation != null)
-            {
-                ConnectionManager.instance.UpdateStatus(newStatus, CurrentSimulation.Id, message);
-            }
-
             if (value == SimulatorStatus.Idle)
             {
                 currentSimulation = null;
@@ -307,7 +300,6 @@ namespace Simulator
 
         public async void StartSimulation(SimulationData simData)
         {
-            CloudAPI API = null;
             if (Instance.Status != SimulatorStatus.Idle)
             {
                 Debug.LogWarning($"Received start simulation command while Simulator is not idle. (status: {Instance.Status})");
@@ -315,33 +307,6 @@ namespace Simulator
             }
             try
             {
-#if UNITY_EDITOR
-                // downloads still need simulator to be online, but in developer mode we don't have ConnectionManager
-                if (ConnectionManager.instance == null)
-                {
-                    if (string.IsNullOrEmpty(Config.CloudProxy))
-                    {
-                        API = new CloudAPI(new Uri(Config.CloudUrl), Config.SimID);
-                    }
-                    else
-                    {
-                        API = new CloudAPI(new Uri(Config.CloudUrl), Config.SimID, new Uri(Config.CloudProxy));
-                    }
-
-                    var simInfo = CloudAPI.GetInfo();
-                    var reader = await API.Connect(simInfo);
-                    var streamReader = await API.EnsureConnectSuccess();
-                    EditorApplication.playModeStateChanged += (PlayModeStateChange state) =>
-                    {
-                        if (state == PlayModeStateChange.ExitingPlayMode)
-                        {
-                            streamReader.Close();
-                            streamReader.Dispose();
-                            API.Disconnect();
-                        }
-                    };
-                }
-#endif
                 currentSimulation = simData;
                 reportStatus(SimulatorStatus.Loading);
                 Network.Initialize(Config.SimID, simData.Cluster, NetworkSettings);
@@ -367,11 +332,11 @@ namespace Simulator
                     foreach (var vehicle in simData.Vehicles.Where(v => v.Bridge != null))
                     {
 #if UNITY_EDITOR
-                        // as of now, developer settings cannot look up bridge assetguid while offline.
+                        // developer settings may store the bridge without its assetguid
                         if (string.IsNullOrEmpty(vehicle.Bridge.AssetGuid))
                         {
                             Debug.Log("missing assetguid on bridge, looking up by id " + vehicle.Bridge.Id);
-                            var bridge = await API.GetByIdOrName<PluginDetailData>(vehicle.Bridge.Id);
+                            var bridge = await LocalAssetLibrary.GetByIdOrName<PluginDetailData>(vehicle.Bridge.Id);
                             if (bridge != null)
                             {
                                 vehicle.Bridge.AssetGuid = bridge.AssetGuid;
@@ -403,11 +368,10 @@ namespace Simulator
                                 Debug.Log($"Sensor {plugin.Name} is not being downloaded, but used from cache or local sources. (Developer Debug Mode)");
                                 continue;
                             }
-                            // WISE stopped sending us assetGuids when in edit mode (no simId),
-                            // so we have to look up while in play mode.
+                            // developer settings may store sensors without their assetguid
                             if (plugin.Plugin.AssetGuid == null)
                             {
-                                var detail = await API.GetByIdOrName<PluginDetailData>(plugin.Plugin.Id);
+                                var detail = await LocalAssetLibrary.GetByIdOrName<PluginDetailData>(plugin.Plugin.Id);
                                 plugin.Plugin.AssetGuid = detail.AssetGuid;
                             }
 #endif
@@ -430,7 +394,6 @@ namespace Simulator
 
                 if (ConnectionUI.instance != null)
                 {
-                    ConnectionUI.instance.SetLinkingButtonActive(false);
                     ConnectionUI.instance.SetVSEButtonActive(false);
                 }
 
@@ -502,15 +465,6 @@ namespace Simulator
                     reportStatus(SimulatorStatus.Idle);
                 }
             }
-#if UNITY_EDITOR
-            finally
-            {
-                if (API != null)
-                {
-                    API.Disconnect();
-                }
-            }
-#endif
         }
 
         public void StartAsync(SimulationData simulation)
@@ -527,11 +481,6 @@ namespace Simulator
             {
                 try
                 {
-                    if (Config.Headless && (simulation.Headless))
-                    {
-                        throw new Exception("Simulator is configured to run in headless mode, only headless simulations are allowed");
-                    }
-
                     if (ConnectionUI != null)
                     {
                         ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.PROGRESS);
@@ -544,6 +493,12 @@ namespace Simulator
                     {
                         var API = Instantiate(ApiManagerPrefab);
                         API.name = "ApiManager";
+                        // ApiManager.Awake only logs it when the server cannot listen, e.g. the port is in use
+                        if ((!Network.IsClusterSimulation || Network.IsMaster) && !API.IsListening)
+                        {
+                            Destroy(API.gameObject);
+                            throw new Exception($"Python API cannot listen on {Config.ApiHost}:{Config.ApiPort}, is the port in use?");
+                        }
 
                         ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.READY);
 
@@ -593,15 +548,22 @@ namespace Simulator
                     Debug.LogException(ex);
 
                     reportStatus(SimulatorStatus.Error, ex.Message);
+                    // only Stopping may go back to Idle, also when the loader scene is still active (e.g. API Only failed)
+                    reportStatus(SimulatorStatus.Stopping);
 
                     if (SceneManager.GetActiveScene().name != LoaderScene)
                     {
-                        reportStatus(SimulatorStatus.Stopping);
                         SceneManager.LoadScene(LoaderScene);
                     }
 
                     reportStatus(SimulatorStatus.Idle);
                     await Network.Deinitialize();
+
+                    if (ConnectionUI != null)
+                    {
+                        ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.START);
+                        ConnectionUI.UpdateStatusText($"Failed to start '{simulation.Name}': {ex.Message}");
+                    }
                 }
             });
         }
@@ -642,10 +604,7 @@ namespace Simulator
                     return;
                 }
 
-                if (ConnectionManager.Status != ConnectionManager.ConnectionStatus.Offline)
-                {
-                    Network?.BroadcastStopCommand();
-                }
+                Network?.BroadcastStopCommand();
 
                 if (SimulatorManager.InstanceAvailable)
                 {
@@ -1036,40 +995,31 @@ namespace Simulator
         public async Task EnterScenarioEditor()
         {
             ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.PROGRESS);
-            ConnectionUI.SetLinkingButtonActive(false);
             ConnectionUI.SetVSEButtonActive(false);
-                
+
             if (SimulatorManager.InstanceAvailable || ApiManager.Instance)
             {
-                ConnectionUI.UpdateStatusText("Cannot enter Scenario Editor during a simulation.");
-                Debug.LogWarning("Cannot enter Scenario Editor during a simulation.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Cannot enter Scenario Editor during a simulation, stop it first.");
                 return;
             }
 
-            if (ConnectionManager.Status != ConnectionManager.ConnectionStatus.Online)
+            if (!LocalAssetLibrary.Exists)
             {
-                ConnectionUI.UpdateStatusText("Cannot enter Scenario Editor when connection is not established.");
-                Debug.LogWarning("Cannot enter Scenario Editor when connection is not established.");
-                ExitScenarioEditor();
+                CancelScenarioEditor($"Scenario Editor requires the asset library {Config.AssetsPath}, which does not exist.");
                 return;
             }
 
-            var maps = await ConnectionManager.API.GetLibrary<MapDetailData>();
+            var maps = await LocalAssetLibrary.GetLibrary<MapDetailData>();
             if (maps.Length == 0)
             {
-                ConnectionUI.UpdateStatusText("Scenario Editor requires at least one map added to the library.");
-                Debug.LogWarning("Scenario Editor requires at least one map added to the library.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Scenario Editor requires at least one map added to the library.");
                 return;
             }
 
-            var egos = await ConnectionManager.API.GetLibrary<VehicleDetailData>();
+            var egos = await LocalAssetLibrary.GetLibrary<VehicleDetailData>();
             if (egos.Length == 0)
             {
-                ConnectionUI.UpdateStatusText("Scenario Editor requires at least one ego vehicle added to the library.");
-                Debug.LogWarning("Scenario Editor requires at least one ego vehicle added to the library.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Scenario Editor requires at least one ego vehicle added to the library.");
                 return;
             }
 
@@ -1077,6 +1027,17 @@ namespace Simulator
             {
                 IsInScenarioEditor = true;
                 SceneManager.LoadScene(ScenarioEditorSceneName);
+            }
+        }
+
+        void CancelScenarioEditor(string reason)
+        {
+            Debug.LogWarning(reason);
+            // back to the loader screen first, which resets the status line, then show why
+            ExitScenarioEditor();
+            if (ConnectionUI != null)
+            {
+                ConnectionUI.UpdateStatusText(reason);
             }
         }
 
@@ -1090,9 +1051,7 @@ namespace Simulator
 
             if (ConnectionUI != null)
             {
-                ConnectionUI.SetLinkingButtonActive(true);
-                ConnectionUI.SetVSEButtonActive(true);
-                ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.READY);
+                ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.START);
             }
         }
 

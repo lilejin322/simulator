@@ -39,7 +39,6 @@ namespace Simulator.Editor
 
         private VehicleData EgoVehicle => DeveloperSimulation.Vehicles?[0];
 
-        private CloudAPI API;
         private string ErrorMessage;
         private static DevelopmentSettingsWindow Instance;
         private int CurrentVehicleIndex = 0;
@@ -50,7 +49,6 @@ namespace Simulator.Editor
         private bool NPCSelectEnable = false;
         private float SaveAssetTime = float.MaxValue;
 
-        private bool linked = true;
         private bool updateVehicleDetails = true;
         private string[] Bridges = new string[] { };
 
@@ -120,10 +118,6 @@ namespace Simulator.Editor
             if (state == PlayModeStateChange.ExitingPlayMode)
             {
                 Instance.Refresh();
-            }
-            else if (state == PlayModeStateChange.ExitingEditMode)
-            {
-                Instance.API.Disconnect();
             }
         }
 
@@ -198,32 +192,13 @@ namespace Simulator.Editor
                     };
                 }
 
-                if (string.IsNullOrEmpty(Config.CloudProxy))
-                {
-                    API = new CloudAPI(new Uri(Config.CloudUrl), Config.SimID);
-                }
-                else
-                {
-                    API = new CloudAPI(new Uri(Config.CloudUrl), Config.SimID, new Uri(Config.CloudProxy));
-                }
-
                 DatabaseManager.Init();
                 var csservice = new Simulator.Database.Services.ClientSettingsService();
                 ClientSettings cls = csservice.GetOrMake();
                 Config.SimID = cls.simid;
-                if (string.IsNullOrEmpty(Config.CloudUrl))
-                {
-                    ErrorMessage = "Cloud URL not set";
-                    return;
-                }
-                if (string.IsNullOrEmpty(Config.SimID))
-                {
-                    linked = false;
-                    ErrorMessage = "Simulator not linked";
-                    return;
-                }
 
-                var ret = await API.GetLibrary<VehicleDetailData>();
+                LocalAssetLibrary.Reload();
+                var ret = await LocalAssetLibrary.GetLibrary<VehicleDetailData>();
                 CloudVehicles = ret.ToList();
 
                 string[] guids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets/External/Vehicles" });
@@ -246,18 +221,6 @@ namespace Simulator.Editor
                 }
 
                 DeveloperSimulation.NPCs = Config.NPCVehicles.Values.ToArray(); // TODO get from cloud and refresh config.cs LoadExternalAssets()
-            }
-            catch (CloudAPI.NoSuccessException ex)
-            {
-                if (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                {
-                    ErrorMessage = "This instance requires linking to a cluster on " + Config.CloudUrl;
-                    linked = false;
-                }
-                else
-                {
-                    Debug.LogException(ex);
-                }
             }
             catch (Exception ex)
             {
@@ -389,7 +352,7 @@ namespace Simulator.Editor
 
         void OnGUI()
         {
-            EditorGUILayout.HelpBox("Cloud URL: " + Config.CloudUrl, MessageType.Info);
+            EditorGUILayout.HelpBox("Local asset library: " + Config.AssetsPath, MessageType.Info);
             EditorGUILayout.HelpBox(new GUIContent("SimID: " + Config.SimID, "Identifies this instance"));
 
             if (!string.IsNullOrEmpty(ErrorMessage))
@@ -412,18 +375,9 @@ namespace Simulator.Editor
             EditorGUI.BeginChangeCheck();
 
             EditorGUILayout.BeginHorizontal();
-            if (!linked && GUILayout.Button(new GUIContent("Link", "Add this instance to a cluster or create a cluster.")))
-            {
-                var simInfo = CloudAPI.GetInfo();
-                LinkTask(simInfo);
-            }
-            if (GUILayout.Button(new GUIContent("Refresh", "Refresh displayed local and cloud asset data in this window.")))
+            if (GUILayout.Button(new GUIContent("Refresh", "Refresh displayed asset data in this window, re-reading the local asset library.")))
             {
                 Refresh();
-            }
-            if (GUILayout.Button(new GUIContent("Manage clusters", "Visit cluster page on " + Config.CloudUrl)))
-            {
-                Application.OpenURL(Config.CloudUrl + "/clusters");
             }
 
             EditorGUILayout.EndHorizontal();
@@ -667,13 +621,10 @@ namespace Simulator.Editor
 
             updateVehicleDetails = false;
 
-            if (API == null)
-                return;
-
             if (DeveloperSimulation.Vehicles == null)
                 return;
 
-            var pluginLibrary = await API.GetLibrary<PluginDetailData>();
+            var pluginLibrary = await LocalAssetLibrary.GetLibrary<PluginDetailData>();
             var bridgeLibrary = pluginLibrary.Where(p => p.Category == "bridge");
 
             if (!EgoVehicle.Id.EndsWith(".prefab"))
@@ -684,7 +635,7 @@ namespace Simulator.Editor
                     // vehicle list does not give us sensor data, so we have to get it later.
                     // I do not want to query each vehicle individually and I can't block the UI, so
                     // we do it after a change was made to the settings in this fire and forget async function
-                    var data = await API.Get<VehicleDetailData>(selection.cloudIdOrPrefabPath);
+                    var data = await LocalAssetLibrary.Get<VehicleDetailData>(selection.cloudIdOrPrefabPath);
                     var selectedConfig = data.SensorsConfigurations.First(c => c.Id == selection.configId);
                     data.Sensors = selectedConfig.Sensors;
                     data.Bridge = selectedConfig.Bridge;
@@ -811,66 +762,6 @@ namespace Simulator.Editor
             if (Time.realtimeSinceStartup >= SaveAssetTime)
             {
                 UpdateAsset();
-            }
-        }
-
-        async void LinkTask(SimulatorInfo simInfo)
-        {
-            try
-            {
-                var stream = await API.Connect(simInfo);
-                string line;
-                using var reader = new StreamReader(stream);
-                while (true)
-                {
-                    var lineTask = reader.ReadLineAsync();
-                    if (await Task.WhenAny(lineTask, Task.Delay(30000)) != lineTask)
-                    {
-                        Debug.Log("Took to long to link to cluster, aborting");
-                        return;
-                    }
-                    line = lineTask.Result;
-
-                    if (line == null)
-                    {
-                        break;
-                    }
-
-                    if (line.StartsWith("data:") && !string.IsNullOrEmpty(line.Substring(6)))
-                    {
-                        JObject deserialized = JObject.Parse(line.Substring(5));
-                        if (deserialized != null && deserialized.HasValues)
-                        {
-                            var status = deserialized.GetValue("status");
-                            if (status != null)
-                            {
-                                switch (status.ToString())
-                                {
-                                    case "Unrecognized":
-                                        Application.OpenURL(Config.CloudUrl + "/clusters/link?token=" + simInfo.linkToken);
-                                        break;
-                                    case "OK":
-                                        Debug.Log("appear to be linked!");
-                                        Refresh();
-                                        linked = true;
-                                        return;
-                                    default:
-                                        return;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                Debug.LogError("error linking editor instance to wise");
-                Debug.LogException(e);
-            }
-            finally
-            {
-                Debug.Log("closing api");
-                API.Disconnect();
             }
         }
     }

@@ -1,0 +1,12 @@
+# config.yml used inside the container (copied to /opt/simulator/config.yml)
+headless: true
+read_only: false
+# listen on all interfaces inside the container; run.sh overrides the port with --apiport HOST_PORT
+# (the API rejects connections whose port differs from its own, so host and container ports must match)
+api_hostname: "*"
+api_port: 8181
+# host asset library is mounted read-only here
+assets_path: "/assets"
+# cache, logs and recorded videos; mount a host folder here to keep them
+data_path: "/data"
+start_api_only: true

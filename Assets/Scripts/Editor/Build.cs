@@ -1108,6 +1108,7 @@ namespace Simulator.Editor
                 if (r.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded)
                 {
                     Debug.Log("Player build succeeded!");
+                    CopyFFmpeg(target, folder);
                 }
                 else
                 {
@@ -1120,6 +1121,28 @@ namespace Simulator.Editor
             {
                 PlayerSettings.graphicsJobs = oldGraphicsJobSetting;
             }
+        }
+
+        // The Video Recording sensor encodes with ffmpeg from the player's Plugins folder (Jenkins/build-simulator.sh did this copy)
+        static void CopyFFmpeg(BuildTarget target, string folder)
+        {
+            string ffmpeg;
+            if (target == BuildTarget.Linux)
+            {
+                ffmpeg = Path.Combine("linux", "ffmpeg");
+            }
+            else if (target == BuildTarget.Windows)
+            {
+                ffmpeg = Path.Combine("windows", "ffmpeg.exe");
+            }
+            else
+            {
+                return;
+            }
+
+            var plugins = Path.Combine(folder, "simulator_Data", "Plugins");
+            Directory.CreateDirectory(plugins);
+            File.Copy(Path.Combine(Application.dataPath, "Plugins", "VideoCapture", "ffmpeg", ffmpeg), Path.Combine(plugins, Path.GetFileName(ffmpeg)), true);
         }
 
         private void BuildBundles(string outputFolder, Action onComplete = null)
@@ -1325,15 +1348,15 @@ namespace Simulator.Editor
 
         void OnGUI()
         {
-            EditorGUILayout.LabelField($"Would you like to go to {Web.Config.CloudUrl} to upload built asset?", EditorStyles.wordWrappedLabel);
+            EditorGUILayout.LabelField($"To use built bundles, copy them into the maps, vehicles or plugins folder of the local asset library {Web.Config.AssetsPath}", EditorStyles.wordWrappedLabel);
             GUILayout.Space(30);
-            if (GUILayout.Button("Yes"))
+            if (GUILayout.Button("Open asset library"))
             {
-                Application.OpenURL(Web.Config.CloudUrl);
+                EditorUtility.RevealInFinder(Web.Config.AssetsPath);
                 this.Close();
             }
             GUILayout.Space(10);
-            if (GUILayout.Button("No"))
+            if (GUILayout.Button("Close"))
             {
                 this.Close();
             }

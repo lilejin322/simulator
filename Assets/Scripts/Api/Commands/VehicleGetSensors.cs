@@ -111,7 +111,7 @@ namespace Simulator.Api.Commands
                             break;
                         case "Video Recording":
                             j = new JSONObject();
-                            j.Add("type", "camera");
+                            j.Add("type", "recorder"); // what the Python API's VideoRecordingSensor is created from
                             j.Add("name", sensor.Name);
                             j.Add("width", (int)sensor.GetType().GetField("Width").GetValue(sensor));
                             j.Add("height", (int)sensor.GetType().GetField("Height").GetValue(sensor));

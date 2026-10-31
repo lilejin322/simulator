@@ -382,18 +382,9 @@ namespace Simulator.Analysis
                 return;
             }
 
-            File.WriteAllText(Path.Combine(SimulationPath, "SimulationConfiguration.json"), Results.ToString(Formatting.Indented));
-
-            if (!string.IsNullOrEmpty(SimConfig.TestReportId))
-            {
-                Console.WriteLine("[ANMGR] Sending test report data id:{0}", SimConfig.TestReportId);
-                ConnectionManager.API.SendAnalysis<JArray>(SimConfig.TestReportId, Results);
-            }
-            else
-            {
-                Console.WriteLine("[ANMGR] Skip sending report: TestReportId is null");
-                Debug.LogWarning("AnalysisSend faild due to null TestReportId");
-            }
+            var reportPath = Path.Combine(SimulationPath, "SimulationConfiguration.json");
+            File.WriteAllText(reportPath, Results.ToString(Formatting.Indented));
+            Console.WriteLine("[ANMGR] Test report saved to {0}", reportPath);
         }
 
         public void AddEvent(Hashtable data)

@@ -75,7 +75,7 @@ namespace Simulator.Api.Commands
                     var agents = SimulatorManager.Instance.AgentManager;
                     GameObject agentGO = null;
 
-                    VehicleDetailData vehicleData = await ConnectionManager.API.GetByIdOrName<VehicleDetailData>(name);
+                    VehicleDetailData vehicleData = await LocalAssetLibrary.GetByIdOrName<VehicleDetailData>(name);
                     var config = new AgentConfig(vehicleData.ToVehicleData());
                     config.Position = position;
                     config.Rotation = Quaternion.Euler(rotation);

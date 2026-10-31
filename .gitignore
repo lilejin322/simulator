@@ -30,6 +30,9 @@
 
 # Project specific
 /AssetBundles/
+/LocalAssets/
+/.build-tools/
+/build/
 /Assets/External/Environments/
 /Assets/External/Vehicles/
 /Assets/External/Sensors/

@@ -31,14 +31,14 @@ namespace Simulator.Web
         public static string ApiHost = "localhost";
         public static int ApiPort = 8181;
 
-        public static string CloudUrl = "https://wise.svlsimulator.com";
-        public static string CloudProxy;
+        // Folder with the local asset library (maps, vehicles, plugins and their metadata), see LocalAssetLibrary
+        public static string AssetsPath;
+        // Start an API Only simulation as soon as the simulator is ready, so Python API clients can connect
+        public static bool StartApiOnly = true;
         public static string SessionGUID;
         public static string SimID;
 
         public static bool Headless = false;
-
-        public static bool RetryForever = false;
 
         public static string Root;
         public static string PersistentDataPath;
@@ -93,7 +93,8 @@ namespace Simulator.Web
         {
             Root = Path.Combine(Application.dataPath, "..");
             PersistentDataPath = Application.persistentDataPath;
-            PersistentDataPath += "-" + CloudAPI.GetInfo().version;
+            PersistentDataPath += "-" + SimulatorVersion;
+            AssetsPath = Path.GetFullPath(Path.Combine(Root, "LocalAssets"));
 
             AssetService = new AssetService();
 
@@ -110,6 +111,12 @@ namespace Simulator.Web
                 CreateLockFile();
             }
 
+            if (!Directory.Exists(AssetsPath))
+            {
+                Debug.LogError($"Local asset library not found: {AssetsPath}. Set assets_path in config.yml, pass --assets <path> " +
+                               "or set SIMULATOR_ASSETS. The Python API does not start without an asset library.");
+            }
+
             AssetBundle.UnloadAllAssetBundles(false);
             Sensors = new List<SensorConfig>();
             SensorPrefabs = new List<SensorBase>();
@@ -120,6 +127,7 @@ namespace Simulator.Web
             Sensors = SensorTypes.ListSensorFields(SensorPrefabs);
 
             DatabaseManager.Init();
+            DownloadManager.PruneCache();
 
             ClientSettingsService csservice = new ClientSettingsService();
             if (string.IsNullOrEmpty(SimID))
@@ -131,11 +139,26 @@ namespace Simulator.Web
             AssetBundle.UnloadAllAssetBundles(false);
         }
 
-        public static void RegenerateSimID()
+        public static string SimulatorVersion
         {
-            SimID = Guid.NewGuid().ToString();
-            ClientSettingsService csservice = new ClientSettingsService();
-            csservice.SetSimID(SimID);
+            get
+            {
+                var buildVersion = Application.version;
+#if UNITY_EDITOR
+                var devSettings = (Simulator.Editor.DevelopmentSettingsAsset)AssetDatabase.LoadAssetAtPath("Assets/Resources/Editor/DeveloperSettings.asset", typeof(Simulator.Editor.DevelopmentSettingsAsset));
+                if (devSettings != null && !string.IsNullOrWhiteSpace(devSettings.VersionOverride))
+                {
+                    buildVersion = devSettings.VersionOverride;
+                }
+#endif
+                var buildInfo = Resources.Load<BuildInfo>("BuildInfo");
+                if (buildInfo != null && !string.IsNullOrWhiteSpace(buildInfo.Version))
+                {
+                    buildVersion = buildInfo.Version;
+                }
+
+                return buildVersion;
+            }
         }
 
         public delegate void AssetLoadFunc(Manifest manifest, VfsEntry dir);
@@ -258,17 +281,75 @@ namespace Simulator.Web
         public static void LoadExternalAssets()
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var dir = Path.Combine(Application.dataPath, "..", "AssetBundles");
-            Debug.Log("Pre-loading Assetbundles from root path " + dir);
-            var vfs = VfsEntry.makeRoot(dir);
+
+            // NPCs, pedestrians and controllables are loaded at startup from the local asset library (npcs/, pedestrians/,
+            // controllables/), then from AssetBundles next to the simulator where LG releases and Simulator/Build... put them.
+            // An asset found in both places is loaded once, from the library.
+            LoadStartupAssets(AssetsPath, LibraryFolder);
+            LoadStartupAssets(Path.Combine(Application.dataPath, "..", "AssetBundles"), BundleConfig.pluralOf);
+
+            Debug.Log($"Loaded NPCs behaviours: {NPCBehaviours.Count}  NPC models: {NPCVehicles.Count}  Pedestrians: {Pedestrians.Count} Controllables: {Controllables.Count} Bridges: {BridgePlugins.All.Count } Sensors: {Sensors.Count} in {sw.Elapsed}");
+        }
+
+        // npcs, pedestrians, ... in the local asset library
+        private static string LibraryFolder(BundleConfig.BundleTypes type) => BundleConfig.pluralOf(type).ToLowerInvariant();
+
+        /// <summary>
+        /// Uses another local asset library for this run; config.yml is not changed. Maps, vehicles and plugins come from
+        /// it right away. Its NPCs, pedestrians and controllables are added to the ones loaded at startup, which stay
+        /// loaded until the simulator restarts.
+        /// </summary>
+        /// <param name="path">absolute, or relative to the simulator folder like assets_path</param>
+        /// <returns>null when switched, otherwise why not</returns>
+        public static string SetAssetsPath(string path)
+        {
+            var fullPath = Path.GetFullPath(Path.Combine(Root, path.Trim()));
+            if (!Directory.Exists(fullPath))
+            {
+                return $"{fullPath} does not exist";
+            }
+            if (!new[] { "maps", "vehicles", "plugins", "metadata" }.Any(folder => Directory.Exists(Path.Combine(fullPath, folder))))
+            {
+                return $"{fullPath} has no maps, vehicles, plugins or metadata folder";
+            }
+
+            AssetsPath = fullPath;
+            LocalAssetLibrary.Reload();
+            DownloadManager.PruneCache();
+            LoadStartupAssets(AssetsPath, LibraryFolder);
+            return null;
+        }
+
+        private static void LoadStartupAssets(string root, Func<BundleConfig.BundleTypes, string> folderOf)
+        {
+            if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+            {
+                return;
+            }
+
+            Debug.Log("Pre-loading Assetbundles from root path " + root);
+            var vfs = VfsEntry.makeRoot(root);
 
             // descend into each known dir looking for only specific asset types. todo: add asset type to manifest?
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.Controllable)), LoadControllablePlugin);
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.Bridge)), LoadBridgePlugin); // NOTE: bridges must be loaded before sensor plugins
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.Sensor)), LoadSensorPlugin);
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.NPC)), LoadNPCAsset);
-            CheckDir(vfs.GetChild(BundleConfig.pluralOf(BundleConfig.BundleTypes.Pedestrian)), LoadPedestrianAsset);
-            Debug.Log($"Loaded NPCs behaviours: {NPCBehaviours.Count}  NPC models: {NPCVehicles.Count}  Pedestrians: {Pedestrians.Count} Controllables: {Controllables.Count} Bridges: {BridgePlugins.All.Count } Sensors: {Sensors.Count} in {sw.Elapsed}");
+            CheckDir(vfs.GetChild(folderOf(BundleConfig.BundleTypes.Controllable)), LoadOnce(LoadControllablePlugin));
+            CheckDir(vfs.GetChild(folderOf(BundleConfig.BundleTypes.Bridge)), LoadOnce(LoadBridgePlugin)); // NOTE: bridges must be loaded before sensor plugins
+            CheckDir(vfs.GetChild(folderOf(BundleConfig.BundleTypes.Sensor)), LoadOnce(LoadSensorPlugin));
+            CheckDir(vfs.GetChild(folderOf(BundleConfig.BundleTypes.NPC)), LoadOnce(LoadNPCAsset));
+            CheckDir(vfs.GetChild(folderOf(BundleConfig.BundleTypes.Pedestrian)), LoadOnce(LoadPedestrianAsset));
+        }
+
+        private static AssetLoadFunc LoadOnce(AssetLoadFunc load)
+        {
+            return (manifest, dir) =>
+            {
+                if (LoadedAssets.Any(loaded => loaded.assetGuid == manifest.assetGuid ||
+                                               (loaded.assetType == manifest.assetType && loaded.assetName == manifest.assetName)))
+                {
+                    Debug.Log($"Skipping {manifest.assetType} {manifest.assetName} at {dir.Path}, already loaded");
+                    return;
+                }
+                load(manifest, dir);
+            };
         }
 
         private static Assembly LoadAssembly(VfsEntry dir, string name)
@@ -746,8 +827,8 @@ namespace Simulator.Web
             public bool read_only { get; set; } = false;
             public string api_hostname { get; set; } = Config.ApiHost;
             public int api_port { get; set; } = Config.ApiPort;
-            public string cloud_url { get; set; } = Config.CloudUrl;
-            public string cloud_proxy { get; set; } = Config.CloudProxy;
+            public string assets_path { get; set; } = Config.AssetsPath;
+            public bool start_api_only { get; set; } = Config.StartApiOnly;
             public string data_path { get; set; } = Config.PersistentDataPath;
         }
 
@@ -757,7 +838,8 @@ namespace Simulator.Web
             {
                 try
                 {
-                    return new Deserializer().Deserialize<YamlConfig>(fs);
+                    // config files written for WISE still contain cloud_url and cloud_proxy
+                    return new DeserializerBuilder().IgnoreUnmatchedProperties().Build().Deserialize<YamlConfig>(fs);
                 }
                 catch (Exception ex)
                 {
@@ -775,8 +857,8 @@ namespace Simulator.Web
                 api_hostname = ApiHost,
                 api_port = ApiPort,
                 data_path = PersistentDataPath,
-                cloud_url = CloudUrl,
-                cloud_proxy = CloudProxy,
+                assets_path = AssetsPath,
+                start_api_only = StartApiOnly,
                 headless = Headless
             };
         }
@@ -784,38 +866,29 @@ namespace Simulator.Web
         public static void ParseConfigFile()
         {
             var configFile = Path.Combine(Root, "config.yml");
-            if (!File.Exists(configFile))
+            var config = File.Exists(configFile) ? LoadConfigFile(configFile) : null;
+            if (config != null)
             {
-                return;
+                ApiHost = config.api_hostname ?? "localhost";
+                ApiPort = config.api_port;
+
+                PersistentDataPath = config.data_path;
+
+                if (!string.IsNullOrEmpty(config.assets_path))
+                {
+                    // relative paths are relative to the simulator folder
+                    AssetsPath = Path.GetFullPath(Path.Combine(Root, config.assets_path));
+                }
+
+                StartApiOnly = config.start_api_only;
+                Headless = config.headless;
             }
 
-            var config = LoadConfigFile(configFile);
-            if (config == null)
+            string assetsPath = Environment.GetEnvironmentVariable("SIMULATOR_ASSETS");
+            if (!string.IsNullOrEmpty(assetsPath))
             {
-                return;
+                AssetsPath = Path.GetFullPath(assetsPath);
             }
-
-            ApiHost = config.api_hostname ?? "localhost";
-            ApiPort = config.api_port;
-
-            PersistentDataPath = config.data_path;
-
-            CloudUrl = config.cloud_url.TrimEnd('/');
-            string cloudUrl = Environment.GetEnvironmentVariable("SIMULATOR_CLOUDURL");
-            if (!string.IsNullOrEmpty(cloudUrl))
-            {
-                CloudUrl = cloudUrl;
-            }
-
-            CloudProxy = config.cloud_proxy;
-            string cloudProxy = Environment.GetEnvironmentVariable("http_proxy") ??
-                                Environment.GetEnvironmentVariable("HTTP_PROXY");
-            if (!string.IsNullOrEmpty(cloudProxy))
-            {
-                CloudProxy = cloudProxy;
-            }
-
-            Headless = config.headless;
         }
 
         private static void ParseCommandLine()
@@ -833,13 +906,16 @@ namespace Simulator.Web
                         }
                         SimID = args[++i];
                         break;
-                    case "--cloudurl":
+                    case "--assets":
                         if (i == args.Length - 1)
                         {
-                            Debug.LogError("No value for cloud url provided!");
+                            Debug.LogError("No value for assets path provided!");
                             Application.Quit(1);
                         }
-                        CloudUrl = args[++i];
+                        AssetsPath = Path.GetFullPath(args[++i]);
+                        break;
+                    case "--no-api-only":
+                        StartApiOnly = false;
                         break;
                     case "--apihost":
                         if (i == args.Length - 1)
@@ -871,9 +947,6 @@ namespace Simulator.Web
                         }
 
                         PersistentDataPath = Path.GetFullPath(args[++i]);
-                        break;
-                    case "--retryForever":
-                        RetryForever = true;
                         break;
                     default:
                         // skip unknown arguments to allow to pass default Unity Player args
