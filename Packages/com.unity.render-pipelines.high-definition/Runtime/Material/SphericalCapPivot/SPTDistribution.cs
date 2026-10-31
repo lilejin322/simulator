@@ -1,19 +1,14 @@
+using UnityEngine.Experimental.Rendering;
+
 namespace UnityEngine.Rendering.HighDefinition
 {
     partial class SPTDistribution
     {
+        static readonly int _PivotData = Shader.PropertyToID(nameof(_PivotData));
+
         static SPTDistribution s_Instance;
 
-        public static SPTDistribution instance
-        {
-            get
-            {
-                if (s_Instance == null)
-                    s_Instance = new SPTDistribution();
-
-                return s_Instance;
-            }
-        }
+        public static SPTDistribution instance => s_Instance ??= new SPTDistribution();
 
         int m_refCounting;
 
@@ -47,12 +42,12 @@ namespace UnityEngine.Rendering.HighDefinition
 
             if (m_refCounting == 0)
             {
-                m_PivotData = new Texture2D(k_PivotLUTResolution, k_PivotLUTResolution, TextureFormat.RGHalf, false /*mipmap*/, true /* linear */)
+                m_PivotData = new Texture2D(k_PivotLUTResolution, k_PivotLUTResolution, GraphicsFormat.R16G16_SFloat, TextureCreationFlags.None)
                 {
                     hideFlags = HideFlags.HideAndDontSave,
                     wrapMode = TextureWrapMode.Clamp,
                     filterMode = FilterMode.Bilinear,
-                    name = CoreUtils.GetTextureAutoName(k_PivotLUTResolution, k_PivotLUTResolution, TextureFormat.RGHalf, depth: 0, dim: TextureDimension.Tex2D, name: "PIVOT_LUT")
+                    name = CoreUtils.GetTextureAutoName(k_PivotLUTResolution, k_PivotLUTResolution, GraphicsFormat.R16G16_SFloat, depth: 0, dim: TextureDimension.Tex2D, name: "PIVOT_LUT")
                 };
 
                 LoadLUT(m_PivotData, s_PivotLUTData);
@@ -77,7 +72,24 @@ namespace UnityEngine.Rendering.HighDefinition
 
         public void Bind(CommandBuffer cmd)
         {
-            cmd.SetGlobalTexture("_PivotData", m_PivotData);
+            cmd.SetGlobalTexture(_PivotData, m_PivotData);
         }
+
+        void Clear()
+        {
+            m_refCounting = 0;
+
+            CoreUtils.Destroy(m_PivotData);
+            m_PivotData = null;
+        }
+
+#if UNITY_EDITOR
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStaticsOnLoad()
+        {
+            s_Instance?.Clear();
+            s_Instance = null;
+        }
+#endif
     }
 }

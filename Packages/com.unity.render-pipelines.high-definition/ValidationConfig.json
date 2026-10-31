@@ -1,6 +1,13 @@
 {
 	"FileContentKeywordValidation":
 	{
+		"IgnoreFilenames":
+		[
+			"Editor/HlslDerivatives/HlslTree.cs",
+			"Editor/HlslDerivatives/HlslGenerator.cs",
+			"Editor/HlslDerivatives/HlslParser.cs"
+		]	
+			
 		"Keywords":
 		[
 			{
@@ -26,6 +33,17 @@
 				]
 			},
 			{
+				"Targets": "+PS5",
+				"Files":
+				[
+					"Editor/Material/ShaderGraph/HDTarget.cs"
+				],
+				"Patterns":
+				[
+					"Pragma\\.OnlyRenderers.*Platform\\.PS5"
+				]
+			},
+			{
 				"Targets": "+XboxOne",
 				"Files":
 				[
@@ -35,7 +53,7 @@
 				[
 					"com\\.unity\\.render-pipelines\\.xboxone"
 				]
-			}
+			}		
 		]
 	}
 }

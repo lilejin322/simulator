@@ -1,4 +1,4 @@
-﻿#define HAVE_MESH_MODIFICATION
+#define HAVE_MESH_MODIFICATION
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/FragInputs.hlsl"
@@ -17,8 +17,8 @@
 #endif
 
 #if defined(_ALPHATEST_ON)
-	#define ATTRIBUTES_NEED_TEXCOORD0
-	#define VARYINGS_NEED_TEXCOORD0
+    #define ATTRIBUTES_NEED_TEXCOORD0
+    #define VARYINGS_NEED_TEXCOORD0
 #endif
 
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
@@ -26,6 +26,10 @@
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Debug/DebugDisplay.hlsl"
 #endif
 #ifdef SCENESELECTIONPASS
+    #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/PickingSpaceTransforms.hlsl"
+#elif SHADERPASS == SHADERPASS_LIGHT_TRANSPORT
+    // Use Unity's built-in matrices for meta pass rendering
+    #define SCENEPICKINGPASS
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/PickingSpaceTransforms.hlsl"
 #endif
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
@@ -43,16 +47,27 @@
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoop.hlsl"
 #else
-    #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
+    #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
 #endif
 
-#if SHADERPASS != SHADERPASS_DEPTH_ONLY || defined(WRITE_NORMAL_BUFFER)
+#if defined(WRITE_DECAL_BUFFER) || (defined(WRITE_RENDERING_LAYER) && !defined(_DISABLE_DECALS))
+#define OUTPUT_DECAL_BUFER
+#endif
+
+#if SHADERPASS != SHADERPASS_DEPTH_ONLY || defined(WRITE_NORMAL_BUFFER) || defined(OUTPUT_DECAL_BUFER)
     #define ATTRIBUTES_NEED_NORMAL
     #define ATTRIBUTES_NEED_TEXCOORD0
     #define ATTRIBUTES_NEED_TANGENT // will be filled by ApplyMeshModification()
     #if SHADERPASS == SHADERPASS_LIGHT_TRANSPORT
         #define ATTRIBUTES_NEED_TEXCOORD1
         #define ATTRIBUTES_NEED_TEXCOORD2
+        #ifdef EDITOR_VISUALIZATION
+        #define ATTRIBUTES_NEED_TEXCOORD3
+        #define VARYINGS_NEED_TEXCOORD0
+        #define VARYINGS_NEED_TEXCOORD1
+        #define VARYINGS_NEED_TEXCOORD2
+        #define VARYINGS_NEED_TEXCOORD3
+        #endif
     #endif
     // Varying - Use for pixel shader
     // This second set of define allow to say which varyings will be output in the vertex (no more tesselation)
@@ -82,5 +97,5 @@
 #elif SHADERPASS == SHADERPASS_SHADOWS || SHADERPASS == SHADERPASS_DEPTH_ONLY
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDepthOnly.hlsl"
 #elif SHADERPASS == SHADERPASS_FORWARD
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForward.hlsl"
+#include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForward.hlsl"
 #endif

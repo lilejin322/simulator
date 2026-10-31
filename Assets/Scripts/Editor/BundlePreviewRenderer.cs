@@ -199,109 +199,6 @@ namespace Simulator.Editor
             Object.DestroyImmediate(vehicle);
         }
 
-        private static bool SkyDone(Volume volume, HDCamera hd)
-        {
-            var pbrSky = volume.profile.components.FirstOrDefault(x => x is PhysicallyBasedSky) as PhysicallyBasedSky;
-
-            if (pbrSky == null)
-            {
-                var hdriSky = volume.profile.components.FirstOrDefault(x => x is HDRISky) as HDRISky;
-                if (hdriSky != null)
-                    return true;
-            }
-
-            var skyUpdateContext = hd.GetType().GetProperty("visualSky", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(hd);
-            var skyRenderer = skyUpdateContext?.GetType().GetProperty("skyRenderer", BindingFlags.Public | BindingFlags.Instance)?.GetValue(skyUpdateContext);
-            var precomputedData = skyRenderer?.GetType().GetField("m_PrecomputedData", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(skyRenderer);
-            var currentBounces = precomputedData?.GetType().GetField("m_LastPrecomputedBounce", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(precomputedData);
-            if (currentBounces == null)
-                return false;
-
-            var baseFrameField = skyRenderer.GetType().BaseType?.GetField("m_LastFrameUpdate", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (baseFrameField != null)
-            {
-                var prev = (int) baseFrameField.GetValue(skyRenderer);
-                baseFrameField.SetValue(skyRenderer, prev - 1);
-            }
-
-            var frameField = precomputedData.GetType().GetField("m_LastFrameComputation", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (frameField != null)
-            {
-                var prev = (int) frameField.GetValue(precomputedData);
-                frameField.SetValue(precomputedData, prev - 1);
-            }
-
-            var targetBounces = pbrSky == null ? 8 : pbrSky.numberOfBounces.value;
-            var bouncesVal = currentBounces is int bounces ? bounces : 0;
-            return bouncesVal >= targetBounces;
-        }
-
-        private static void LogSkyData(Volume volume, HDCamera hd)
-        {
-            PhysicallyBasedSky sky = null;
-
-            foreach (var component in volume.profile.components)
-            {
-                if (component is PhysicallyBasedSky bps)
-                {
-                    sky = bps;
-                    break;
-                }
-            }
-
-            if (sky == null)
-            {
-                Debug.LogError("No sky component available.");
-                return;
-            }
-
-            var skyUpdateContext = hd.GetType().GetProperty("visualSky", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(hd);
-            if (skyUpdateContext == null)
-            {
-                Debug.LogError("No sky context available.");
-                return;
-            }
-
-            var skyRenderer = skyUpdateContext.GetType().GetProperty("skyRenderer", BindingFlags.Public | BindingFlags.Instance)?.GetValue(skyUpdateContext);
-            if (skyRenderer == null)
-            {
-                Debug.LogError("No sky renderer available.");
-                return;
-            }
-
-            var baseFrameField = skyRenderer.GetType().BaseType?.GetField("m_LastFrameUpdate", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (baseFrameField == null)
-            {
-                Debug.LogError("No frame count field available in sky renderer base class.");
-                return;
-            }
-
-            var precomputedData = skyRenderer.GetType().GetField("m_PrecomputedData", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(skyRenderer);
-            if (precomputedData == null)
-            {
-                Debug.LogError("No precomputed data field available in sky renderer.");
-                return;
-            }
-
-            var frameField = precomputedData.GetType().GetField("m_LastFrameComputation", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (frameField == null)
-            {
-                Debug.LogError("No frame count field available in precomputed data.");
-                return;
-            }
-
-            var currentBounces = precomputedData.GetType().GetField("m_LastPrecomputedBounce", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(precomputedData);
-            if (currentBounces == null)
-            {
-                Debug.LogError("No bounce data available in precomputed data.");
-                return;
-            }
-
-            var targetBounces = sky.numberOfBounces.value;
-            var bouncesVal = currentBounces is int bounces ? bounces : 0;
-            Debug.LogError($"Current bounces: {bouncesVal} expected: {targetBounces}");
-        }
-
         private static void Render(HDCamera hd, PreviewTextures textures, Volume volume)
         {
             var camera = hd.camera;
@@ -312,21 +209,14 @@ namespace Simulator.Editor
             var largeRt = RenderTexture.GetTemporary(largeRes.x, largeRes.y, 24);
             camera.targetTexture = largeRt;
 
-            // Physically based sky renderer builds up bounces over multiple frames, modifying indirect light
-            // Render some frames in advance here so that all lighting is fully calculated for previews
-            const int maxCalls = 20;
-            var calls = 0;
+            // Physically based sky computes its tables in a single frame since HDRP 14 (no more bounces); render a few
+            // frames in advance anyway so that the ambient probe and exposure settle before previews are taken
+            const int warmupFrames = 3;
 
-            do
+            for (var i = 0; i < warmupFrames; ++i)
             {
                 camera.Render();
                 largeRt.IncrementUpdateCount();
-            } while (calls++ < maxCalls && !SkyDone(volume, hd));
-
-            if (!SkyDone(volume, hd))
-            {
-                LogSkyData(volume, hd);
-                Debug.LogError($"Preview rendering failed - sky not initialized");
             }
 
             camera.Render();
@@ -364,7 +254,7 @@ namespace Simulator.Editor
             var openScenePaths = new List<string>();
             var activeScenePath = SceneManager.GetActiveScene().path;
 
-            for (var i = 0; i < EditorSceneManager.loadedSceneCount; ++i)
+            for (var i = 0; i < SceneManager.loadedSceneCount; ++i)
                 openScenePaths.Add(SceneManager.GetSceneAt(i).path);
 
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);

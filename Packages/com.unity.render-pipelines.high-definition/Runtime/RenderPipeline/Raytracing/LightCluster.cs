@@ -5,21 +5,16 @@ namespace UnityEngine.Rendering.HighDefinition
     /// <summary>
     /// A volume component that holds settings for the ray tracing light cluster.
     /// </summary>
-    [Serializable, VolumeComponentMenu("Ray Tracing/Light Cluster (Preview)")]
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Ray-Tracing-Light-Cluster" + Documentation.endURL)]
+    [Serializable, VolumeComponentMenu("Ray Tracing/Light Cluster")]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
+    [HDRPHelpURL("Ray-Tracing-Light-Cluster")]
+    [DisplayInfo(name = "Light Cluster")]
     public sealed class LightCluster : VolumeComponent
     {
         /// <summary>
-        /// Controls the range of the cluster around the camera.
+        /// Controls the range of the cluster around the camera in meters.
         /// </summary>
-        [Tooltip("Controls the range of the cluster around the camera. High value have performance impacts.")]
-        public ClampedFloatParameter cameraClusterRange = new ClampedFloatParameter(10f, 0.001f, 500f);
-        /// <summary>
-        /// Default constructor for the light cluster volume component.
-        /// </summary>
-        public LightCluster()
-        {
-            displayName = "Light Cluster (Preview)";
-        }
+        [Tooltip("Controls the range of the cluster around the camera in meters.")]
+        public MinFloatParameter cameraClusterRange = new MinFloatParameter(10.0f, 0.001f);
     }
 }

@@ -29,14 +29,14 @@ public class SDFDocument
     private static readonly Regex uriRegExp = new Regex(@"(\w+)://(.+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public List<(GameObject, SDFModel)> Models = new List<(GameObject, SDFModel)>();
-    public PhysicMaterial DefaultPhysicMaterial { get; } = new PhysicMaterial()
+    public PhysicsMaterial DefaultPhysicMaterial { get; } = new PhysicsMaterial()
     {
         name = "Stone",
         dynamicFriction = 0.6f,
         staticFriction = 0.6f,
         bounciness = 0.0f,
-        frictionCombine = PhysicMaterialCombine.Average,
-        bounceCombine = PhysicMaterialCombine.Average,
+        frictionCombine = PhysicsMaterialCombine.Average,
+        bounceCombine = PhysicsMaterialCombine.Average,
     };
 
     public SDFDocument(string fileName, string modelPath)
@@ -138,7 +138,7 @@ public class SDFDocument
         {
             ext = "material";
         }
-        else if (asset.GetType() == typeof(PhysicMaterial))
+        else if (asset.GetType() == typeof(PhysicsMaterial))
         {
             ext = "physicMaterial";
         }

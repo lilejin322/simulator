@@ -8,12 +8,13 @@ namespace UnityEngine.Rendering.HighDefinition
     /// Fog Volume Component.
     /// </summary>
     [Serializable, VolumeComponentMenu("Fog")]
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Override-Fog" + Documentation.endURL)]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
+    [HDRPHelpURL("fog")]
     public class Fog : VolumeComponentWithQuality
     {
         /// <summary>Enable fog.</summary>
         [Tooltip("Enables the fog.")]
-        public BoolParameter enabled = new BoolParameter(false);
+        public BoolParameter enabled = new BoolParameter(false, BoolParameter.DisplayType.EnumPopup);
 
         /// <summary>Fog color mode.</summary>
         public FogColorParameter colorMode = new FogColorParameter(FogColorMode.SkyColor);
@@ -27,12 +28,15 @@ namespace UnityEngine.Rendering.HighDefinition
         [Tooltip("Sets the maximum fog distance HDRP uses when it shades the skybox or the Far Clipping Plane of the Camera.")]
         public MinFloatParameter maxFogDistance = new MinFloatParameter(5000.0f, 0.0f);
         /// <summary>Controls the maximum mip map HDRP uses for mip fog (0 is the lowest mip and 1 is the highest mip).</summary>
+        [AdditionalProperty]
         [Tooltip("Controls the maximum mip map HDRP uses for mip fog (0 is the lowest mip and 1 is the highest mip).")]
         public ClampedFloatParameter mipFogMaxMip = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
         /// <summary>Sets the distance at which HDRP uses the minimum mip image of the blurred sky texture as the fog color.</summary>
+        [AdditionalProperty]
         [Tooltip("Sets the distance at which HDRP uses the minimum mip image of the blurred sky texture as the fog color.")]
         public MinFloatParameter mipFogNear = new MinFloatParameter(0.0f, 0.0f);
         /// <summary>Sets the distance at which HDRP uses the maximum mip image of the blurred sky texture as the fog color.</summary>
+        [AdditionalProperty]
         [Tooltip("Sets the distance at which HDRP uses the maximum mip image of the blurred sky texture as the fog color.")]
         public MinFloatParameter mipFogFar = new MinFloatParameter(1000.0f, 0.0f);
 
@@ -52,8 +56,8 @@ namespace UnityEngine.Rendering.HighDefinition
         // Common Fog Parameters (Exponential/Volumetric)
         /// <summary>Stores the fog albedo. This defines the color of the fog.</summary>
         public ColorParameter albedo = new ColorParameter(Color.white);
-        /// <summary>Multiplier for ambient probe contribution.</summary>
-        [DisplayInfo(name = "Ambient Light Probe Dimmer")]
+        /// <summary>Multiplier for global illumination (APV or ambient probe).</summary>
+        [DisplayInfo(name = "GI Dimmer")]
         public ClampedFloatParameter globalLightProbeDimmer = new ClampedFloatParameter(1.0f, 0.0f, 1.0f);
         /// <summary>Sets the distance (in meters) from the Camera's Near Clipping Plane to the back of the Camera's volumetric lighting buffer. The lower the distance is, the higher the fog quality is.</summary>
         public MinFloatParameter depthExtent = new MinFloatParameter(64.0f, 0.1f);
@@ -62,12 +66,20 @@ namespace UnityEngine.Rendering.HighDefinition
         [Tooltip("Specifies the denoising technique to use for the volumetric effect.")]
         public FogDenoisingModeParameter denoisingMode = new FogDenoisingModeParameter(FogDenoisingMode.Gaussian);
 
-        // Advanced parameters
         /// <summary>Controls the angular distribution of scattered light. 0 is isotropic, 1 is forward scattering, and -1 is backward scattering.</summary>
+        [AdditionalProperty]
+        [Tooltip("Controls the angular distribution of scattered light. 0 is isotropic, 1 is forward scattering, and -1 is backward scattering.")]
         public ClampedFloatParameter anisotropy = new ClampedFloatParameter(0.0f, -1.0f, 1.0f);
+
         /// <summary>Controls the distribution of slices along the Camera's focal axis. 0 is exponential distribution and 1 is linear distribution.</summary>
+        [AdditionalProperty]
         [Tooltip("Controls the distribution of slices along the Camera's focal axis. 0 is exponential distribution and 1 is linear distribution.")]
         public ClampedFloatParameter sliceDistributionUniformity = new ClampedFloatParameter(0.75f, 0, 1);
+
+        /// <summary>Controls how much the multiple-scattering will affect the scene. Directly controls the amount of blur depending on the fog density.</summary>
+        [AdditionalProperty]
+        [Tooltip("Use this value to simulate multiple scattering when combining the fog with the scene color.")]
+        public ClampedFloatParameter multipleScatteringIntensity = new ClampedFloatParameter(0.0f, 0.0f, 2.0f);
 
         // Limit parameters for the fog quality
         internal const float minFogScreenResolutionPercentage = (1.0f / 16.0f) * 100;
@@ -88,17 +100,20 @@ namespace UnityEngine.Rendering.HighDefinition
             }
             set { m_FogControlMode.value = value; }
         }
+        [AdditionalProperty]
         [SerializeField, FormerlySerializedAs("fogControlMode")]
         [Tooltip("Specifies which method to use to control the performance and quality of the volumetric fog.")]
         private FogControlParameter m_FogControlMode = new FogControlParameter(FogControl.Balance);
 
         /// <summary>Stores the resolution of the volumetric buffer (3D texture) along the x-axis and y-axis relative to the resolution of the screen.</summary>
+        [AdditionalProperty]
         [Tooltip("Controls the resolution of the volumetric buffer (3D texture) along the x-axis and y-axis relative to the resolution of the screen.")]
         public ClampedFloatParameter screenResolutionPercentage = new ClampedFloatParameter(optimalFogScreenResolutionPercentage, minFogScreenResolutionPercentage, maxFogScreenResolutionPercentage);
         /// <summary>Number of slices of the volumetric buffer (3D texture) along the camera's focal axis.</summary>
+        [AdditionalProperty]
         [Tooltip("Controls the number of slices to use the volumetric buffer (3D texture) along the camera's focal axis.")]
         public ClampedIntParameter volumeSliceCount = new ClampedIntParameter(64, 1, maxFogSliceCount);
-        
+
         /// <summary>Defines the performance to quality ratio of the volumetric fog. A value of 0 being the least resource-intensive and a value of 1 being the highest quality.</summary>
         /// <remarks>Try to minimize this value to find a compromise between quality and performance. </remarks>
         public float volumetricFogBudget
@@ -112,12 +127,17 @@ namespace UnityEngine.Rendering.HighDefinition
             }
             set { m_VolumetricFogBudget.value = value; }
         }
+
+        /// <summary>The override state for the fog component's volumetric fog budget.</summary>
+        public bool volumetricFogBudgetOverrideState => m_VolumetricFogBudget.overrideState;
+
+        [AdditionalProperty]
         [SerializeField, FormerlySerializedAs("volumetricFogBudget")]
         [Tooltip("Controls the performance to quality ratio of the volumetric fog. A value of 0 being the least resource-intensive and a value of 1 being the highest quality.")]
         private ClampedFloatParameter m_VolumetricFogBudget = new ClampedFloatParameter(0.25f, 0.0f, 1.0f);
 
         /// <summary>Controls how Unity shares resources between Screen (XY) and Depth (Z) resolutions.</summary>
-        /// <remarks>A value of 0 means Unity allocates all of the resources to the XY resolution, which reduces aliasing, but increases noise. A value of 1 means Unity allocates all of the resources to the Z resolution, which reduces noise, but increases aliasing. This property allows for linear interpolation between the two configurations.<remarks>
+        /// <remarks>A value of 0 means Unity allocates all of the resources to the XY resolution, which reduces aliasing, but increases noise. A value of 1 means Unity allocates all of the resources to the Z resolution, which reduces noise, but increases aliasing. This property allows for linear interpolation between the two configurations.</remarks>
         public float resolutionDepthRatio
         {
             get
@@ -129,17 +149,21 @@ namespace UnityEngine.Rendering.HighDefinition
             }
             set { m_ResolutionDepthRatio.value = value; }
         }
+
+        /// <summary>Controls how Unity shares resources between Screen (XY) and Depth (Z) resolutions.</summary>
+        [AdditionalProperty]
         [SerializeField, FormerlySerializedAs("resolutionDepthRatio")]
         [Tooltip("Controls how Unity shares resources between Screen (x-axis and y-axis) and Depth (z-axis) resolutions.")]
         public ClampedFloatParameter m_ResolutionDepthRatio = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
 
         /// <summary>Indicates whether Unity includes or excludes non-directional light types when it evaluates the volumetric fog. Including non-directional lights increases the resource intensity of the effect.</summary>
+        [AdditionalProperty]
         [Tooltip("When enabled, HDRP only includes directional Lights when it evaluates volumetric fog.")]
         public BoolParameter directionalLightsOnly = new BoolParameter(false);
 
-        /// <summary>Deprecated don't used</summary>
-        [Tooltip("Deprecated don't used")]
-        public BoolParameter filter = new BoolParameter(false); // DO not used, removed in 11.x
+        /// <summary>Indicates at which fog density the lighting should be ignored. Every voxel containing less fog density than this value will be ignored by the volumetric lighting.</summary>
+        [Tooltip("Improves performance by skipping the lighting evaluation in areas with low-density fog. When the value is above 0, HDRP skips calculating volumetric lighting in areas where the fog density is below this value.")]
+        public FloatParameter volumetricLightingDensityCutoff = new MinFloatParameter(0.0f, 0.0f);
 
         internal static bool IsFogEnabled(HDCamera hdCamera)
         {
@@ -153,16 +177,31 @@ namespace UnityEngine.Rendering.HighDefinition
             bool a = fog.enableVolumetricFog.value;
             bool b = hdCamera.frameSettings.IsEnabled(FrameSettingsField.Volumetrics);
             bool c = CoreUtils.IsSceneViewFogEnabled(hdCamera.camera);
+            bool d = fog.enabled.value;
 
-            return a && b && c;
+            return a && b && c && d;
+        }
+
+        internal static bool IsVolumetricReprojectionEnabled(HDCamera hdCamera)
+        {
+            var fog = hdCamera.volumeStack.GetComponent<Fog>();
+
+            return (fog.denoisingMode.value & FogDenoisingMode.Reprojection) != 0;
         }
 
         internal static bool IsPBRFogEnabled(HDCamera hdCamera)
         {
             var visualEnv = hdCamera.volumeStack.GetComponent<VisualEnvironment>();
-            // For now PBR fog (coming from the PBR sky) is disabled until we improve it
-            return false;
-            //return (visualEnv.skyType.value == (int)SkyType.PhysicallyBased) && hdCamera.frameSettings.IsEnabled(FrameSettingsField.AtmosphericScattering);
+            var pbrSky = hdCamera.volumeStack.GetComponent<PhysicallyBasedSky>();
+            var fs = hdCamera.frameSettings.IsEnabled(FrameSettingsField.AtmosphericScattering);
+            return (visualEnv.skyType.value == (int)SkyType.PhysicallyBased) && pbrSky.atmosphericScattering.value && fs;
+        }
+
+        internal static bool IsMultipleScatteringEnabled(HDCamera hdCamera, out float intensity)
+        {
+            var fog = hdCamera.volumeStack.GetComponent<Fog>();
+            intensity = fog.multipleScatteringIntensity.value;
+            return intensity > 0.0f;
         }
 
         static float ScaleHeightFromLayerDepth(float d)
@@ -189,6 +228,10 @@ namespace UnityEngine.Rendering.HighDefinition
             // TODO Handle user override
             var fogSettings = hdCamera.volumeStack.GetComponent<Fog>();
 
+            // Those values are also used when fog is disabled
+            cb._PBRFogEnabled = IsPBRFogEnabled(hdCamera) ? 1 : 0;
+            cb._MaxFogDistance = fogSettings.maxFogDistance.value;
+
             if (!hdCamera.frameSettings.IsEnabled(FrameSettingsField.AtmosphericScattering) || !fogSettings.enabled.value)
             {
                 UpdateShaderVariablesGlobalCBNeutralParameters(ref cb);
@@ -204,26 +247,29 @@ namespace UnityEngine.Rendering.HighDefinition
             bool enableVolumetrics = enableVolumetricFog.value && hdCamera.frameSettings.IsEnabled(FrameSettingsField.Volumetrics);
 
             cb._FogEnabled = 1;
-            cb._PBRFogEnabled = IsPBRFogEnabled(hdCamera) ? 1 : 0;
             cb._EnableVolumetricFog = enableVolumetrics ? 1 : 0;
-            cb._MaxFogDistance = maxFogDistance.value;
 
             Color fogColor = (colorMode.value == FogColorMode.ConstantColor) ? color.value : tint.value;
             cb._FogColorMode = (float)colorMode.value;
             cb._FogColor = new Color(fogColor.r, fogColor.g, fogColor.b, 0.0f);
-            cb._MipFogParameters  = new Vector4(mipFogNear.value, mipFogFar.value, mipFogMaxMip.value, 0.0f);
+            cb._MipFogParameters = new Vector4(mipFogNear.value, mipFogFar.value, mipFogMaxMip.value, 0.0f);
 
-            DensityVolumeArtistParameters param = new DensityVolumeArtistParameters(albedo.value, meanFreePath.value, anisotropy.value);
-            DensityVolumeEngineData data = param.ConvertToEngineData();
+            LocalVolumetricFogArtistParameters param = new LocalVolumetricFogArtistParameters(albedo.value, meanFreePath.value, anisotropy.value);
+            LocalVolumetricFogEngineData data = param.ConvertToEngineData();
 
-            cb._HeightFogBaseScattering = data.scattering;
-            cb._HeightFogBaseExtinction = data.extinction;
+            // When volumetric fog is disabled, we don't want its color to affect the heightfog. So we pass neutral values here.
+            var extinction = VolumeRenderingUtils.ExtinctionFromMeanFreePath(param.meanFreePath);
+            cb._HeightFogBaseScattering = enableVolumetrics ? data.scattering : Vector4.one * extinction;
+            cb._HeightFogBaseExtinction = extinction;
 
             float crBaseHeight = baseHeight.value;
-
             if (ShaderConfig.s_CameraRelativeRendering != 0)
             {
+                // === LGSVL: the fog base height is a world Y, as in HDRP 10, not an altitude above the planet surface.
+                // The simulator keeps the planet surface 100 m below the world origin for the sky, so the altitude
+                // would put the fog layer (base 0, 25 to 100 m high) entirely below the maps.
                 crBaseHeight -= hdCamera.camera.transform.position.y;
+                // ===
             }
 
             float layerDepth = Mathf.Max(0.01f, maximumHeight.value - baseHeight.value);
@@ -232,13 +278,13 @@ namespace UnityEngine.Rendering.HighDefinition
             cb._HeightFogBaseHeight = crBaseHeight;
             cb._GlobalFogAnisotropy = anisotropy.value;
             cb._VolumetricFilteringEnabled = ((int)denoisingMode.value & (int)FogDenoisingMode.Gaussian) != 0 ? 1 : 0;
+            cb._FogDirectionalOnly = directionalLightsOnly.value ? 1 : 0;
         }
     }
 
     /// <summary>
     /// Fog Color Mode.
     /// </summary>
-    [GenerateHLSL]
     public enum FogColorMode
     {
         /// <summary>Fog is a constant color.</summary>

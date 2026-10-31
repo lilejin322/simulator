@@ -180,7 +180,7 @@ public class NPCLaneFollowBehaviour : NPCBehaviourBase
         currentSpeed = 0f;
         currentStopTime = 0f;
         rb.angularVelocity = Vector3.zero;
-        rb.velocity = Vector3.zero;
+        rb.linearVelocity = Vector3.zero;
         isCurve = false;
         isLeftTurn = false;
         isRightTurn = false;
@@ -750,7 +750,7 @@ public class NPCLaneFollowBehaviour : NPCBehaviourBase
         float elapsedTime = 0f;
         while (elapsedTime < 5f)
         {
-            if (aC.AgentGameObject.GetComponent<Rigidbody>().velocity.magnitude > 0.01f)
+            if (aC.AgentGameObject.GetComponent<Rigidbody>().linearVelocity.magnitude > 0.01f)
             {
                 isWaitingToDodge = false;
                 yield break;

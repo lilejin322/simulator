@@ -14,7 +14,7 @@ namespace Simulator.FMU
     public class ExampleVehicleFMU : VehicleFMU, IVehicleDynamics
     {
         private Rigidbody RB;
-        public Vector3 Velocity => RB.velocity;
+        public Vector3 Velocity => RB.linearVelocity;
         public Vector3 AngularVelocity => RB.angularVelocity;
         public Transform BaseLink { get { return BaseLinkTransform; } }
         public Transform BaseLinkTransform;
@@ -43,7 +43,7 @@ namespace Simulator.FMU
             {
                 if (RB != null)
                 {
-                    return RB.velocity.magnitude;
+                    return RB.linearVelocity.magnitude;
                 }
                 return 0f;
             }
@@ -207,7 +207,8 @@ namespace Simulator.FMU
 
         private void OnDestroy()
         {
-            fmu.Dispose();
+            fmu?.Dispose();
+            fmu = null;
         }
 
         private void GetInput()

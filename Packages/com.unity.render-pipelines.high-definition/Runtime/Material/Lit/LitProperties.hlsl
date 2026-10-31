@@ -4,6 +4,8 @@
 // Otherwise those parameters are not bound correctly at runtime.
 // ===========================================================================
 
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DebugMipmapStreamingMacros.hlsl"
+
 TEXTURE2D(_EmissiveColorMap);
 SAMPLER(sampler_EmissiveColorMap);
 
@@ -19,6 +21,8 @@ TEXTURE2D(_MaskMap);
 SAMPLER(sampler_MaskMap);
 TEXTURE2D(_BentNormalMap); // Reuse sampler from normal map
 SAMPLER(sampler_BentNormalMap);
+TEXTURE2D(_BentNormalMapOS);
+SAMPLER(sampler_BentNormalMapOS);
 
 TEXTURE2D(_NormalMap);
 SAMPLER(sampler_NormalMap);
@@ -41,6 +45,8 @@ SAMPLER(sampler_AnisotropyMap);
 
 TEXTURE2D(_SubsurfaceMaskMap);
 SAMPLER(sampler_SubsurfaceMaskMap);
+TEXTURE2D(_TransmissionMaskMap);
+SAMPLER(sampler_TransmissionMaskMap);
 TEXTURE2D(_ThicknessMap);
 SAMPLER(sampler_ThicknessMap);
 
@@ -79,12 +85,14 @@ SAMPLER(sampler_CoatMaskMap);
 PROP_DECL_TEX2D(_BaseColorMap);
 PROP_DECL_TEX2D(_MaskMap);
 PROP_DECL_TEX2D(_BentNormalMap);
+PROP_DECL_TEX2D(_BentNormalMapOS);
 PROP_DECL_TEX2D(_NormalMap);
 PROP_DECL_TEX2D(_NormalMapOS);
 PROP_DECL_TEX2D(_DetailMap);
 PROP_DECL_TEX2D(_HeightMap);
 
 PROP_DECL_TEX2D(_SubsurfaceMaskMap);
+PROP_DECL_TEX2D(_TransmissionMaskMap);
 PROP_DECL_TEX2D(_ThicknessMap);
 
 TEXTURE2D(_LayerMaskMap);
@@ -129,15 +137,9 @@ float3 _EmissionColor;
 float4 _EmissiveColorMap_ST;
 float _TexWorldScaleEmissive;
 float4 _UVMappingMaskEmissive;
+float _ObjectSpaceUVMappingEmissive;
 
 float4 _InvPrimScale; // Only XY are used
-
-// Wind
-float _InitialBend;
-float _Stiffness;
-float _Drag;
-float _ShiverDrag;
-float _ShiverDirectionality;
 
 // Specular AA
 float _EnableGeometricSpecularAA;
@@ -153,7 +155,6 @@ float _RayTracing;
 float4 _BaseColor;
 float4 _BaseColorMap_ST;
 float4 _BaseColorMap_TexelSize;
-float4 _BaseColorMap_MipInfo;
 
 float _Metallic;
 float _MetallicRemapMin;
@@ -161,6 +162,8 @@ float _MetallicRemapMax;
 float _Smoothness;
 float _SmoothnessRemapMin;
 float _SmoothnessRemapMax;
+float _AlphaRemapMin;
+float _AlphaRemapMax;
 float _AORemapMin;
 float _AORemapMax;
 
@@ -180,6 +183,7 @@ float _Anisotropy;
 
 float _DiffusionProfileHash;
 float _SubsurfaceMask;
+float _TransmissionMask;
 float _Thickness;
 float4 _ThicknessRemap;
 
@@ -198,6 +202,7 @@ float _InvTilingScale;
 float4 _UVMappingMask;
 float4 _UVDetailsMappingMask;
 float _LinkDetailsWithBase;
+float _ObjectSpaceUVMapping;
 
 #else // LAYERED_LIT_SHADER
 
@@ -209,7 +214,6 @@ float4 _BaseColorMap2_ST;
 float4 _BaseColorMap3_ST;
 
 float4 _BaseColorMap0_TexelSize;
-float4 _BaseColorMap0_MipInfo;
 
 PROP_DECL(float, _Metallic);
 PROP_DECL(float, _MetallicRemapMin);
@@ -217,6 +221,8 @@ PROP_DECL(float, _MetallicRemapMax);
 PROP_DECL(float, _Smoothness);
 PROP_DECL(float, _SmoothnessRemapMin);
 PROP_DECL(float, _SmoothnessRemapMax);
+PROP_DECL(float, _AlphaRemapMin);
+PROP_DECL(float, _AlphaRemapMax);
 PROP_DECL(float, _AORemapMin);
 PROP_DECL(float, _AORemapMax);
 
@@ -242,6 +248,7 @@ PROP_DECL(float, _HeightCenter);
 
 PROP_DECL(float, _DiffusionProfileHash);
 PROP_DECL(float, _SubsurfaceMask);
+PROP_DECL(float, _TransmissionMask);
 PROP_DECL(float, _Thickness);
 PROP_DECL(float4, _ThicknessRemap);
 
@@ -278,14 +285,10 @@ float _TessellationFactorMaxDistance;
 float _TessellationFactorTriangleSize;
 float _TessellationShapeFactor;
 float _TessellationBackFaceCullEpsilon;
-float _TessellationObjectScale;
-float _TessellationTilingScale;
 #endif
 
-// Following three variables are feeded by the C++ Editor for Scene selection
-int _ObjectId;
-int _PassValue;
-float4 _SelectionID;
+// Mipmap Streaming Debug
+UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 
 // === LGSVL (Add segmentation color variable to CBuffer)
 float4 _SegmentationColor;
@@ -293,9 +296,15 @@ float4 _SegmentationColor;
 
 CBUFFER_END
 
+// Following three variables are feeded by the C++ Editor for Scene selection
+// It need to be outside the UnityPerMaterial buffer to have Material compatible with SRP Batcher
+int _ObjectId;
+int _PassValue;
+float4 _SelectionID;
+
 #if defined(UNITY_DOTS_INSTANCING_ENABLED)
 #if defined(LAYERED_LIT_SHADER)
-// TODO: Do we want to expose all of this?
+
 UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float4, _BaseColor0)
     UNITY_DOTS_INSTANCED_PROP(float4, _BaseColor1)
@@ -313,18 +322,8 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _MetallicRemapMax1)
     UNITY_DOTS_INSTANCED_PROP(float , _MetallicRemapMax2)
     UNITY_DOTS_INSTANCED_PROP(float , _MetallicRemapMax3)
-    UNITY_DOTS_INSTANCED_PROP(float3, _EmissiveColor0)
-    UNITY_DOTS_INSTANCED_PROP(float3, _EmissiveColor1)
-    UNITY_DOTS_INSTANCED_PROP(float3, _EmissiveColor2)
-    UNITY_DOTS_INSTANCED_PROP(float3, _EmissiveColor3)
-    UNITY_DOTS_INSTANCED_PROP(float4, _SpecularColor0)
-    UNITY_DOTS_INSTANCED_PROP(float4, _SpecularColor1)
-    UNITY_DOTS_INSTANCED_PROP(float4, _SpecularColor2)
-    UNITY_DOTS_INSTANCED_PROP(float4, _SpecularColor3)
-    UNITY_DOTS_INSTANCED_PROP(float , _AlphaCutoff0);
-    UNITY_DOTS_INSTANCED_PROP(float , _AlphaCutoff1);
-    UNITY_DOTS_INSTANCED_PROP(float , _AlphaCutoff2);
-    UNITY_DOTS_INSTANCED_PROP(float , _AlphaCutoff3);
+    UNITY_DOTS_INSTANCED_PROP(float3, _EmissiveColor)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaCutoff)
     UNITY_DOTS_INSTANCED_PROP(float , _Smoothness0)
     UNITY_DOTS_INSTANCED_PROP(float , _Smoothness1)
     UNITY_DOTS_INSTANCED_PROP(float , _Smoothness2)
@@ -337,6 +336,14 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _SmoothnessRemapMax1)
     UNITY_DOTS_INSTANCED_PROP(float , _SmoothnessRemapMax2)
     UNITY_DOTS_INSTANCED_PROP(float , _SmoothnessRemapMax3)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMin0)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMin1)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMin2)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMin3)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMax0)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMax1)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMax2)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMax3)
     UNITY_DOTS_INSTANCED_PROP(float , _AORemapMin0)
     UNITY_DOTS_INSTANCED_PROP(float , _AORemapMin1)
     UNITY_DOTS_INSTANCED_PROP(float , _AORemapMin2)
@@ -371,78 +378,234 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float4, _ThicknessRemap3)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
-#define _BaseColor0              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__BaseColor0)
-#define _BaseColor1              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__BaseColor1)
-#define _BaseColor2              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__BaseColor2)
-#define _BaseColor3              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__BaseColor3)
-#define _Metallic0               UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Metallic0)
-#define _Metallic1               UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Metallic1)
-#define _Metallic2               UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Metallic2)
-#define _Metallic3               UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Metallic3)
-#define _MetallicRemapMin0       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMin0)
-#define _MetallicRemapMin1       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMin1)
-#define _MetallicRemapMin2       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMin2)
-#define _MetallicRemapMin3       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMin3)
-#define _MetallicRemapMax0       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMax0)
-#define _MetallicRemapMax1       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMax1)
-#define _MetallicRemapMax2       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMax2)
-#define _MetallicRemapMax3       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMax3)
-#define _EmissiveColor0          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float3, Metadata__EmissiveColor0)
-#define _EmissiveColor1          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float3, Metadata__EmissiveColor1)
-#define _EmissiveColor2          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float3, Metadata__EmissiveColor2)
-#define _EmissiveColor3          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float3, Metadata__EmissiveColor3)
-#define _SpecularColor0          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__SpecularColor0)
-#define _SpecularColor1          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__SpecularColor1)
-#define _SpecularColor2          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__SpecularColor2)
-#define _SpecularColor3          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__SpecularColor3)
-#define _AlphaCutoff0            UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AlphaCutoff0)
-#define _AlphaCutoff1            UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AlphaCutoff1)
-#define _AlphaCutoff2            UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AlphaCutoff2)
-#define _AlphaCutoff3            UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AlphaCutoff3)
-#define _Smoothness0             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Smoothness0)
-#define _Smoothness1             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Smoothness1)
-#define _Smoothness2             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Smoothness2)
-#define _Smoothness3             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Smoothness3)
-#define _SmoothnessRemapMin0     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMin0)
-#define _SmoothnessRemapMin1     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMin1)
-#define _SmoothnessRemapMin2     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMin2)
-#define _SmoothnessRemapMin3     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMin3)
-#define _SmoothnessRemapMax0     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMax0)
-#define _SmoothnessRemapMax1     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMax1)
-#define _SmoothnessRemapMax2     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMax2)
-#define _SmoothnessRemapMax3     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMax3)
-#define _AORemapMin0             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMin0)
-#define _AORemapMin1             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMin1)
-#define _AORemapMin2             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMin2)
-#define _AORemapMin3             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMin3)
-#define _AORemapMax0             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMax0)
-#define _AORemapMax1             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMax1)
-#define _AORemapMax2             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMax2)
-#define _AORemapMax3             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMax3)
-#define _DetailAlbedoScale0      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailAlbedoScale0)
-#define _DetailAlbedoScale1      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailAlbedoScale1)
-#define _DetailAlbedoScale2      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailAlbedoScale2)
-#define _DetailAlbedoScale3      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailAlbedoScale3)
-#define _DetailNormalScale0      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailNormalScale0)
-#define _DetailNormalScale1      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailNormalScale1)
-#define _DetailNormalScale2      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailNormalScale2)
-#define _DetailNormalScale3      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailNormalScale3)
-#define _DetailSmoothnessScale0  UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailSmoothnessScale0)
-#define _DetailSmoothnessScale1  UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailSmoothnessScale1)
-#define _DetailSmoothnessScale2  UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailSmoothnessScale2)
-#define _DetailSmoothnessScale3  UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailSmoothnessScale3)
-#define _DiffusionProfileHash0   UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DiffusionProfileHash0)
-#define _DiffusionProfileHash1   UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DiffusionProfileHash1)
-#define _DiffusionProfileHash2   UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DiffusionProfileHash2)
-#define _DiffusionProfileHash3   UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DiffusionProfileHash3)
-#define _Thickness0              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Thickness0)
-#define _Thickness1              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Thickness1)
-#define _Thickness2              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Thickness2)
-#define _Thickness3              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Thickness3)
-#define _ThicknessRemap0         UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__ThicknessRemap0)
-#define _ThicknessRemap1         UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__ThicknessRemap1)
-#define _ThicknessRemap2         UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__ThicknessRemap2)
-#define _ThicknessRemap3         UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__ThicknessRemap3)
+// Here, we want to avoid overriding a property like e.g. _BaseColor0 with something like this:
+// #define _BaseColor0 UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _BaseColor0)
+//
+// It would be simpler, but it can cause the compiler to regenerate the property loading code for each use of _BaseColor0.
+//
+// To avoid this, the property loads are cached in some static values at the beginning of the shader.
+// The properties such as _BaseColor0 are then overridden so that it expand directly to the static value like this:
+// #define _BaseColor0 unity_DOTS_Sampled_BaseColor0
+//
+// This simple fix happened to improve GPU performances by ~10% on Meta Quest 2 with URP on some scenes.
+static float4 unity_DOTS_Sampled_BaseColor0;
+static float4 unity_DOTS_Sampled_BaseColor1;
+static float4 unity_DOTS_Sampled_BaseColor2;
+static float4 unity_DOTS_Sampled_BaseColor3;
+static float  unity_DOTS_Sampled_Metallic0;
+static float  unity_DOTS_Sampled_Metallic1;
+static float  unity_DOTS_Sampled_Metallic2;
+static float  unity_DOTS_Sampled_Metallic3;
+static float  unity_DOTS_Sampled_MetallicRemapMin0;
+static float  unity_DOTS_Sampled_MetallicRemapMin1;
+static float  unity_DOTS_Sampled_MetallicRemapMin2;
+static float  unity_DOTS_Sampled_MetallicRemapMin3;
+static float  unity_DOTS_Sampled_MetallicRemapMax0;
+static float  unity_DOTS_Sampled_MetallicRemapMax1;
+static float  unity_DOTS_Sampled_MetallicRemapMax2;
+static float  unity_DOTS_Sampled_MetallicRemapMax3;
+static float3 unity_DOTS_Sampled_EmissiveColor;
+static float  unity_DOTS_Sampled_AlphaCutoff;
+static float  unity_DOTS_Sampled_Smoothness0;
+static float  unity_DOTS_Sampled_Smoothness1;
+static float  unity_DOTS_Sampled_Smoothness2;
+static float  unity_DOTS_Sampled_Smoothness3;
+static float  unity_DOTS_Sampled_SmoothnessRemapMin0;
+static float  unity_DOTS_Sampled_SmoothnessRemapMin1;
+static float  unity_DOTS_Sampled_SmoothnessRemapMin2;
+static float  unity_DOTS_Sampled_SmoothnessRemapMin3;
+static float  unity_DOTS_Sampled_SmoothnessRemapMax0;
+static float  unity_DOTS_Sampled_SmoothnessRemapMax1;
+static float  unity_DOTS_Sampled_SmoothnessRemapMax2;
+static float  unity_DOTS_Sampled_SmoothnessRemapMax3;
+static float  unity_DOTS_Sampled_AlphaRemapMin0;
+static float  unity_DOTS_Sampled_AlphaRemapMin1;
+static float  unity_DOTS_Sampled_AlphaRemapMin2;
+static float  unity_DOTS_Sampled_AlphaRemapMin3;
+static float  unity_DOTS_Sampled_AlphaRemapMax0;
+static float  unity_DOTS_Sampled_AlphaRemapMax1;
+static float  unity_DOTS_Sampled_AlphaRemapMax2;
+static float  unity_DOTS_Sampled_AlphaRemapMax3;
+static float  unity_DOTS_Sampled_AORemapMin0;
+static float  unity_DOTS_Sampled_AORemapMin1;
+static float  unity_DOTS_Sampled_AORemapMin2;
+static float  unity_DOTS_Sampled_AORemapMin3;
+static float  unity_DOTS_Sampled_AORemapMax0;
+static float  unity_DOTS_Sampled_AORemapMax1;
+static float  unity_DOTS_Sampled_AORemapMax2;
+static float  unity_DOTS_Sampled_AORemapMax3;
+static float  unity_DOTS_Sampled_DetailAlbedoScale0;
+static float  unity_DOTS_Sampled_DetailAlbedoScale1;
+static float  unity_DOTS_Sampled_DetailAlbedoScale2;
+static float  unity_DOTS_Sampled_DetailAlbedoScale3;
+static float  unity_DOTS_Sampled_DetailNormalScale0;
+static float  unity_DOTS_Sampled_DetailNormalScale1;
+static float  unity_DOTS_Sampled_DetailNormalScale2;
+static float  unity_DOTS_Sampled_DetailNormalScale3;
+static float  unity_DOTS_Sampled_DetailSmoothnessScale0;
+static float  unity_DOTS_Sampled_DetailSmoothnessScale1;
+static float  unity_DOTS_Sampled_DetailSmoothnessScale2;
+static float  unity_DOTS_Sampled_DetailSmoothnessScale3;
+static float  unity_DOTS_Sampled_DiffusionProfileHash0;
+static float  unity_DOTS_Sampled_DiffusionProfileHash1;
+static float  unity_DOTS_Sampled_DiffusionProfileHash2;
+static float  unity_DOTS_Sampled_DiffusionProfileHash3;
+static float  unity_DOTS_Sampled_Thickness0;
+static float  unity_DOTS_Sampled_Thickness1;
+static float  unity_DOTS_Sampled_Thickness2;
+static float  unity_DOTS_Sampled_Thickness3;
+static float4 unity_DOTS_Sampled_ThicknessRemap0;
+static float4 unity_DOTS_Sampled_ThicknessRemap1;
+static float4 unity_DOTS_Sampled_ThicknessRemap2;
+static float4 unity_DOTS_Sampled_ThicknessRemap3;
+
+void SetupDOTSLayeredLitMaterialPropertyCaches()
+{
+    unity_DOTS_Sampled_BaseColor0               = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _BaseColor0);
+    unity_DOTS_Sampled_BaseColor1               = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _BaseColor1);
+    unity_DOTS_Sampled_BaseColor2               = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _BaseColor2);
+    unity_DOTS_Sampled_BaseColor3               = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _BaseColor3);
+    unity_DOTS_Sampled_Metallic0                = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Metallic0);
+    unity_DOTS_Sampled_Metallic1                = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Metallic1);
+    unity_DOTS_Sampled_Metallic2                = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Metallic2);
+    unity_DOTS_Sampled_Metallic3                = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Metallic3);
+    unity_DOTS_Sampled_MetallicRemapMin0        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMin0);
+    unity_DOTS_Sampled_MetallicRemapMin1        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMin1);
+    unity_DOTS_Sampled_MetallicRemapMin2        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMin2);
+    unity_DOTS_Sampled_MetallicRemapMin3        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMin3);
+    unity_DOTS_Sampled_MetallicRemapMax0        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMax0);
+    unity_DOTS_Sampled_MetallicRemapMax1        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMax1);
+    unity_DOTS_Sampled_MetallicRemapMax2        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMax2);
+    unity_DOTS_Sampled_MetallicRemapMax3        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMax3);
+    unity_DOTS_Sampled_EmissiveColor            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float3, _EmissiveColor);
+    unity_DOTS_Sampled_AlphaCutoff              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaCutoff);
+    unity_DOTS_Sampled_Smoothness0              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Smoothness0);
+    unity_DOTS_Sampled_Smoothness1              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Smoothness1);
+    unity_DOTS_Sampled_Smoothness2              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Smoothness2);
+    unity_DOTS_Sampled_Smoothness3              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Smoothness3);
+    unity_DOTS_Sampled_SmoothnessRemapMin0      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMin0);
+    unity_DOTS_Sampled_SmoothnessRemapMin1      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMin1);
+    unity_DOTS_Sampled_SmoothnessRemapMin2      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMin2);
+    unity_DOTS_Sampled_SmoothnessRemapMin3      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMin3);
+    unity_DOTS_Sampled_SmoothnessRemapMax0      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMax0);
+    unity_DOTS_Sampled_SmoothnessRemapMax1      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMax1);
+    unity_DOTS_Sampled_SmoothnessRemapMax2      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMax2);
+    unity_DOTS_Sampled_SmoothnessRemapMax3      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMax3);
+    unity_DOTS_Sampled_AlphaRemapMin0           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMin0);
+    unity_DOTS_Sampled_AlphaRemapMin1           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMin1);
+    unity_DOTS_Sampled_AlphaRemapMin2           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMin2);
+    unity_DOTS_Sampled_AlphaRemapMin3           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMin3);
+    unity_DOTS_Sampled_AlphaRemapMax0           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMax0);
+    unity_DOTS_Sampled_AlphaRemapMax1           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMax1);
+    unity_DOTS_Sampled_AlphaRemapMax2           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMax2);
+    unity_DOTS_Sampled_AlphaRemapMax3           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMax3);
+    unity_DOTS_Sampled_AORemapMin0              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMin0);
+    unity_DOTS_Sampled_AORemapMin1              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMin1);
+    unity_DOTS_Sampled_AORemapMin2              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMin2);
+    unity_DOTS_Sampled_AORemapMin3              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMin3);
+    unity_DOTS_Sampled_AORemapMax0              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMax0);
+    unity_DOTS_Sampled_AORemapMax1              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMax1);
+    unity_DOTS_Sampled_AORemapMax2              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMax2);
+    unity_DOTS_Sampled_AORemapMax3              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMax3);
+    unity_DOTS_Sampled_DetailAlbedoScale0       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoScale0);
+    unity_DOTS_Sampled_DetailAlbedoScale1       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoScale1);
+    unity_DOTS_Sampled_DetailAlbedoScale2       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoScale2);
+    unity_DOTS_Sampled_DetailAlbedoScale3       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoScale3);
+    unity_DOTS_Sampled_DetailNormalScale0       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalScale0);
+    unity_DOTS_Sampled_DetailNormalScale1       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalScale1);
+    unity_DOTS_Sampled_DetailNormalScale2       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalScale2);
+    unity_DOTS_Sampled_DetailNormalScale3       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalScale3);
+    unity_DOTS_Sampled_DetailSmoothnessScale0   = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailSmoothnessScale0);
+    unity_DOTS_Sampled_DetailSmoothnessScale1   = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailSmoothnessScale1);
+    unity_DOTS_Sampled_DetailSmoothnessScale2   = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailSmoothnessScale2);
+    unity_DOTS_Sampled_DetailSmoothnessScale3   = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailSmoothnessScale3);
+    unity_DOTS_Sampled_DiffusionProfileHash0    = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DiffusionProfileHash0);
+    unity_DOTS_Sampled_DiffusionProfileHash1    = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DiffusionProfileHash1);
+    unity_DOTS_Sampled_DiffusionProfileHash2    = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DiffusionProfileHash2);
+    unity_DOTS_Sampled_DiffusionProfileHash3    = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DiffusionProfileHash3);
+    unity_DOTS_Sampled_Thickness0               = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Thickness0);
+    unity_DOTS_Sampled_Thickness1               = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Thickness1);
+    unity_DOTS_Sampled_Thickness2               = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Thickness2);
+    unity_DOTS_Sampled_Thickness3               = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Thickness3);
+    unity_DOTS_Sampled_ThicknessRemap0          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _ThicknessRemap0);
+    unity_DOTS_Sampled_ThicknessRemap1          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _ThicknessRemap1);
+    unity_DOTS_Sampled_ThicknessRemap2          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _ThicknessRemap2);
+    unity_DOTS_Sampled_ThicknessRemap3          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _ThicknessRemap3);
+}
+
+#undef UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES
+#define UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES() SetupDOTSLayeredLitMaterialPropertyCaches()
+
+#define _BaseColor0              unity_DOTS_Sampled_BaseColor0
+#define _BaseColor1              unity_DOTS_Sampled_BaseColor1
+#define _BaseColor2              unity_DOTS_Sampled_BaseColor2
+#define _BaseColor3              unity_DOTS_Sampled_BaseColor3
+#define _Metallic0               unity_DOTS_Sampled_Metallic0
+#define _Metallic1               unity_DOTS_Sampled_Metallic1
+#define _Metallic2               unity_DOTS_Sampled_Metallic2
+#define _Metallic3               unity_DOTS_Sampled_Metallic3
+#define _MetallicRemapMin0       unity_DOTS_Sampled_MetallicRemapMin0
+#define _MetallicRemapMin1       unity_DOTS_Sampled_MetallicRemapMin1
+#define _MetallicRemapMin2       unity_DOTS_Sampled_MetallicRemapMin2
+#define _MetallicRemapMin3       unity_DOTS_Sampled_MetallicRemapMin3
+#define _MetallicRemapMax0       unity_DOTS_Sampled_MetallicRemapMax0
+#define _MetallicRemapMax1       unity_DOTS_Sampled_MetallicRemapMax1
+#define _MetallicRemapMax2       unity_DOTS_Sampled_MetallicRemapMax2
+#define _MetallicRemapMax3       unity_DOTS_Sampled_MetallicRemapMax3
+#define _EmissiveColor           unity_DOTS_Sampled_EmissiveColor
+#define _AlphaCutoff             unity_DOTS_Sampled_AlphaCutoff
+#define _Smoothness0             unity_DOTS_Sampled_Smoothness0
+#define _Smoothness1             unity_DOTS_Sampled_Smoothness1
+#define _Smoothness2             unity_DOTS_Sampled_Smoothness2
+#define _Smoothness3             unity_DOTS_Sampled_Smoothness3
+#define _SmoothnessRemapMin0     unity_DOTS_Sampled_SmoothnessRemapMin0
+#define _SmoothnessRemapMin1     unity_DOTS_Sampled_SmoothnessRemapMin1
+#define _SmoothnessRemapMin2     unity_DOTS_Sampled_SmoothnessRemapMin2
+#define _SmoothnessRemapMin3     unity_DOTS_Sampled_SmoothnessRemapMin3
+#define _SmoothnessRemapMax0     unity_DOTS_Sampled_SmoothnessRemapMax0
+#define _SmoothnessRemapMax1     unity_DOTS_Sampled_SmoothnessRemapMax1
+#define _SmoothnessRemapMax2     unity_DOTS_Sampled_SmoothnessRemapMax2
+#define _SmoothnessRemapMax3     unity_DOTS_Sampled_SmoothnessRemapMax3
+#define _AlphaRemapMin0          unity_DOTS_Sampled_AlphaRemapMin0
+#define _AlphaRemapMin1          unity_DOTS_Sampled_AlphaRemapMin1
+#define _AlphaRemapMin2          unity_DOTS_Sampled_AlphaRemapMin2
+#define _AlphaRemapMin3          unity_DOTS_Sampled_AlphaRemapMin3
+#define _AlphaRemapMax0          unity_DOTS_Sampled_AlphaRemapMax0
+#define _AlphaRemapMax1          unity_DOTS_Sampled_AlphaRemapMax1
+#define _AlphaRemapMax2          unity_DOTS_Sampled_AlphaRemapMax2
+#define _AlphaRemapMax3          unity_DOTS_Sampled_AlphaRemapMax3
+#define _AORemapMin0             unity_DOTS_Sampled_AORemapMin0
+#define _AORemapMin1             unity_DOTS_Sampled_AORemapMin1
+#define _AORemapMin2             unity_DOTS_Sampled_AORemapMin2
+#define _AORemapMin3             unity_DOTS_Sampled_AORemapMin3
+#define _AORemapMax0             unity_DOTS_Sampled_AORemapMax0
+#define _AORemapMax1             unity_DOTS_Sampled_AORemapMax1
+#define _AORemapMax2             unity_DOTS_Sampled_AORemapMax2
+#define _AORemapMax3             unity_DOTS_Sampled_AORemapMax3
+#define _DetailAlbedoScale0      unity_DOTS_Sampled_DetailAlbedoScale0
+#define _DetailAlbedoScale1      unity_DOTS_Sampled_DetailAlbedoScale1
+#define _DetailAlbedoScale2      unity_DOTS_Sampled_DetailAlbedoScale2
+#define _DetailAlbedoScale3      unity_DOTS_Sampled_DetailAlbedoScale3
+#define _DetailNormalScale0      unity_DOTS_Sampled_DetailNormalScale0
+#define _DetailNormalScale1      unity_DOTS_Sampled_DetailNormalScale1
+#define _DetailNormalScale2      unity_DOTS_Sampled_DetailNormalScale2
+#define _DetailNormalScale3      unity_DOTS_Sampled_DetailNormalScale3
+#define _DetailSmoothnessScale0  unity_DOTS_Sampled_DetailSmoothnessScale0
+#define _DetailSmoothnessScale1  unity_DOTS_Sampled_DetailSmoothnessScale1
+#define _DetailSmoothnessScale2  unity_DOTS_Sampled_DetailSmoothnessScale2
+#define _DetailSmoothnessScale3  unity_DOTS_Sampled_DetailSmoothnessScale3
+#define _DiffusionProfileHash0   unity_DOTS_Sampled_DiffusionProfileHash0
+#define _DiffusionProfileHash1   unity_DOTS_Sampled_DiffusionProfileHash1
+#define _DiffusionProfileHash2   unity_DOTS_Sampled_DiffusionProfileHash2
+#define _DiffusionProfileHash3   unity_DOTS_Sampled_DiffusionProfileHash3
+#define _Thickness0              unity_DOTS_Sampled_Thickness0
+#define _Thickness1              unity_DOTS_Sampled_Thickness1
+#define _Thickness2              unity_DOTS_Sampled_Thickness2
+#define _Thickness3              unity_DOTS_Sampled_Thickness3
+#define _ThicknessRemap0         unity_DOTS_Sampled_ThicknessRemap0
+#define _ThicknessRemap1         unity_DOTS_Sampled_ThicknessRemap1
+#define _ThicknessRemap2         unity_DOTS_Sampled_ThicknessRemap2
+#define _ThicknessRemap3         unity_DOTS_Sampled_ThicknessRemap3
 
 #else
 
@@ -457,6 +620,8 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _Smoothness)
     UNITY_DOTS_INSTANCED_PROP(float , _SmoothnessRemapMin)
     UNITY_DOTS_INSTANCED_PROP(float , _SmoothnessRemapMax)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMin)
+    UNITY_DOTS_INSTANCED_PROP(float , _AlphaRemapMax)
     UNITY_DOTS_INSTANCED_PROP(float , _AORemapMin)
     UNITY_DOTS_INSTANCED_PROP(float , _AORemapMax)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailAlbedoScale)
@@ -467,26 +632,86 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float4, _ThicknessRemap)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
-#define _BaseColor              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__BaseColor)
-#define _Metallic               UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Metallic)
-#define _MetallicRemapMin       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMin)
-#define _MetallicRemapMax       UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__MetallicRemapMax)
-#define _Smoothness             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Smoothness)
-#define _EmissiveColor          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float3, Metadata__EmissiveColor)
-#define _SpecularColor          UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__SpecularColor)
-#define _AlphaCutoff            UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AlphaCutoff)
-#define _Smoothness             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Smoothness)
-#define _SmoothnessRemapMin     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMin)
-#define _SmoothnessRemapMax     UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__SmoothnessRemapMax)
-#define _AORemapMin             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMin)
-#define _AORemapMax             UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__AORemapMax)
-#define _DetailAlbedoScale      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailAlbedoScale)
-#define _DetailNormalScale      UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailNormalScale)
-#define _DetailSmoothnessScale  UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DetailSmoothnessScale)
-#define _DiffusionProfileHash   UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__DiffusionProfileHash)
-#define _Thickness              UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float , Metadata__Thickness)
-#define _ThicknessRemap         UNITY_ACCESS_DOTS_INSTANCED_PROP_FROM_MACRO(float4, Metadata__ThicknessRemap)
+// Here, we want to avoid overriding a property like e.g. _BaseColor with something like this:
+// #define _BaseColor UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _BaseColor0)
+//
+// It would be simpler, but it can cause the compiler to regenerate the property loading code for each use of _BaseColor.
+//
+// To avoid this, the property loads are cached in some static values at the beginning of the shader.
+// The properties such as _BaseColor are then overridden so that it expand directly to the static value like this:
+// #define _BaseColor unity_DOTS_Sampled_BaseColor
+//
+// This simple fix happened to improve GPU performances by ~10% on Meta Quest 2 with URP on some scenes.
+static float4 unity_DOTS_Sampled_BaseColor;
+static float  unity_DOTS_Sampled_Metallic;
+static float  unity_DOTS_Sampled_MetallicRemapMin;
+static float  unity_DOTS_Sampled_MetallicRemapMax;
+static float3 unity_DOTS_Sampled_EmissiveColor;
+static float4 unity_DOTS_Sampled_SpecularColor;
+static float  unity_DOTS_Sampled_AlphaCutoff;;
+static float  unity_DOTS_Sampled_Smoothness;
+static float  unity_DOTS_Sampled_SmoothnessRemapMin;
+static float  unity_DOTS_Sampled_SmoothnessRemapMax;
+static float  unity_DOTS_Sampled_AlphaRemapMin;
+static float  unity_DOTS_Sampled_AlphaRemapMax;
+static float  unity_DOTS_Sampled_AORemapMin;
+static float  unity_DOTS_Sampled_AORemapMax;
+static float  unity_DOTS_Sampled_DetailAlbedoScale;
+static float  unity_DOTS_Sampled_DetailNormalScale;
+static float  unity_DOTS_Sampled_DetailSmoothnessScale;
+static float  unity_DOTS_Sampled_DiffusionProfileHash;
+static float  unity_DOTS_Sampled_Thickness;
+static float4 unity_DOTS_Sampled_ThicknessRemap;
+
+void SetupDOTSLitMaterialPropertyCaches()
+{
+    unity_DOTS_Sampled_BaseColor = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _BaseColor);
+    unity_DOTS_Sampled_Metallic = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Metallic);
+    unity_DOTS_Sampled_MetallicRemapMin = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMin);
+    unity_DOTS_Sampled_MetallicRemapMax = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetallicRemapMax);
+    unity_DOTS_Sampled_Smoothness = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Smoothness);
+    unity_DOTS_Sampled_EmissiveColor = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float3, _EmissiveColor);
+    unity_DOTS_Sampled_SpecularColor = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _SpecularColor);
+    unity_DOTS_Sampled_AlphaCutoff = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaCutoff);
+    unity_DOTS_Sampled_Smoothness = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Smoothness);
+    unity_DOTS_Sampled_SmoothnessRemapMin = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMin);
+    unity_DOTS_Sampled_SmoothnessRemapMax = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _SmoothnessRemapMax);
+    unity_DOTS_Sampled_AlphaRemapMin = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMin);
+    unity_DOTS_Sampled_AlphaRemapMax = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AlphaRemapMax);
+    unity_DOTS_Sampled_AORemapMin = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMin);
+    unity_DOTS_Sampled_AORemapMax = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AORemapMax);
+    unity_DOTS_Sampled_DetailAlbedoScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoScale);
+    unity_DOTS_Sampled_DetailNormalScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalScale);
+    unity_DOTS_Sampled_DetailSmoothnessScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailSmoothnessScale);
+    unity_DOTS_Sampled_DiffusionProfileHash = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DiffusionProfileHash);
+    unity_DOTS_Sampled_Thickness = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Thickness);
+    unity_DOTS_Sampled_ThicknessRemap = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _ThicknessRemap);
+}
+
+#undef UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES
+#define UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES() SetupDOTSLitMaterialPropertyCaches()
+
+#define _BaseColor             unity_DOTS_Sampled_BaseColor
+#define _Metallic              unity_DOTS_Sampled_Metallic
+#define _MetallicRemapMin      unity_DOTS_Sampled_MetallicRemapMin
+#define _MetallicRemapMax      unity_DOTS_Sampled_MetallicRemapMax
+#define _Smoothness            unity_DOTS_Sampled_Smoothness
+#define _EmissiveColor         unity_DOTS_Sampled_EmissiveColor
+#define _SpecularColor         unity_DOTS_Sampled_SpecularColor
+#define _AlphaCutoff           unity_DOTS_Sampled_AlphaCutoff
+#define _Smoothness            unity_DOTS_Sampled_Smoothness
+#define _SmoothnessRemapMin    unity_DOTS_Sampled_SmoothnessRemapMin
+#define _SmoothnessRemapMax    unity_DOTS_Sampled_SmoothnessRemapMax
+#define _AlphaRemapMin         unity_DOTS_Sampled_AlphaRemapMin
+#define _AlphaRemapMax         unity_DOTS_Sampled_AlphaRemapMax
+#define _AORemapMin            unity_DOTS_Sampled_AORemapMin
+#define _AORemapMax            unity_DOTS_Sampled_AORemapMax
+#define _DetailAlbedoScale     unity_DOTS_Sampled_DetailAlbedoScale
+#define _DetailNormalScale     unity_DOTS_Sampled_DetailNormalScale
+#define _DetailSmoothnessScale unity_DOTS_Sampled_DetailSmoothnessScale
+#define _DiffusionProfileHash  unity_DOTS_Sampled_DiffusionProfileHash
+#define _Thickness             unity_DOTS_Sampled_Thickness
+#define _ThicknessRemap        unity_DOTS_Sampled_ThicknessRemap
 
 #endif
 #endif
-

@@ -3,7 +3,7 @@ using UnityEngine.Rendering.HighDefinition;
 namespace UnityEditor.Rendering.HighDefinition
 {
     [CanEditMultipleObjects]
-    [VolumeComponentEditor(typeof(ScreenSpaceRefraction))]
+    [CustomEditor(typeof(ScreenSpaceRefraction))]
     class ScreenSpaceRefractionEditor : VolumeComponentEditor
     {
         protected SerializedDataParameter m_ScreenFadeDistance;
@@ -17,7 +17,10 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public override void OnInspectorGUI()
         {
-            PropertyField(m_ScreenFadeDistance, EditorGUIUtility.TrTextContent("Screen Weight Distance"));
+            HDEditorUtils.EnsureFrameSetting(FrameSettingsField.Refraction);
+            PropertyField(m_ScreenFadeDistance, k_ScreenFadeDistance);
         }
+
+        static public readonly UnityEngine.GUIContent k_ScreenFadeDistance = EditorGUIUtility.TrTextContent("Screen Weight Distance", "Controls the distance at which HDRP fades out the refraction effect when the destination of the ray is near the boundaries of the screen. Increase this value to increase the distance from the screen edge at which HDRP fades out the refraction effect for a ray destination.");
     }
 }

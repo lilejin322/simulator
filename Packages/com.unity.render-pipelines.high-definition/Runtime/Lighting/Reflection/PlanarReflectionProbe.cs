@@ -7,9 +7,10 @@ namespace UnityEngine.Rendering.HighDefinition
     /// <summary>
     /// The planar reflection probe component.
     /// </summary>
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Planar-Reflection-Probe" + Documentation.endURL)]
+    [HDRPHelpURLAttribute("Planar-Reflection-Probe")]
     [ExecuteAlways]
     [AddComponentMenu("Rendering/Planar Reflection Probe")]
+    [Icon("PlanarReflections")]
     public sealed partial class PlanarReflectionProbe : HDProbe
     {
         // Serialized data
@@ -24,6 +25,7 @@ namespace UnityEngine.Rendering.HighDefinition
         void Awake()
         {
             type = ProbeSettings.ProbeType.PlanarProbe;
+
             k_PlanarProbeMigration.Migrate(this);
         }
     }

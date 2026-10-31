@@ -11,7 +11,7 @@ using UnityEngine.Rendering.HighDefinition;
 
 public class AgentZoneController : MonoBehaviour
 {
-    private LightLayerEnum BornLightLayer = LightLayerEnum.LightLayerDefault; //LightLayerEnum.LightLayer7;
+    private UnityEngine.Rendering.HighDefinition.RenderingLayerMask BornLightLayer = UnityEngine.Rendering.HighDefinition.RenderingLayerMask.LightLayerDefault; //LightLayerEnum.LightLayer7;
     private LightLayerTrigger CurrentLightMask = null;
     private Stack<LightLayerTrigger> RenderMaskStack  = new Stack<LightLayerTrigger>();
 
@@ -61,7 +61,7 @@ public class AgentZoneController : MonoBehaviour
 
     public void SetLightLayerMask(LightLayerTrigger trigger)
     {
-        var renderLightMask = trigger != null ? trigger.LightLayer : LightLayerEnum.LightLayerDefault;
+        var renderLightMask = trigger != null ? trigger.LightLayer : UnityEngine.Rendering.HighDefinition.RenderingLayerMask.LightLayerDefault;
         // Light layer is stored in the first 8 bit of the rendering layer mask.
         Component[] renderers = GetComponentsInChildren<Renderer>();
         foreach (Renderer r in renderers)

@@ -1,3 +1,8 @@
+using System.Linq;
+using UnityEditor.VFX.HDRP;
+using UnityEditor.VFX.UI;
+using UnityEditorInternal;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
 
 namespace UnityEditor.Rendering.HighDefinition
@@ -9,10 +14,28 @@ namespace UnityEditor.Rendering.HighDefinition
         SerializedHDRenderPipelineAsset m_SerializedHDRenderPipeline;
 
         internal bool largeLabelWidth = true;
+        internal bool needRefreshVfxWarnings = false;
+
+        internal ReorderableList reusableReorderableList;
+
+#if ENABLE_UPSCALER_FRAMEWORK
+        internal UpscalerOptionsEditorCache upscalerOptionsEditorCache => m_UpscalerOptionsEditorCache;
+        UpscalerOptionsEditorCache m_UpscalerOptionsEditorCache;
+#endif
 
         void OnEnable()
         {
             m_SerializedHDRenderPipeline = new SerializedHDRenderPipelineAsset(serializedObject);
+#if ENABLE_UPSCALER_FRAMEWORK
+            m_UpscalerOptionsEditorCache = new UpscalerOptionsEditorCache();
+#endif
+        }
+
+        void OnDisable()
+        {
+#if ENABLE_UPSCALER_FRAMEWORK
+            m_UpscalerOptionsEditorCache?.Cleanup();
+#endif            
         }
 
         public override void OnInspectorGUI()
@@ -32,6 +55,8 @@ namespace UnityEditor.Rendering.HighDefinition
                 EditorGUIUtility.labelWidth *= 0.5f;
 
             serialized.Apply();
+            if (needRefreshVfxWarnings)
+                VFXHDRPSettingsUtility.RefreshVfxErrorsIfNeeded();
         }
     }
 }

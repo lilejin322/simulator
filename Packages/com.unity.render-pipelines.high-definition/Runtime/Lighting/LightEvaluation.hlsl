@@ -6,6 +6,7 @@
 // use #define LIGHT_EVALUATION_NO_COOKIE to disable cookie evaluation
 // use #define LIGHT_EVALUATION_NO_CONTACT_SHADOWS to disable contact shadow evaluation
 // use #define LIGHT_EVALUATION_NO_SHADOWS to disable evaluation of shadow including contact shadow (but not micro shadow)
+// use #define LIGHT_EVALUATION_NO_CLOUDS_SHADOWS to disable evaluation of volumetric clouds shadows
 // use #define OVERRIDE_EVALUATE_ENV_INTERSECTION to provide a new version of EvaluateLight_EnvIntersection
 
 // Samples the area light's associated cookie
@@ -88,9 +89,84 @@ float3 SampleAreaLightCookie(float4 cookieScaleOffset, float4x3 L, float3 F, flo
     return SampleCookie2D(saturate(hitUV), cookieScaleOffset, mipLevel);
 }
 
-float3 SampleAreaLightCookie(float4 cookieScaleOffset, float4x3 L, float3 F)
+// Helper function for rectangular area lights.
+// Input: 'ltcVerts' must be inversely transformed in such a way that the transformed BRDF becomes uniform (diffuse).
+// Returns unassociated (non-premultiplied) color with alpha (irradiance).
+// The calling code must perform alpha-compositing.
+float4 EvaluateLTC_Rect(float4x3 ltcVerts, float perceptualRoughness, int cookieMode, float4 cookieScaleOffset)
 {
-    return SampleAreaLightCookie(cookieScaleOffset, L, F, 1.0f);
+    float4 ltcValue;
+    float3 formFactor;
+
+    // Polygon irradiance in the transformed configuration.
+    ltcValue.a   = PolygonIrradiance(ltcVerts, formFactor);
+    ltcValue.rgb = float3(1,1,1);
+
+    if (cookieMode != COOKIEMODE_NONE)
+    {
+        ltcValue.rgb = SampleAreaLightCookie(cookieScaleOffset, ltcVerts, formFactor, perceptualRoughness);
+    }
+
+    return ltcValue;
+}
+
+float4 EvaluateLTC_Area(bool isRectLight, float3 center, float3 right, float3 up, float halfLength, float halfHeight,
+                        float3x3 invM, float perceptualRoughness, int cookieMode, float4 cookieScaleOffset)
+{
+    float3 ortho   = cross(center, right);
+    float  orthoSq = dot(ortho, ortho);
+
+    // Check whether the light is in a vertical orientation.
+    bool quit = (orthoSq == 0);
+
+    // Check whether the light is entirely below the surface.
+    // We must test twice, since a linear transformation
+    // may bring the light above the surface (a side-effect).
+    quit = quit || (center.z + halfLength * abs(right.z) + halfHeight * abs(up.z) <= 0);
+
+    float4 ltcValue = float4(1, 1, 1, 0);
+
+    if (!quit)
+    {
+        // Perform a sparse matrix multiplication.
+        float3 C = mul(invM, center);
+        float3 A = mul(invM, right);
+        float3 B = mul(invM, up);
+
+        // Check whether the light is entirely below the surface.
+        // We must test twice, since a linear transformation
+        // may bring the light below the surface (as expected).
+        if (C.z + halfLength * abs(A.z) + halfHeight * abs(B.z) > 0)
+        {
+            if (isRectLight)
+            {
+                float4x3 lightVerts;
+
+                lightVerts[0] = C - halfLength * A - halfHeight  * B; // LL
+                lightVerts[1] = lightVerts[0] + (2 * halfHeight) * B; // UL
+                lightVerts[2] = lightVerts[1] + (2 * halfLength) * A; // UR
+                lightVerts[3] = lightVerts[2] - (2 * halfHeight) * B; // LR
+
+                float3 formFactor;
+
+                // Polygon irradiance in the transformed configuration.
+                ltcValue.a = PolygonIrradiance(lightVerts, formFactor);
+
+                if (cookieMode != COOKIEMODE_NONE)
+                {
+                    ltcValue.rgb = SampleAreaLightCookie(cookieScaleOffset, lightVerts, formFactor, perceptualRoughness);
+                }
+            }
+            else // Line light
+            {
+                float w = ComputeLineWidthFactor(invM, ortho, orthoSq);
+
+                ltcValue.a = I_diffuse_line(C, A, halfLength) * w;
+            }
+        }
+    }
+
+    return ltcValue;
 }
 
 // This function transforms a rectangular area light according the the barn door inputs defined by the user.
@@ -177,26 +253,23 @@ float3 EvaluateCookie_Directional(LightLoopContext lightLoopContext, Directional
     return SampleCookie2D(positionNDC, light.cookieScaleOffset);
 }
 
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/VolumetricCloudsShadowSampling.hlsl"
+
 // Returns unassociated (non-premultiplied) color with alpha (attenuation).
 // The calling code must perform alpha-compositing.
 float4 EvaluateLight_Directional(LightLoopContext lightLoopContext, PositionInputs posInput,
                                  DirectionalLightData light)
 {
     float4 color = float4(light.color, 1.0);
-
     float3 L = -light.forward;
 
 #ifndef LIGHT_EVALUATION_NO_HEIGHT_FOG
     // Height fog attenuation.
     {
-        // TODO: should probably unify height attenuation somehow...
-        float  cosZenithAngle = L.y;
-        float  fragmentHeight = posInput.positionWS.y;
-        float3 oDepth = OpticalDepthHeightFog(_HeightFogBaseExtinction, _HeightFogBaseHeight,
-                                              _HeightFogExponents, cosZenithAngle, fragmentHeight);
-        // Cannot do this once for both the sky and the fog because the sky may be desaturated. :-(
-        float3 transm = TransmittanceFromOpticalDepth(oDepth);
-        color.rgb *= transm;
+        float cosZenithAngle = max(dot(L, _PlanetUp), 0.001f);
+        float fragmentHeight = dot(posInput.positionWS, _PlanetUp);
+        color.a *= TransmittanceHeightFog(_HeightFogBaseExtinction, _HeightFogBaseHeight,
+                                          _HeightFogExponents, cosZenithAngle, fragmentHeight);
     }
 #endif
 
@@ -207,34 +280,8 @@ float4 EvaluateLight_Directional(LightLoopContext lightLoopContext, PositionInpu
 #else
     // Use scalar or integer cores (more efficient).
     bool interactsWithSky = asint(light.distanceFromCamera) >= 0;
-
     if (interactsWithSky)
-    {
-        // TODO: should probably unify height attenuation somehow...
-        // TODO: Not sure it's possible to precompute cam rel pos since variables
-        // in the two constant buffers may be set at a different frequency?
-        float3 X = GetAbsolutePositionWS(posInput.positionWS);
-        float3 C = _PlanetCenterPosition.xyz;
-
-        float r        = distance(X, C);
-        float cosHoriz = ComputeCosineOfHorizonAngle(r);
-        float cosTheta = dot(X - C, L) * rcp(r); // Normalize
-
-        if (cosTheta >= cosHoriz) // Above horizon
-        {
-            float3 oDepth = ComputeAtmosphericOpticalDepth(r, cosTheta, true);
-            // Cannot do this once for both the sky and the fog because the sky may be desaturated. :-(
-            float3 transm  = TransmittanceFromOpticalDepth(oDepth);
-            float3 opacity = 1 - transm;
-            color.rgb *= 1 - (Desaturate(opacity, _AlphaSaturation) * _AlphaMultiplier);
-        }
-        else
-        {
-            // return 0; // Kill the light. This generates a warning, so can't early out. :-(
-           color = 0;
-        }
-    }
-
+        color.xyz *= EvaluateSunColorAttenuation(posInput.positionWS - _PlanetCenterPosition, L);
 #endif
 
 #ifndef LIGHT_EVALUATION_NO_COOKIE
@@ -269,27 +316,35 @@ SHADOW_TYPE EvaluateShadow_Directional( LightLoopContext lightLoopContext, Posit
         shadow = lightLoopContext.shadowValue;
 
     #ifdef SHADOWS_SHADOWMASK
-        // TODO: Optimize this code! Currently it is a bit like brute force to get the last transistion and fade to shadow mask, but there is
-        // certainly more efficient to do
-        // We reuse the transition from the cascade system to fade between shadow mask at max distance
-        uint  payloadOffset;
-        real  fade;
-        int cascadeCount;
-        int shadowSplitIndex = 0;
-
-        shadowSplitIndex = EvalShadow_GetSplitIndex(lightLoopContext.shadowContext, light.shadowIndex, posInput.positionWS, fade, cascadeCount);
-
-        // we have a fade caclulation for each cascade but we must lerp with shadow mask only for the last one
-        // if shadowSplitIndex is -1 it mean we are outside cascade and should return 1.0 to use shadowmask: saturate(-shadowSplitIndex) return 0 for >= 0 and 1 for -1
-        fade = ((shadowSplitIndex + 1) == cascadeCount) ? fade : saturate(-shadowSplitIndex);
-
-        // In the transition code (both dithering and blend) we use shadow = lerp( shadow, 1.0, fade ) for last transition
-        // mean if we expend the code we have (shadow * (1 - fade) + fade). Here to make transition with shadow mask
-        // we will remove fade and add fade * shadowMask which mean we do a lerp with shadow mask
-        shadow = shadow - fade + fade * shadowMask;
+        int shadowSplitIndex = lightLoopContext.shadowContext.shadowSplitIndex;
+        if (shadowSplitIndex < 0)
+        {
+            shadow = shadowMask;
+        }
+        else if (shadowSplitIndex == int(_CascadeShadowCount) - 1)
+        {
+            float fade = lightLoopContext.shadowContext.fade;
+            // In the transition code (both dithering and blend) we use shadow = lerp( shadow, 1.0, fade ) for last transition
+            // mean if we expend the code we have (shadow * (1 - fade) + fade). Here to make transition with shadow mask
+            // we will remove fade and add fade * shadowMask which mean we do a lerp with shadow mask
+            shadow = shadow - fade + fade * shadowMask;
+        }
 
         // See comment in EvaluateBSDF_Punctual
-        shadow = light.nonLightMappedOnly ? min(shadowMask, shadow) : shadow;
+        if (light.useShadowMask)
+        {
+            shadow = min(shadowMask, shadow);
+        }
+        else
+        {
+            // Use shadowmask when shadow value ​​cannot be retrieved due to shadow caster culling.
+            float3 camToPixel = posInput.positionWS - GetPrimaryCameraPosition();
+            float distanceCamToPixel2 = dot(camToPixel, camToPixel);
+
+            HDDirectionalShadowData dsd = lightLoopContext.shadowContext.directionalShadowData;
+            float alpha = saturate(distanceCamToPixel2 * dsd.fadeScale + dsd.fadeBias);
+            shadow = min(shadow, lerp(1.0, shadowMask, alpha * alpha));
+        }
     #endif
 
         shadow = lerp(shadowMask.SHADOW_TYPE_REPLICATE, shadow, light.shadowDimmer);
@@ -297,7 +352,16 @@ SHADOW_TYPE EvaluateShadow_Directional( LightLoopContext lightLoopContext, Posit
 
     // Transparents have no contact shadow information
 #if !defined(_SURFACE_TYPE_TRANSPARENT) && !defined(LIGHT_EVALUATION_NO_CONTACT_SHADOWS)
-    shadow = min(shadow, NdotL > 0.0 ? GetContactShadow(lightLoopContext, light.contactShadowMask, light.isRayTracedContactShadow) : 1.0);
+{
+    // In certain cases (like hair) we allow to force the contact shadow sample.
+    #ifdef LIGHT_EVALUATION_CONTACT_SHADOW_DISABLE_NDOTL
+        const bool allowContactShadow = true;
+    #else
+        const bool allowContactShadow = NdotL > 0.0;
+    #endif
+
+    shadow = min(shadow, allowContactShadow ? GetContactShadow(lightLoopContext, light.contactShadowMask, light.isRayTracedContactShadow) : 1.0);
+}
 #endif
 
 #ifdef DEBUG_DISPLAY
@@ -318,7 +382,7 @@ SHADOW_TYPE EvaluateShadow_Directional( LightLoopContext lightLoopContext, Posit
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/PunctualLightCommon.hlsl"
 
 float4 EvaluateCookie_Punctual(LightLoopContext lightLoopContext, LightData light,
-                               float3 lightToSample)
+                               float3 lightToSample, float lod = 0)
 {
 #ifndef LIGHT_EVALUATION_NO_COOKIE
     int lightType = light.lightType;
@@ -344,18 +408,27 @@ float4 EvaluateCookie_Punctual(LightLoopContext lightLoopContext, LightData ligh
         float z = positionLS.z;
         float r = light.range;
 
+        cookie.a = 1.0;
         // Box lights have no range attenuation, so we must clip manually.
-        bool isInBounds = Max3(abs(positionCS.x), abs(positionCS.y), abs(z - 0.5 * r) - 0.5 * r + 1) <= light.boxLightSafeExtent;
-        if (lightType != GPULIGHTTYPE_PROJECTOR_PYRAMID && lightType != GPULIGHTTYPE_PROJECTOR_BOX)
+        if ( Max3(abs(positionCS.x), abs(positionCS.y), abs(z - 0.5 * r) - 0.5 * r + 1) > light.boxLightSafeExtent )
         {
-            isInBounds = isInBounds && (dot(positionCS, positionCS) <= light.iesCut * light.iesCut);
+            cookie.a = 0.0;
         }
-
+        else
+        {
+            if (lightType != GPULIGHTTYPE_PROJECTOR_PYRAMID && lightType != GPULIGHTTYPE_PROJECTOR_BOX)
+            {
+                float iesCut = light.iesCut;
+                if (dot(positionCS, positionCS) > (iesCut * iesCut))
+                {
+                    cookie.a = 0;
+                }
+            }
+        }
         float2 positionNDC = positionCS * 0.5 + 0.5;
 
         // Manually clamp to border (black).
-        cookie.rgb = SampleCookie2D(positionNDC, light.cookieScaleOffset);
-        cookie.a   = isInBounds ? 1.0 : 0.0;
+        cookie.rgb = SampleCookie2D(positionNDC, light.cookieScaleOffset, lod);
     }
 
 #else
@@ -391,6 +464,22 @@ float4 EvaluateCookie_Punctual(LightLoopContext lightLoopContext, LightData ligh
     return cookie;
 }
 
+real PunctualLightAttenuationWithDistanceModification(float4 distances, real rangeAttenuationScale, real rangeAttenuationBias,
+                              real lightAngleScale, real lightAngleOffset)
+{
+    float distSq   = distances.y;
+    float distRcp  = distances.z; //distance contains light size modification. See ModifyDistancesForFillLighting
+    float distProj = distances.w;
+    real cosFwd   = distProj * rcp(distances.x); //we recompute inv distance here
+
+    real attenuation = min(distRcp, 1.0 / PUNCTUAL_LIGHT_THRESHOLD);
+    attenuation *= DistanceWindowing(distSq, rangeAttenuationScale, rangeAttenuationBias);
+    attenuation *= AngleAttenuation(cosFwd, lightAngleScale, lightAngleOffset);
+    // Effectively results in SmoothWindowedDistanceAttenuation(...) * SmoothAngleAttenuation(...).
+    return Sq(attenuation);
+
+}
+
 // Returns unassociated (non-premultiplied) color with alpha (attenuation).
 // The calling code must perform alpha-compositing.
 // distances = {d, d^2, 1/d, d_proj}, where d_proj = dot(lightToSample, light.forward).
@@ -399,19 +488,19 @@ float4 EvaluateLight_Punctual(LightLoopContext lightLoopContext, PositionInputs 
 {
     float4 color = float4(light.color, 1.0);
 
-    color.a *= PunctualLightAttenuation(distances, light.rangeAttenuationScale, light.rangeAttenuationBias,
-                                        light.angleScale, light.angleOffset);
+    color.a *= PunctualLightAttenuationWithDistanceModification(
+            distances, light.rangeAttenuationScale, light.rangeAttenuationBias,
+            light.angleScale, light.angleOffset);
 
 #ifndef LIGHT_EVALUATION_NO_HEIGHT_FOG
     // Height fog attenuation.
     // TODO: add an if()?
     {
-        float cosZenithAngle = L.y;
-        float distToLight = (light.lightType == GPULIGHTTYPE_PROJECTOR_BOX) ? distances.w : distances.x;
-        float fragmentHeight = posInput.positionWS.y;
+        float cosZenithAngle = dot(L, _PlanetUp);
+        float fragmentHeight = dot(posInput.positionWS, _PlanetUp);
         color.a *= TransmittanceHeightFog(_HeightFogBaseExtinction, _HeightFogBaseHeight,
                                           _HeightFogExponents, cosZenithAngle,
-                                          fragmentHeight, distToLight);
+                                          fragmentHeight, distances.x);
     }
 #endif
 
@@ -448,6 +537,7 @@ SHADOW_TYPE EvaluateShadow_Punctual(LightLoopContext lightLoopContext, PositionI
     if ((light.screenSpaceShadowIndex & SCREEN_SPACE_SHADOW_INDEX_MASK) != INVALID_SCREEN_SPACE_SHADOW)
     {
         shadow = GetScreenSpaceShadow(posInput, light.screenSpaceShadowIndex);
+        shadow = lerp(shadowMask, shadow, light.shadowDimmer);
     }
     else
 #endif
@@ -463,7 +553,7 @@ SHADOW_TYPE EvaluateShadow_Punctual(LightLoopContext lightLoopContext, PositionI
         // The min handle the case of having only dynamic objects in the ShadowMap
         // The second case for blend with distance is handled with ShadowDimmer. ShadowDimmer is define manually and by shadowDistance by light.
         // With distance, ShadowDimmer become one and only the ShadowMask appear, we get the blend with distance behavior.
-        shadow = light.nonLightMappedOnly ? min(shadowMask, shadow) : shadow;
+        shadow = light.useShadowMask ? min(shadowMask, shadow) : shadow;
     #endif
 
         shadow = lerp(shadowMask, shadow, light.shadowDimmer);
@@ -471,7 +561,16 @@ SHADOW_TYPE EvaluateShadow_Punctual(LightLoopContext lightLoopContext, PositionI
 
     // Transparents have no contact shadow information
 #if !defined(_SURFACE_TYPE_TRANSPARENT) && !defined(LIGHT_EVALUATION_NO_CONTACT_SHADOWS)
-    shadow = min(shadow, NdotL > 0.0 ? GetContactShadow(lightLoopContext, light.contactShadowMask, light.isRayTracedContactShadow) : 1.0);
+    {
+    // In certain cases (like hair) we allow to force the contact shadow sample.
+    #ifdef LIGHT_EVALUATION_CONTACT_SHADOW_DISABLE_NDOTL
+        const bool allowContactShadow = true;
+    #else
+        const bool allowContactShadow = NdotL > 0.0;
+    #endif
+
+        shadow = min(shadow, allowContactShadow ? GetContactShadow(lightLoopContext, light.contactShadowMask, light.isRayTracedContactShadow) : 1.0);
+    }
 #endif
 
 #ifdef DEBUG_DISPLAY
@@ -517,6 +616,7 @@ SHADOW_TYPE EvaluateShadow_RectArea( LightLoopContext lightLoopContext, Position
         #else
         shadow = screenSpaceAreaShadow.x;
         #endif
+        shadow = lerp(shadowMask, shadow, light.shadowDimmer);
     }
 #endif
 
@@ -526,7 +626,7 @@ SHADOW_TYPE EvaluateShadow_RectArea( LightLoopContext lightLoopContext, Position
 
 #ifdef SHADOWS_SHADOWMASK
         // See comment for punctual light shadow mask
-        shadow = light.nonLightMappedOnly ? min(shadowMask, shadow) : shadow;
+        shadow = light.useShadowMask ? min(shadowMask, shadow) : shadow;
 #endif
         shadow = lerp(shadowMask, shadow, light.shadowDimmer);
     }
@@ -539,6 +639,122 @@ SHADOW_TYPE EvaluateShadow_RectArea( LightLoopContext lightLoopContext, Position
 #else // LIGHT_EVALUATION_NO_SHADOWS
     return 1.0;
 #endif
+}
+
+bool OccluderInRendererBounds(HDShadowData shadowData, Texture2D atlas, PositionInputs posInput, float2 texelSize, bool isPerspective, bool decodeMoment = false)
+{
+    // Sample raw shadow map value.
+    float3 occluderPositionWS;
+    {
+        float4 closestNDC = { 0,0,0,1 };
+        float2 shadowCoord = EvalShadow_GetTexcoordsAtlas(shadowData, texelSize, posInput.positionWS, closestNDC.xy, isPerspective);
+
+        closestNDC.z = SAMPLE_TEXTURE2D_LOD(atlas, s_linear_clamp_sampler, shadowCoord, 0).x;
+
+        if (decodeMoment)
+        {
+            // Decode the shadow moment (needed for med/low filtering which uses EVSM).
+            closestNDC.z = 1 - ( 0.5 + 0.5 * (log2(closestNDC.z) / shadowData.shadowFilterParams0.x) );
+        }
+
+        float4 closestWS = mul(closestNDC, shadowData.shadowToWorld);
+        occluderPositionWS = closestWS.xyz / closestWS.w;
+    }
+
+    // Renderer center and extents.
+    float3 minBounds, maxBounds;
+    GetRendererBounds(minBounds, maxBounds);
+
+    float3 rendererCenterWS = (maxBounds + minBounds) * 0.5;
+    float3 rendererExtentWS = (maxBounds - minBounds) * 0.5;
+
+    // Comparison between bounding sphere radius and occluder distance.
+    const float occlusionDirectionSq = Length2(rendererCenterWS - occluderPositionWS);
+    return occlusionDirectionSq < Sq(Max3(rendererExtentWS.x, rendererExtentWS.y, rendererExtentWS.z));
+}
+
+bool DirectionalOccluderInRendererBounds(LightLoopContext lightLoopContext, DirectionalLightData lightData, PositionInputs posInput)
+{
+    if (lightData.shadowIndex < 0)
+        return false;
+
+    float   unused0;
+    int     unused1;
+    int splitIndex = EvalShadow_GetSplitIndex(lightLoopContext.shadowContext, lightData.shadowIndex, posInput.positionWS, unused0, unused1);
+
+    HDShadowData shadowData = lightLoopContext.shadowContext.shadowDatas[lightData.shadowIndex + splitIndex];
+    posInput.positionWS = posInput.positionWS + shadowData.cacheTranslationDelta.xyz;
+
+    return OccluderInRendererBounds(shadowData, _ShadowmapCascadeAtlas, posInput, _CascadeShadowAtlasSize.zw, false);
+}
+
+bool PunctualOccluderInRendererBounds(LightLoopContext lightLoopContext, LightData lightData, PositionInputs posInput, float3 L)
+{
+    if (lightData.shadowIndex < 0)
+        return false;
+
+#if FORCE_SHADOW_SCALAR_READ
+    const int shadowIndex = WaveReadLaneFirst(lightData.shadowIndex);
+#else
+    const int shadowIndex = lightData.shadowIndex;
+#endif
+
+    // Note: Here we assume that all the shadow map cube faces have been added contiguously in the buffer to retreive the shadow information
+    // Do the scalar load first and then replace parts of the data with the relevant cube face information.
+    HDShadowData shadowData = lightLoopContext.shadowContext.shadowDatas[shadowIndex];
+
+    if (lightData.lightType == GPULIGHTTYPE_POINT)
+    {
+        const int cubeFaceOffset = CubeMapFaceID(-L);
+
+        shadowData.shadowToWorld = lightLoopContext.shadowContext.shadowDatas[shadowIndex + cubeFaceOffset].shadowToWorld;
+        shadowData.atlasOffset   = lightLoopContext.shadowContext.shadowDatas[shadowIndex + cubeFaceOffset].atlasOffset;
+        shadowData.rot0          = lightLoopContext.shadowContext.shadowDatas[shadowIndex + cubeFaceOffset].rot0;
+        shadowData.rot1          = lightLoopContext.shadowContext.shadowDatas[shadowIndex + cubeFaceOffset].rot1;
+        shadowData.rot2          = lightLoopContext.shadowContext.shadowDatas[shadowIndex + cubeFaceOffset].rot2;
+    }
+
+    if (shadowData.isInCachedAtlas > 0) // This is a scalar branch.
+    {
+        return OccluderInRendererBounds(shadowData, _CachedShadowmapAtlas, posInput, _CachedShadowAtlasSize.zw, lightData.lightType != GPULIGHTTYPE_PROJECTOR_BOX);
+    }
+    else
+    {
+        return OccluderInRendererBounds(shadowData, _ShadowmapAtlas, posInput, _ShadowAtlasSize.zw, lightData.lightType != GPULIGHTTYPE_PROJECTOR_BOX);
+    }
+}
+
+bool AreaOccluderInRendererBounds(LightLoopContext lightLoopContext, LightData lightData, PositionInputs posInput)
+{
+    if (lightData.shadowIndex < 0)
+        return false;
+
+    // We need to disable the scalarization here on xbox due to bad code generated by FXC for the eye shader.
+    // This shouldn't have an enormous impact since with Area lights we are already exploded in VGPR by this point.
+#if FORCE_SHADOW_SCALAR_READ
+    const int shadowIndex = WaveReadLaneFirst(lightData.shadowIndex);
+#else
+    const int shadowIndex = lightData.shadowIndex;
+#endif
+
+    const HDShadowData shadowData = lightLoopContext.shadowContext.shadowDatas[shadowIndex];
+
+#ifdef AREA_SHADOW_HIGH
+    // High quality area shadows do not use moment shadow maps.
+    const bool decodeMoment = false;
+#else
+    const bool decodeMoment = true;
+#endif
+
+
+    if (shadowData.isInCachedAtlas > 0) // This is a scalar branch.
+    {
+        return OccluderInRendererBounds(shadowData, _CachedAreaLightShadowmapAtlas, posInput, _CachedShadowAtlasSize.zw, true, decodeMoment);
+    }
+    else
+    {
+        return OccluderInRendererBounds(shadowData, _ShadowmapAreaAtlas, posInput, _ShadowAtlasSize.zw, true, decodeMoment);
+    }
 }
 
 //-----------------------------------------------------------------------------

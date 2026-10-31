@@ -31,11 +31,27 @@ namespace Simulator.Api.Commands
                 if (ped == null)
                 {
                     var tr = obj.transform;
-                    tr.SetPositionAndRotation(position, Quaternion.Euler(rotation));
-
                     var rb = obj.GetComponent<Rigidbody>();
-                    rb.velocity = velocity;
-                    rb.angularVelocity = angular_velocity;
+                    var body = rb == null ? AgentGetState.RootArticulation(obj) : null;
+                    if (body != null)
+                    {
+                        // An articulation does not follow its parent transform: teleport its root body along with it.
+                        var offset = Quaternion.Inverse(tr.rotation) * (body.transform.position - tr.position);
+                        var turn = Quaternion.Inverse(tr.rotation) * body.transform.rotation;
+                        tr.SetPositionAndRotation(position, Quaternion.Euler(rotation));
+                        body.TeleportRoot(tr.position + tr.rotation * offset, tr.rotation * turn);
+                        body.linearVelocity = velocity;
+                        body.angularVelocity = angular_velocity;
+                    }
+                    else
+                    {
+                        tr.SetPositionAndRotation(position, Quaternion.Euler(rotation));
+                        if (rb != null)
+                        {
+                            rb.linearVelocity = velocity;
+                            rb.angularVelocity = angular_velocity;
+                        }
+                    }
                 }
                 else
                 {

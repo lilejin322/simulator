@@ -1,5 +1,5 @@
 //
-// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit / Render Pipeline / Generate Shader Includes ] instead
+// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit > Rendering > Generate Shader Includes ] instead
 //
 
 #ifndef SHADERVARIABLESSCREENSPACEREFLECTION_CS_HLSL
@@ -15,11 +15,14 @@ CBUFFER_START(ShaderVariablesScreenSpaceReflection)
     float _SsrRoughnessFadeRcpLength;
     float _SsrRoughnessFadeEndTimesRcpLength;
     float _SsrEdgeFadeRcpLength;
-    float4 _ColorPyramidUvScaleAndLimitPrevFrame;
     int _SsrDepthPyramidMaxMip;
     int _SsrColorPyramidMaxMip;
     int _SsrReflectsSky;
     float _SsrAccumulationAmount;
+    float _SsrPBRSpeedRejection;
+    float _SsrPBRBias;
+    float _SsrPRBSpeedRejectionScalerFactor;
+    float _SsrPBRPad0;
 CBUFFER_END
 
 

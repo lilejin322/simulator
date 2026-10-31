@@ -475,7 +475,7 @@ DAMAGES.
 -----------------------------------------------------------------------------
                                Mozilla Public License, Version 2.0
 
-        applies to: 
+        applies to:
         - Assets/Scripts/Components/VehicleDynamics.cs, Copyright (C) 2016, Jaguar Land Rover. Copyright (c) 2019 LG Electronics, Inc. 
 -----------------------------------------------------------------------------
 
@@ -634,7 +634,7 @@ This Source Code Form is “Incompatible With Secondary Licenses”, as defined 
 
 -----------------------------------------------------------------------------
                                Modified BSD License
-        applies to: 
+        applies to:
         - libjpeg-turbo, Copyright (C)2009-2019 D. R. Commander. All Rights Reserved. Copyright (C)2015 Viktor Szathmáry. All Rights Reserved.
         - Moq, Copyright (c) 2007, Clarius Consulting, Manas Technology Solutions, InSTEDD. All rights reserved.
         - FMI, Copyright (c) 2018, Dassault Systemes. All rights reserved.
@@ -671,7 +671,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 -----------------------------------------------------------------------------
                         Independent JPEG Group License, Clause 2
-        applies to: 
+        applies to:
         - libjpeg-turbo
 -----------------------------------------------------------------------------
 
@@ -894,7 +894,7 @@ Group.
 
 -----------------------------------------------------------------------------
                         The MIT License (MIT)
-        applies to: 
+        applies to:
         - Nancy, Copyright (c) 2010 Andreas Håkansson, Steven Robbins and contributors
         - OsmSharp, Copyright (c) 2017 Ben Abelshausen
         - SimpleJSON, Copyright (c) 2012-2017 Markus Göbel (Bunny83)
@@ -931,7 +931,7 @@ SOFTWARE.
 
 -----------------------------------------------------------------------------
                   Boost Software License - Version 1.0
-        applies to: 
+        applies to:
         - Clipper, Copyright (c) 2010-2014 Angus Johnson
 -----------------------------------------------------------------------------
 
@@ -958,3 +958,41 @@ SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE
 FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+
+-----------------------------------------------------------------------------
+                               BSD 3-Clause License
+        applies to:
+        - Asset identities and sensor configurations derived from SORA-SVL (https://github.com/YuqiHuai/SORA-SVL):
+          Assets/Maps/*/map.json, Assets/Vehicles/*/vehicle.json, Assets/Sensors/*/sensor.json,
+          Assets/Bridges/*/bridge.json, Assets/Vehicles/*/SensorConfigurations/*.json,
+          and the generated Assets/Resources/BuiltinAssets.json,
+          Copyright (c) 2024, Yuqi Huai (UCI SORA)
+-----------------------------------------------------------------------------
+
+Copyright (c) 2024, Yuqi Huai (UCI SORA)
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

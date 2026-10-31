@@ -99,6 +99,16 @@
 #define SAMPLER_SUBSURFACE_MASK_MAP_IDX sampler_SubsurfaceMaskMap3
 #endif
 
+#if defined(_TRANSMISSION_MASK_MAP0)
+#define SAMPLER_TRANSMISSION_MASK_MAP_IDX sampler_TransmissionMaskMap0
+#elif defined(_TRANSMISSION_MASK_MAP1)
+#define SAMPLER_TRANSMISSION_MASK_MAP_IDX sampler_TransmissionMaskMap1
+#elif defined(_TRANSMISSION_MASK_MAP2)
+#define SAMPLER_TRANSMISSION_MASK_MAP_IDX sampler_TransmissionMaskMap2
+#elif defined(_TRANSMISSION_MASK_MAP3)
+#define SAMPLER_TRANSMISSION_MASK_MAP_IDX sampler_TransmissionMaskMap3
+#endif
+
 #if defined(_THICKNESSMAP0)
 #define SAMPLER_THICKNESSMAP_IDX sampler_ThicknessMap0
 #elif defined(_THICKNESSMAP1)
@@ -128,6 +138,9 @@
 #ifdef _SUBSURFACE_MASK_MAP0
 #define _SUBSURFACE_MASK_MAP_IDX
 #endif
+#ifdef _TRANSMISSION_MASK_MAP0
+#define _TRANSMISSION_MASK_MAP_IDX
+#endif
 #ifdef _THICKNESSMAP0
 #define _THICKNESSMAP_IDX
 #endif
@@ -144,6 +157,7 @@
 #undef _NORMALMAP_TANGENT_SPACE_IDX
 #undef _DETAIL_MAP_IDX
 #undef _SUBSURFACE_MASK_MAP_IDX
+#undef _TRANSMISSION_MASK_MAP_IDX
 #undef _THICKNESSMAP_IDX
 #undef _MASKMAP_IDX
 #undef _BENTNORMALMAP_IDX
@@ -162,6 +176,9 @@
 #ifdef _SUBSURFACE_MASK_MAP1
 #define _SUBSURFACE_MASK_MAP_IDX
 #endif
+#ifdef _TRANSMISSION_MASK_MAP1
+#define _TRANSMISSION_MASK_MAP_IDX
+#endif
 #ifdef _THICKNESSMAP1
 #define _THICKNESSMAP_IDX
 #endif
@@ -178,6 +195,7 @@
 #undef _NORMALMAP_TANGENT_SPACE_IDX
 #undef _DETAIL_MAP_IDX
 #undef _SUBSURFACE_MASK_MAP_IDX
+#undef _TRANSMISSION_MASK_MAP_IDX
 #undef _THICKNESSMAP_IDX
 #undef _MASKMAP_IDX
 #undef _BENTNORMALMAP_IDX
@@ -196,6 +214,9 @@
 #ifdef _SUBSURFACE_MASK_MAP2
 #define _SUBSURFACE_MASK_MAP_IDX
 #endif
+#ifdef _TRANSMISSION_MASK_MAP2
+#define _TRANSMISSION_MASK_MAP_IDX
+#endif
 #ifdef _THICKNESSMAP2
 #define _THICKNESSMAP_IDX
 #endif
@@ -212,6 +233,7 @@
 #undef _NORMALMAP_TANGENT_SPACE_IDX
 #undef _DETAIL_MAP_IDX
 #undef _SUBSURFACE_MASK_MAP_IDX
+#undef _TRANSMISSION_MASK_MAP_IDX
 #undef _THICKNESSMAP_IDX
 #undef _MASKMAP_IDX
 #undef _BENTNORMALMAP_IDX
@@ -230,6 +252,9 @@
 #ifdef _SUBSURFACE_MASK_MAP3
 #define _SUBSURFACE_MASK_MAP_IDX
 #endif
+#ifdef _TRANSMISSION_MASK_MAP3
+#define _TRANSMISSION_MASK_MAP_IDX
+#endif
 #ifdef _THICKNESSMAP3
 #define _THICKNESSMAP_IDX
 #endif
@@ -246,6 +271,7 @@
 #undef _NORMALMAP_TANGENT_SPACE_IDX
 #undef _DETAIL_MAP_IDX
 #undef _SUBSURFACE_MASK_MAP_IDX
+#undef _TRANSMISSION_MASK_MAP_IDX
 #undef _THICKNESSMAP_IDX
 #undef _MASKMAP_IDX
 #undef _BENTNORMALMAP_IDX
@@ -299,21 +325,23 @@ float BlendLayeredScalar(float x0, float x1, float x2, float x3, float weight[4]
 // Or the last found in case of equality.
 uint BlendLayeredDiffusionProfile(uint x0, uint x1, uint x2, uint x3, float weight[4])
 {
-    uint diffusionProfileHash = x0;
-    float currentMax = weight[0];
-
-    diffusionProfileHash = currentMax < weight[1] ? x1 : diffusionProfileHash;
-    currentMax = max(currentMax, weight[1]);
-
+    // Not the simplest logic but it's to workaround what looks like a compiler bug on metal
+    float maxw = max(weight[0], weight[1]);
 #if _LAYER_COUNT >= 3
-    diffusionProfileHash = currentMax < weight[2] ? x2 : diffusionProfileHash;
-    currentMax = max(currentMax, weight[2]);
+    maxw = max(maxw, weight[2]);
 #endif
 #if _LAYER_COUNT >= 4
-    diffusionProfileHash = currentMax < weight[3] ? x3 : diffusionProfileHash;
+    maxw = max(maxw, weight[3]);
 #endif
 
-    return diffusionProfileHash;
+    return x0 * (maxw == weight[0]) + x1 * (maxw == weight[1])
+#if _LAYER_COUNT >= 3
+        + x2 * (maxw == weight[2])
+#endif
+#if _LAYER_COUNT >= 4
+        + x3 * (maxw == weight[3])
+#endif
+    ;
 }
 
 #define SURFACEDATA_BLEND_VECTOR3(surfaceData, name, mask) BlendLayeredVector3(MERGE_NAME(surfaceData, 0).name, MERGE_NAME(surfaceData, 1).name, MERGE_NAME(surfaceData, 2).name, MERGE_NAME(surfaceData, 3).name, mask);
@@ -339,7 +367,7 @@ void GetLayerTexCoord(float2 texCoord0, float2 texCoord1, float2 texCoord2, floa
     ComputeLayerTexCoord0(  texCoord0, texCoord1, texCoord2, texCoord3, _UVMappingMaskBlendMask, _UVMappingMaskBlendMask,
                             _LayerMaskMap_ST.xy, _LayerMaskMap_ST.zw, float2(0.0, 0.0), float2(0.0, 0.0), 1.0, false,
                             positionWS, _TexWorldScaleBlendMask,
-                            mappingType, layerTexCoord);
+                            mappingType, false, layerTexCoord);
 
     layerTexCoord.blendMask = layerTexCoord.base0;
 
@@ -360,6 +388,8 @@ void GetLayerTexCoord(float2 texCoord0, float2 texCoord1, float2 texCoord2, floa
     mappingType = UV_MAPPING_TRIPLANAR;
 #endif
 
+    bool objectSpaceMapping = false;
+
     ComputeLayerTexCoord0(  texCoord0, texCoord1, texCoord2, texCoord3, _UVMappingMask0, _UVDetailsMappingMask0,
                             _BaseColorMap0_ST.xy, _BaseColorMap0_ST.zw, _DetailMap0_ST.xy, _DetailMap0_ST.zw, 1.0
                             #if !defined(_MAIN_LAYER_INFLUENCE_MODE)
@@ -367,7 +397,7 @@ void GetLayerTexCoord(float2 texCoord0, float2 texCoord1, float2 texCoord2, floa
                             #endif
                             , _LinkDetailsWithBase0
                             , positionWS, _TexWorldScale0,
-                            mappingType, layerTexCoord);
+                            mappingType, objectSpaceMapping, layerTexCoord);
 
     mappingType = UV_MAPPING_UVSET;
 #if defined(_LAYER_MAPPING_PLANAR1)
@@ -378,7 +408,7 @@ void GetLayerTexCoord(float2 texCoord0, float2 texCoord1, float2 texCoord2, floa
     ComputeLayerTexCoord1(  texCoord0, texCoord1, texCoord2, texCoord3, _UVMappingMask1, _UVDetailsMappingMask1,
                             _BaseColorMap1_ST.xy, _BaseColorMap1_ST.zw, _DetailMap1_ST.xy, _DetailMap1_ST.zw, tileObjectScale, _LinkDetailsWithBase1,
                             positionWS, _TexWorldScale1,
-                            mappingType, layerTexCoord);
+                            mappingType, objectSpaceMapping, layerTexCoord);
 
     mappingType = UV_MAPPING_UVSET;
 #if defined(_LAYER_MAPPING_PLANAR2)
@@ -389,7 +419,7 @@ void GetLayerTexCoord(float2 texCoord0, float2 texCoord1, float2 texCoord2, floa
     ComputeLayerTexCoord2(  texCoord0, texCoord1, texCoord2, texCoord3, _UVMappingMask2, _UVDetailsMappingMask2,
                             _BaseColorMap2_ST.xy, _BaseColorMap2_ST.zw, _DetailMap2_ST.xy, _DetailMap2_ST.zw, tileObjectScale, _LinkDetailsWithBase2,
                             positionWS, _TexWorldScale2,
-                            mappingType, layerTexCoord);
+                            mappingType, objectSpaceMapping, layerTexCoord);
 
     mappingType = UV_MAPPING_UVSET;
 #if defined(_LAYER_MAPPING_PLANAR3)
@@ -400,7 +430,7 @@ void GetLayerTexCoord(float2 texCoord0, float2 texCoord1, float2 texCoord2, floa
     ComputeLayerTexCoord3(  texCoord0, texCoord1, texCoord2, texCoord3, _UVMappingMask3, _UVDetailsMappingMask3,
                             _BaseColorMap3_ST.xy, _BaseColorMap3_ST.zw, _DetailMap3_ST.xy, _DetailMap3_ST.zw, tileObjectScale, _LinkDetailsWithBase3,
                             positionWS, _TexWorldScale3,
-                            mappingType, layerTexCoord);
+                            mappingType, objectSpaceMapping, layerTexCoord);
 }
 
 // This is call only in this file
@@ -581,7 +611,7 @@ void ComputeLayerWeights(FragInputs input, LayerTexCoord layerTexCoord, float4 i
     // Note: blendMasks.argb because a is main layer
     float4 opacityAsDensity = saturate((inputAlphaMask - (float4(1.0, 1.0, 1.0, 1.0) - blendMasks.argb)) * 20.0); // 20.0 is the number of steps in inputAlphaMask (Density mask. We decided 20 empirically)
     float4 useOpacityAsDensityParam = float4(_OpacityAsDensity0, _OpacityAsDensity1, _OpacityAsDensity2, _OpacityAsDensity3);
-    blendMasks.argb = lerp(blendMasks.argb, opacityAsDensity, useOpacityAsDensityParam);
+    blendMasks.argb = ceil(opacityAsDensity);
 #endif
 
 #if LAYERS_HEIGHTMAP_ENABLE
@@ -651,7 +681,10 @@ float3 ComputeMainBaseColorInfluence(float influenceMask, float3 baseColor0, flo
     // (baseColor - meanColor) + lerp(meanColor, baseColor0, inheritBaseColor) simplify to
     // saturate(influenceFactor * (baseColor0 - meanColor) + baseColor);
     // There is a special case when baseColor < meanColor to avoid getting negative values.
-    float3 factor = baseColor > meanColor ? (baseColor0 - meanColor) : (baseColor0 * baseColor / max(meanColor, 0.001) - baseColor); // max(to avoid divide by 0)
+    float3 factor = (baseColor0 - meanColor);
+    factor.x = baseColor.x > meanColor.x ? factor.x : (baseColor0.x * baseColor.x / max(meanColor.x, 0.001) - baseColor.x); // max(to avoid divide by 0)
+    factor.y = baseColor.y > meanColor.y ? factor.y : (baseColor0.y * baseColor.y / max(meanColor.y, 0.001) - baseColor.y);
+    factor.z = baseColor.z > meanColor.z ? factor.z : (baseColor0.z * baseColor.z / max(meanColor.z, 0.001) - baseColor.z);
     return influenceFactor * factor + baseColor;
 }
 #ifndef SHADER_STAGE_RAY_TRACING
@@ -676,11 +709,7 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
 #endif
 #endif
 
-#ifdef _DOUBLESIDED_ON
-    float3 doubleSidedConstants = _DoubleSidedConstants.xyz;
-#else
-    float3 doubleSidedConstants = float3(1.0, 1.0, 1.0);
-#endif
+    float3 doubleSidedConstants = GetDoubleSidedConstants();
 
     ApplyDoubleSidedFlipOrMirror(input, doubleSidedConstants); // Apply double sided flip on the vertex normal
 
@@ -746,6 +775,7 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     surfaceData.metallic = SURFACEDATA_BLEND_SCALAR(surfaceData, metallic, weights);
     surfaceData.tangentWS = normalize(input.tangentToWorld[0].xyz); // The tangent is not normalize in tangentToWorld for mikkt. Tag: SURFACE_GRADIENT
     surfaceData.subsurfaceMask = SURFACEDATA_BLEND_SCALAR(surfaceData, subsurfaceMask, weights);
+    surfaceData.transmissionMask = SURFACEDATA_BLEND_VECTOR3(surfaceData, transmissionMask, weights);
     surfaceData.thickness = SURFACEDATA_BLEND_SCALAR(surfaceData, thickness, weights);
     surfaceData.diffusionProfileHash = SURFACEDATA_BLEND_DIFFUSION_PROFILE(surfaceData, diffusionProfileHash, weights); // We don't need the hash as we only use it to compute the diffusion profile index
 
@@ -753,7 +783,8 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     surfaceData.materialFeatures = MATERIALFEATUREFLAGS_LIT_STANDARD;
 
 #ifdef _MATERIAL_FEATURE_SUBSURFACE_SCATTERING
-    surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_LIT_SUBSURFACE_SCATTERING;
+    if (surfaceData.subsurfaceMask > 0)
+        surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_LIT_SUBSURFACE_SCATTERING;
 #endif
 #ifdef _MATERIAL_FEATURE_TRANSMISSION
     surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_LIT_TRANSMISSION;
@@ -773,13 +804,23 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     surfaceData.atDistance = 1000000.0;
     surfaceData.transmittanceMask = 0.0;
 
-    GetNormalWS(input, normalTS, surfaceData.normalWS, doubleSidedConstants);
-
     surfaceData.geomNormalWS = input.tangentToWorld[2];
 
-    surfaceData.specularOcclusion = 1.0; // This need to be init here to quiet the compiler in case of decal, but can be override later.
+    // This need to be init here to quiet the compiler in case of decal, but can be override later.
+    surfaceData.specularOcclusion = 1.0;
+    surfaceData.normalWS = float3(0.0, 0.0, 0.0);
 
-#if HAVE_DECALS
+#if HAVE_DECALS && defined(DECAL_SURFACE_GRADIENT)
+    if (_EnableDecals)
+    {
+        DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, input, alpha);
+        ApplyDecalToSurfaceData(decalSurfaceData, input.tangentToWorld[2], surfaceData, normalTS);
+    }
+#endif
+
+    GetNormalWS(input, normalTS, surfaceData.normalWS, doubleSidedConstants);
+
+#if HAVE_DECALS && !defined(DECAL_SURFACE_GRADIENT)
     if (_EnableDecals)
     {
         // Both uses and modifies 'surfaceData.normalWS'.
@@ -797,14 +838,17 @@ void GetSurfaceAndBuiltinData(FragInputs input, float3 V, inout PositionInputs p
     bentNormalWS = surfaceData.normalWS;
 #endif
 
-#if defined(DEBUG_DISPLAY) && !defined(SHADER_STAGE_RAY_TRACING)
+#if defined(DEBUG_DISPLAY)
+#if !defined(SHADER_STAGE_RAY_TRACING)
+    // Mipmap mode debugging isn't supported with ray tracing as it relies on derivatives
     if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
     {
-        surfaceData.baseColor = GetTextureDataDebug(_DebugMipMapMode, layerTexCoord.base0.uv, _BaseColorMap0, _BaseColorMap0_TexelSize, _BaseColorMap0_MipInfo, surfaceData.baseColor);
+        surfaceData.baseColor = GET_TEXTURE_STREAMING_DEBUG(posInput.positionSS, input.texCoord0);
         surfaceData.metallic = 0;
     }
+#endif
 
-    // We need to call ApplyDebugToSurfaceData after filling the surfarcedata and before filling builtinData
+    // We need to call ApplyDebugToSurfaceData after filling the surfaceData and before filling builtinData
     // as it can modify attribute use for static lighting
     ApplyDebugToSurfaceData(input.tangentToWorld, surfaceData);
 #endif

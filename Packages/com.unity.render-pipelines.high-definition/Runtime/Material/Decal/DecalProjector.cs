@@ -1,22 +1,35 @@
 using System;
+using System.Collections.Generic;
+#if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.Rendering.HighDefinition;
+using UnityEditor.SceneManagement;
+#endif
 
 namespace UnityEngine.Rendering.HighDefinition
 {
+    /// <summary>The scaling mode to apply to decals that use the Decal Projector.</summary>
+    public enum DecalScaleMode
+    {
+        /// <summary>Ignores the transformation hierarchy and uses the scale values in the Decal Projector component directly.</summary>
+        ScaleInvariant,
+        /// <summary>Multiplies the lossy scale of the Transform with the Decal Projector's own scale then applies this to the decal.</summary>
+        [InspectorName("Inherit from Hierarchy")]
+        InheritFromHierarchy,
+    }
+
     /// <summary>
     /// Decal Projector component.
     /// </summary>
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Decal-Projector" + Documentation.endURL)]
+    [HDRPHelpURLAttribute("understand-decals")]
     [ExecuteAlways]
 #if UNITY_EDITOR
     [CanEditMultipleObjects]
 #endif
-    [AddComponentMenu("Rendering/Decal Projector")]
+    [AddComponentMenu("Rendering/HDRP Decal Projector")]
+    [Icon("Packages/com.unity.render-pipelines.core/Editor/Icons/Processed/DecalProjector Icon.asset")]
     public partial class DecalProjector : MonoBehaviour
     {
-        internal static readonly Quaternion k_MinusYtoZRotation = Quaternion.Euler(-90, 0, 0);
-
         [SerializeField]
         private Material m_Material = null;
         /// <summary>
@@ -36,7 +49,7 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
 #if UNITY_EDITOR
-        private int m_Layer;
+        internal int cachedEditorLayer = 0;
 #endif
 
         [SerializeField]
@@ -58,7 +71,7 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
         [SerializeField]
-        [Range(0,1)]
+        [Range(0, 1)]
         private float m_FadeScale = 0.9f;
         /// <summary>
         /// Percent of the distance from the camera at which this Decal start to fade off.
@@ -169,23 +182,58 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
         [SerializeField]
-        DecalLayerEnum m_DecalLayerMask = DecalLayerEnum.DecalLayerDefault;
+        private IntScalableSettingValue m_TransparentTextureResolution = new IntScalableSettingValue
+        {
+            @override = 256,
+            useOverride = true,
+        };
+
+        /// <summary>
+        /// Resolution that is used when the projector affects transparency and a shader graph is being used
+        /// </summary>
+        public IntScalableSettingValue TransparentTextureResolution
+        {
+            get => m_TransparentTextureResolution;
+            set
+            {
+                m_TransparentTextureResolution = value;
+                OnValidate();
+            }
+        }
+
+        [SerializeField]
+        RenderingLayerMask m_DecalLayerMask = (RenderingLayerMask) (uint) UnityEngine.RenderingLayerMask.defaultRenderingLayerMask;
         /// <summary>
         /// The layer of the decal.
         /// </summary>
-        public DecalLayerEnum decalLayerMask
+        public RenderingLayerMask decalLayerMask
         {
             get => m_DecalLayerMask;
             set => m_DecalLayerMask = value;
         }
 
         [SerializeField]
-        private Vector3 m_Offset = new Vector3(0, 0, 0.5f);
+        private DecalScaleMode m_ScaleMode = DecalScaleMode.ScaleInvariant;
         /// <summary>
-        /// Change the offset position.
-        /// Do not expose: Could be changed by the inspector when manipulating the gizmo.
+        /// The scaling mode to apply to decals that use this Decal Projector.
         /// </summary>
-        internal Vector3 offset
+        public DecalScaleMode scaleMode
+        {
+            get => m_ScaleMode;
+            set
+            {
+                m_ScaleMode = value;
+                OnValidate();
+            }
+        }
+
+        [SerializeField]
+        internal Vector3 m_Offset = new Vector3(0, 0, 0);
+        /// <summary>
+        /// Change the pivot position.
+        /// It is an offset between the center of the projection and the transform position.
+        /// </summary>
+        public Vector3 pivot
         {
             get
             {
@@ -199,21 +247,31 @@ namespace UnityEngine.Rendering.HighDefinition
         }
 
         [SerializeField]
-        Vector3 m_Size = new Vector3(1, 1, 1);
+        internal Vector3 m_Size = new Vector3(1, 1, 1);
         /// <summary>
         /// The size of the projection volume.
+        /// See also <seealso cref="ResizeAroundPivot"/> to rescale relatively to the pivot position.
         /// </summary>
         public Vector3 size
         {
-            get
-            {
-                return m_Size;
-            }
+            get => m_Size;
             set
             {
                 m_Size = value;
                 OnValidate();
             }
+        }
+
+        /// <summary>
+        /// Update the pivot to resize centered on the pivot position.
+        /// </summary>
+        /// <param name="newSize">The new size.</param>
+        public void ResizeAroundPivot(Vector3 newSize)
+        {
+            for (int axis = 0; axis < 3; ++axis)
+                if (m_Size[axis] > Mathf.Epsilon)
+                    m_Offset[axis] *= newSize[axis] / m_Size[axis];
+            size = newSize;
         }
 
         [SerializeField]
@@ -238,15 +296,11 @@ namespace UnityEngine.Rendering.HighDefinition
         private Material m_OldMaterial = null;
         private DecalSystem.DecalHandle m_Handle = null;
 
+        /// <summary>A scale that should be used for rendering and handles.</summary>
+        internal Vector3 effectiveScale => m_ScaleMode == DecalScaleMode.InheritFromHierarchy ? transform.lossyScale : Vector3.one;
 
-        /// <summary>current rotation in a way the DecalSystem will be able to use it</summary>
-        internal Quaternion rotation => transform.rotation * k_MinusYtoZRotation;
         /// <summary>current position in a way the DecalSystem will be able to use it</summary>
         internal Vector3 position => transform.position;
-        /// <summary>current size in a way the DecalSystem will be able to use it</summary>
-        internal Vector3 decalSize => new Vector3(m_Size.x, m_Size.z, m_Size.y);
-        /// <summary>current size in a way the DecalSystem will be able to use it</summary>
-        internal Vector3 decalOffset => new Vector3(m_Offset.x, -m_Offset.z, m_Offset.y);
         /// <summary>current uv parameters in a way the DecalSystem will be able to use it</summary>
         internal Vector4 uvScaleBias => new Vector4(m_UVScale.x, m_UVScale.y, m_UVBias.x, m_UVBias.y);
 
@@ -265,9 +319,6 @@ namespace UnityEngine.Rendering.HighDefinition
         // Struct used to gather all decal property required to be cached to be sent to shader code
         internal struct CachedDecalData
         {
-            public Matrix4x4 localToWorld;
-            public Quaternion rotation;
-            public Matrix4x4 sizeOffset;
             public float drawDistance;
             public float fadeScale;
             public float startAngleFade;
@@ -277,16 +328,13 @@ namespace UnityEngine.Rendering.HighDefinition
             public int layerMask;
             public ulong sceneLayerMask;
             public float fadeFactor;
-            public DecalLayerEnum decalLayerMask;
+            public RenderingLayerMask decalLayerMask;
         }
 
         internal CachedDecalData GetCachedDecalData()
         {
             CachedDecalData data = new CachedDecalData();
 
-            data.localToWorld = Matrix4x4.TRS(position, rotation, Vector3.one);
-            data.rotation = rotation;
-            data.sizeOffset = Matrix4x4.Translate(decalOffset) * Matrix4x4.Scale(decalSize);
             data.drawDistance = m_DrawDistance;
             data.fadeScale = m_FadeScale;
             data.startAngleFade = m_StartAngleFade;
@@ -303,19 +351,23 @@ namespace UnityEngine.Rendering.HighDefinition
 
         void InitMaterial()
         {
+#if UNITY_EDITOR
+            if (m_Material == null && GraphicsSettings.TryGetRenderPipelineSettings<HDRenderPipelineEditorMaterials>(out var defaultMaterials))
+                m_Material = defaultMaterials.defaultDecalMaterial;
+#endif
+
             if (m_Material == null)
             {
-#if UNITY_EDITOR
-                var hdrp = HDRenderPipeline.defaultAsset;
-                m_Material = hdrp != null ? hdrp.GetDefaultDecalMaterial() : null;
-#else
-                m_Material = null;
-#endif
+                Debug.LogWarning($"{name} has a null {typeof(Material)} on the {nameof(material)} property.");
             }
         }
 
         void Reset() => InitMaterial();
 
+#if UNITY_EDITOR
+        static List<DecalProjector> m_DecalProjectorInstances;  // List of decal projectors that have had OnEnable() called on them
+        [NonSerialized] int m_EditorInstanceIndex = -1;
+#endif
         void OnEnable()
         {
             InitMaterial();
@@ -326,36 +378,110 @@ namespace UnityEngine.Rendering.HighDefinition
                 m_Handle = null;
             }
 
-            m_Handle = DecalSystem.instance.AddDecal(m_Material, GetCachedDecalData());
+            m_Handle = DecalSystem.instance.AddDecal(this);
             m_OldMaterial = m_Material;
 
 #if UNITY_EDITOR
-            m_Layer = gameObject.layer;
+            cachedEditorLayer = gameObject.layer;
             // Handle scene visibility
-            UnityEditor.SceneVisibilityManager.visibilityChanged += UpdateDecalVisibility;
+
+            // Create a list to keep track of all active decal projectors and register our event handlers that dispatch events to each one.
+            // We do this instead of registering event handlers individually for each instance as that generates far more garbage on the heap
+            if (m_DecalProjectorInstances == null)
+            {
+                m_DecalProjectorInstances = new List<DecalProjector>();
+                SceneVisibilityManager.visibilityChanged += UpdateDecalVisibilityDispatcher;
+                PrefabStage.prefabStageOpened += RegisterDecalVisibilityUpdatePrefabStage;
+
+                if (PrefabStageUtility.GetCurrentPrefabStage() != null) // In case the prefab stage is already opened when enabling the decal
+                    RegisterDecalVisibilityUpdatePrefabStage();
+            }
+            m_EditorInstanceIndex = m_DecalProjectorInstances.Count;
+            m_DecalProjectorInstances.Add(this);
 #endif
         }
 
 #if UNITY_EDITOR
+        // Handler for the SceneVisibilityManager.visibilityChanged event, calls UpdateDecalVisibility() on each active decal projector
+        static void UpdateDecalVisibilityDispatcher()
+        {
+            foreach (DecalProjector decalProjector in m_DecalProjectorInstances)
+                decalProjector.UpdateDecalVisibility();
+        }
+
+        // Handle the SceneVisibilityManager.visibilityChanged event for this decal projector
         void UpdateDecalVisibility()
         {
+            // This callback is called before HDRP is initialized after a domain reload
+            if (HDRenderPipeline.currentPipeline == null)
+                return;
+
             // Fade out the decal when it is hidden by the scene visibility
-            if (UnityEditor.SceneVisibilityManager.instance.IsHidden(gameObject) && m_Handle != null)
+            if (SceneVisibilityManager.instance.IsHidden(gameObject) && m_Handle != null)
             {
                 DecalSystem.instance.RemoveDecal(m_Handle);
                 m_Handle = null;
             }
             else if (m_Handle == null)
             {
-                m_Handle = DecalSystem.instance.AddDecal(m_Material, GetCachedDecalData());
+                m_Handle = DecalSystem.instance.AddDecal(this);
             }
             else
             {
                 // Scene culling mask may have changed.
-                DecalSystem.instance.UpdateCachedData(m_Handle, GetCachedDecalData());
+                DecalSystem.instance.UpdateCachedData(m_Handle, this);
             }
         }
-#endif
+
+        // Handler for the PrefabStage.prefabStageOpened event
+        static void RegisterDecalVisibilityUpdatePrefabStage(PrefabStage stage = null)
+        {
+            SceneView.duringSceneGui -= UpdateDecalVisibilityPrefabStageDispatcher;
+            SceneView.duringSceneGui += UpdateDecalVisibilityPrefabStageDispatcher;
+        }
+
+        void UnregisterDecalVisibilityUpdatePrefabStage()
+        {
+            SceneView.duringSceneGui -= UpdateDecalVisibilityPrefabStageDispatcher;
+        }
+
+        // Handler for the SceneView.duringSceneGui event, calls UpdateDecalVisibilityPrefabStage() on each active decal projector
+        static void UpdateDecalVisibilityPrefabStageDispatcher(SceneView sv)
+        {
+            foreach (DecalProjector decalProjector in m_DecalProjectorInstances)
+                decalProjector.UpdateDecalVisibilityPrefabStage(sv);
+
+        }
+
+        // Handle the SceneView.duringSceneGui event for this decal projector
+        bool m_LastPrefabStageVisibility = true;
+        void UpdateDecalVisibilityPrefabStage(SceneView sv)
+        {
+            bool showDecal = true;
+
+            // If prefab context is not hidden, then we should render the decal
+            if (!CoreUtils.IsSceneViewPrefabStageContextHidden())
+                showDecal = true;
+
+            var stage = PrefabStageUtility.GetCurrentPrefabStage();
+            if (stage != null)
+            {
+                bool isDecalInPrefabStage = gameObject.scene == stage.scene;
+
+                if (!isDecalInPrefabStage && stage.mode == PrefabStage.Mode.InIsolation)
+                    showDecal = false;
+                if (!isDecalInPrefabStage && CoreUtils.IsSceneViewPrefabStageContextHidden())
+                    showDecal = false;
+            }
+
+            // Update decal visibility based on showDecal
+            if (!m_LastPrefabStageVisibility && showDecal)
+                m_Handle = DecalSystem.instance.AddDecal(this);
+            else if (m_LastPrefabStageVisibility && !showDecal)
+                DecalSystem.instance.RemoveDecal(m_Handle);
+            m_LastPrefabStageVisibility = showDecal;
+        }
+#endif  // UNITY_EDITOR
 
         void OnDisable()
         {
@@ -365,7 +491,21 @@ namespace UnityEngine.Rendering.HighDefinition
                 m_Handle = null;
             }
 #if UNITY_EDITOR
-            UnityEditor.SceneVisibilityManager.visibilityChanged -= UpdateDecalVisibility;
+            // Remove this instance from the list tracking active decal projectors.
+            // We do this by swapping the last element of the array into the slot we are deleting rather than shuffling the entire contents above the slot down as it's faster and the actual ordering is not significant
+            var movedInstance = m_DecalProjectorInstances[m_EditorInstanceIndex] = m_DecalProjectorInstances[m_DecalProjectorInstances.Count - 1];
+            movedInstance.m_EditorInstanceIndex = m_EditorInstanceIndex;
+            m_EditorInstanceIndex = -1;
+            m_DecalProjectorInstances.RemoveAt(m_DecalProjectorInstances.Count - 1);
+
+            // If the list of active instances is now empty delete it and un-register our event handlers
+            if (m_DecalProjectorInstances.Count == 0)
+            {
+                SceneVisibilityManager.visibilityChanged -= UpdateDecalVisibilityDispatcher;
+                PrefabStage.prefabStageOpened -= RegisterDecalVisibilityUpdatePrefabStage;
+                UnregisterDecalVisibilityUpdatePrefabStage();
+                m_DecalProjectorInstances = null;
+            }
 #endif
         }
 
@@ -390,12 +530,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
                     if (m_Material != null)
                     {
-                        m_Handle = DecalSystem.instance.AddDecal(m_Material, GetCachedDecalData());
-
-                        if (!DecalSystem.IsHDRenderPipelineDecal(m_Material.shader)) // non HDRP/decal shaders such as shader graph decal do not affect transparency
-                        {
-                            m_AffectsTransparency = false;
-                        }
+                        m_Handle = DecalSystem.instance.AddDecal(this);
                     }
 
                     // notify the editor that material has changed so it can update the shader foldout
@@ -408,31 +543,12 @@ namespace UnityEngine.Rendering.HighDefinition
                 }
                 else // no material change, just update whatever else changed
                 {
-                    DecalSystem.instance.UpdateCachedData(m_Handle, GetCachedDecalData());
+                    DecalSystem.instance.UpdateCachedData(m_Handle, this);
                 }
-            }
-        }
 
 #if UNITY_EDITOR
-        void Update() // only run in editor
-        {
-            if (m_Layer != gameObject.layer)
-            {
-                m_Layer = gameObject.layer;
-                DecalSystem.instance.UpdateCachedData(m_Handle, GetCachedDecalData());
-            }
-        }
+                cachedEditorLayer = gameObject.layer;
 #endif
-
-        void LateUpdate()
-        {
-            if (m_Handle != null)
-            {
-                if (transform.hasChanged == true)
-                {
-                    DecalSystem.instance.UpdateCachedData(m_Handle, GetCachedDecalData());
-                    transform.hasChanged = false;
-                }
             }
         }
 
@@ -447,12 +563,20 @@ namespace UnityEngine.Rendering.HighDefinition
                 return false;
 
 #if UNITY_EDITOR
-            var hdrp = HDRenderPipeline.defaultAsset;
-            if ((hdrp != null) && (m_Material == hdrp.GetDefaultDecalMaterial()))
+            if (!HDRenderPipeline.isReady || m_Material == HDRenderPipeline.currentAsset.GetDefaultDecalMaterial())
                 return false;
 #endif
 
             return true;
+        }
+
+        /// <summary>
+        /// If called it will force an update of the shader graph textures in the transparent decal atlas
+        /// if the DecalProjector has Affects Transparent enabled
+        /// </summary>
+        public void UpdateTransparentShaderGraphTextures()
+        {
+            DecalSystem.instance.UpdateTransparentShaderGraphTextures(m_Handle, this);
         }
     }
 }

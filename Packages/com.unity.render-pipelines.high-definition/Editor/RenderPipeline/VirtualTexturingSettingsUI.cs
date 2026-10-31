@@ -22,6 +22,8 @@ namespace UnityEditor.Rendering.HighDefinition
 
         private const int CPUCacheSizeMinValue = 64;
         private const int GPUCacheSizeMinValue = 32;
+        private const int MaxMipPreloadTextureCount = 1024;
+        private const int MaxPreloadMipCount = 9;
 
         public void OnGUI(SerializedHDRenderPipelineAsset serialized, Editor owner)
         {
@@ -39,6 +41,8 @@ namespace UnityEditor.Rendering.HighDefinition
             using (var scope = new EditorGUI.ChangeCheckScope())
             {
                 serialized.virtualTexturingSettings.streamingCpuCacheSizeInMegaBytes.intValue = Mathf.Max(CPUCacheSizeMinValue, EditorGUILayout.DelayedIntField(s_Styles.cpuCacheSize, serialized.virtualTexturingSettings.streamingCpuCacheSizeInMegaBytes.intValue));
+                serialized.virtualTexturingSettings.streamingMipPreloadTexturesPerFrame.intValue = Mathf.Clamp(EditorGUILayout.DelayedIntField(s_Styles.streamingMipPreloadTexturesPerFrame, serialized.virtualTexturingSettings.streamingMipPreloadTexturesPerFrame.intValue), 0, MaxMipPreloadTextureCount);
+                serialized.virtualTexturingSettings.streamingPreloadMipCount.intValue = Mathf.Clamp(EditorGUILayout.DelayedIntField(s_Styles.streamingPreloadMipCount, serialized.virtualTexturingSettings.streamingPreloadMipCount.intValue), 1, MaxPreloadMipCount);
 
                 // GPU Cache size settings
                 if (m_GPUCacheSizeOverrideListStreaming == null ||
@@ -65,7 +69,7 @@ namespace UnityEditor.Rendering.HighDefinition
             {
                 SerializedProperty settingProperty = property.GetArrayElementAtIndex(i);
                 settings.Add(new GPUCacheSettingSRP()
-                    { format = (GraphicsFormat)settingProperty.FindPropertyRelative("format").intValue, sizeInMegaBytes = (uint)settingProperty.FindPropertyRelative("sizeInMegaBytes").intValue });
+                { format = (GraphicsFormat)settingProperty.FindPropertyRelative("format").intValue, sizeInMegaBytes = (uint)settingProperty.FindPropertyRelative("sizeInMegaBytes").intValue });
             }
 
             return settings.ToArray();
@@ -77,9 +81,9 @@ namespace UnityEditor.Rendering.HighDefinition
 
             list.drawHeaderCallback =
                 (Rect rect) =>
-                {
-                    GUI.Label(rect, s_Styles.gpuCacheSize);
-                };
+            {
+                GUI.Label(rect, s_Styles.gpuCacheSize);
+            };
 
             list.drawElementCallback = drawCallback;
 
@@ -116,6 +120,7 @@ namespace UnityEditor.Rendering.HighDefinition
             format = formatString.Substring(0, lastUnderscore);
             channelTransform = formatString.Substring(lastUnderscore + 1);
         }
+
         GraphicsFormat FormatAndChannelTransformStringToGraphicsFormat(string format, string channelTransform)
         {
             if (format == "None") return GraphicsFormat.None;
@@ -156,7 +161,7 @@ namespace UnityEditor.Rendering.HighDefinition
             }
 #endif
 
-            GraphicsFormat serializedFormat = (GraphicsFormat) cacheSizeOverrideProperty.FindPropertyRelative("format").intValue;
+            GraphicsFormat serializedFormat = (GraphicsFormat)cacheSizeOverrideProperty.FindPropertyRelative("format").intValue;
             GraphicsFormatToFormatAndChannelTransformString(serializedFormat, out string formatString, out string channelTransformString);
 
 
@@ -254,10 +259,10 @@ namespace UnityEditor.Rendering.HighDefinition
             rect.position += new Vector2(sizeLabelWidth, 0);
             rect.width = sizeWidth;
 
-            cacheSizeOverride.sizeInMegaBytes = (uint) Mathf.Max(GPUCacheSizeMinValue,
-                EditorGUI.DelayedIntField(rect, (int) cacheSizeOverride.sizeInMegaBytes));
+            cacheSizeOverride.sizeInMegaBytes = (uint)Mathf.Max(GPUCacheSizeMinValue,
+                EditorGUI.DelayedIntField(rect, (int)cacheSizeOverride.sizeInMegaBytes));
             cacheSizeOverrideProperty.FindPropertyRelative("sizeInMegaBytes").intValue =
-                (int) cacheSizeOverride.sizeInMegaBytes;
+                (int)cacheSizeOverride.sizeInMegaBytes;
         }
 
         void DrawStreamingOverrideElement(Rect rect, int settingIdx, bool active, bool focused)
@@ -272,6 +277,9 @@ namespace UnityEditor.Rendering.HighDefinition
 
             public readonly GUIContent gpuCacheSizeOverrideFormat = new GUIContent("Format", "Format and channel transform that will be overridden.");
             public readonly GUIContent gpuCacheSizeOverrideSize = new GUIContent("Size", "Size (in MB) of the setting.");
+
+            public readonly GUIContent streamingMipPreloadTexturesPerFrame = new GUIContent("Preload Textures Per Frame", "The number of textures Unity preloads into GPU memory per frame. Use this to avoid texture pop-in. The range is 0 through 1024. The default is 0, which disables preloading.");
+            public readonly GUIContent streamingPreloadMipCount = new GUIContent("Preload Mip Count", "The number of mipmap levels to preload. The range is 1 through 9. The default is 1, which preloads only the highest mipmap level with the smallest size (128 × 128 pixels, the size of a Streaming Virtual Texturing tile).");
         }
 
         static Styles s_Styles;

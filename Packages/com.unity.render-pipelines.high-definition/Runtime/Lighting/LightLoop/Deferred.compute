@@ -34,8 +34,11 @@
 
 #pragma multi_compile _ SHADOWS_SHADOWMASK
 #pragma multi_compile SCREEN_SPACE_SHADOWS_OFF SCREEN_SPACE_SHADOWS_ON
-
-#pragma multi_compile SHADOW_LOW SHADOW_MEDIUM SHADOW_HIGH
+#pragma multi_compile _ CONTACT_SHADOWS_OFF
+#pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+#pragma multi_compile PUNCTUAL_SHADOW_LOW PUNCTUAL_SHADOW_MEDIUM PUNCTUAL_SHADOW_HIGH
+#pragma multi_compile DIRECTIONAL_SHADOW_LOW DIRECTIONAL_SHADOW_MEDIUM DIRECTIONAL_SHADOW_HIGH
+#pragma multi_compile AREA_SHADOW_MEDIUM AREA_SHADOW_HIGH
 
 #ifdef DEBUG_DISPLAY
     // Don't care about this warning in debug
@@ -53,6 +56,9 @@
 
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPass.cs.hlsl"
 #define SHADERPASS SHADERPASS_DEFERRED_LIGHTING
+
+// Disable half-precision types in the deferred lighting pass since this causes visual corruption in some cases
+#define PREFER_HALF 0
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
@@ -87,13 +93,13 @@ CBUFFER_END
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoop.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/HDStencilUsage.cs.hlsl"
 
-#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
 //-------------------------------------------------------------------------------------
 // variable declaration
 //-------------------------------------------------------------------------------------
 
-TEXTURE2D_X_UINT2(_StencilTexture);
+TYPED_TEXTURE2D_X(uint2, _StencilTexture);
 RW_TEXTURE2D_X(float3, diffuseLightingUAV);
 RW_TEXTURE2D_X(float4, specularLightingUAV);
 
@@ -150,7 +156,7 @@ void SHADE_OPAQUE_ENTRY(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 grou
     {
         return;
     }
-    
+
     // This is required for camera stacking and other cases where we might have a valid depth value in the depth buffer, but the pixel was not covered by this camera
     uint stencilVal = GetStencilValue(LOAD_TEXTURE2D_X(_StencilTexture, pixelCoord.xy));
     if ((stencilVal & STENCILUSAGE_REQUIRES_DEFERRED_LIGHTING) == 0)

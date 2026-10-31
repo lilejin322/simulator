@@ -12,56 +12,76 @@ namespace UnityEngine.Rendering.HighDefinition
     {
         /// <summary>Perform a rendering into <paramref name="target"/>.</summary>
         /// <example>
-        /// How to perform standard rendering:
+        /// How to perform rendering into a 2D render target:
         /// <code>
+        /// using UnityEngine;
+        /// using UnityEngine.Rendering;
+        /// using UnityEngine.Rendering.HighDefinition;
+        /// using UnityEngine.Experimental.Rendering;
+        /// 
         /// class StandardRenderingExample
         /// {
-        ///     public void Render()
-        ///     {
-        ///         // Copy default settings
-        ///         var settings = CameraRenderSettings.Default;
-        ///         // Adapt default settings to our custom usage
-        ///         settings.position.position = new Vector3(0, 1, 0);
-        ///         settings.camera.frustum.fieldOfView = 60.0f;
-        ///         // Get our render target
-        ///         var rt = new RenderTexture(128, 128, 1, GraphicsFormat.B8G8R8A8_SNorm);
-        ///         HDRenderUtilities.Render(settings, rt);
-        ///         // Do something with rt
-        ///         rt.Release();
-        ///     }
+        ///    public void Render()
+        ///    {
+        ///        // Copy default settings and adjust them for the custom rendering.
+        ///        var cameraSettings = CameraSettings.defaultCameraSettingsNonAlloc;
+        ///        cameraSettings.frustum.fieldOfView = 60.0f;
+        ///        var cameraPosition = CameraPositionSettings.NewDefault();
+        ///        cameraPosition.position = new Vector3(0, 1, 0);
+        ///
+        ///        // Create the 2D render target
+        ///        var rt = new RenderTexture(128, 128, 1, GraphicsFormat.B8G8R8A8_UNorm);
+        ///
+        ///        // Perform the custom rendering into the render target
+        ///        HDRenderUtilities.Render(cameraSettings, cameraPosition, rt);
+        ///
+        ///        // Implement the custom render target processing.
+        ///
+        ///        // Release the render target when the processing is done, RenderTexture variables are not garbage collected like normal managed types.
+        ///        rt.Release();
+        ///    }
         /// }
         /// </code>
         ///
         /// How to perform a cubemap rendering:
         /// <code>
+        /// using UnityEngine;
+        /// using UnityEngine.Rendering;
+        /// using UnityEngine.Rendering.HighDefinition;
+        /// using UnityEngine.Experimental.Rendering;
+        /// 
         /// class CubemapRenderExample
         /// {
-        ///     public void Render()
-        ///     {
-        ///         // Copy default settings
-        ///         var settings = CameraRenderSettings.Default;
-        ///         // Adapt default settings to our custom usage
-        ///         settings.position.position = new Vector3(0, 1, 0);
-        ///         settings.camera.physical.iso = 800.0f;
-        ///         // Frustum settings are ignored and driven by the cubemap rendering
-        ///         // Get our render target
-        ///         var rt = new RenderTexture(128, 128, 1, GraphicsFormat.B8G8R8A8_SNorm)
-        ///         {
-        ///             dimension = TextureDimension.Cube
-        ///         };
-        ///         // The TextureDimension is detected and the renderer will perform a cubemap rendering.
-        ///         HDRenderUtilities.Render(settings, rt);
-        ///         // Do something with rt
-        ///         rt.Release();
-        ///     }
+        ///    public void Render()
+        ///    {
+        ///        // Copy the default settings and adjust them for the custom rendering.
+        ///        // Frustum settings from cameraSettings are ignored because the render target is a cubemap.
+        ///        var cameraSettings = CameraSettings.defaultCameraSettingsNonAlloc;
+        ///        var cameraPosition = CameraPositionSettings.NewDefault();
+        ///        cameraPosition.position = new Vector3(0, 1, 0);
+        ///
+        ///        // Create the cubemap render target
+        ///        var rt = new RenderTexture(128, 128, 1, GraphicsFormat.B8G8R8A8_UNorm)
+        ///        {
+        ///            dimension = TextureDimension.Cube
+        ///        };
+        ///
+        ///        // Perform the custom rendering into the cubemap
+        ///        HDRenderUtilities.Render(cameraSettings, cameraPosition, rt);
+        ///
+        ///        // Implement the custom render target processing.
+        ///
+        ///        // Release the render target when the processing is done, RenderTexture variables are not garbage collected like normal managed types.
+        ///        rt.Release();
+        ///    }
         /// }
         /// </code>
         /// </example>
         /// <param name="settings">Settings for the camera.</param>
         /// <param name="position">Position for the camera.</param>
         /// <param name="target">Target to render to.</param>
-        /// <param name="staticFlags">Only used in the Editor fo cubemaps.
-        /// This is bitmask of <see cref="UnityEditor.StaticEditorFlags"/> only objects with these flags will be rendered
+        /// <param name="staticFlags">Only used in the Editor for cubemaps.
+        /// This is a bitmask of <see cref="UnityEditor.StaticEditorFlags"/>, only objects with these flags are rendered.
         /// </param>
         public static void Render(
             CameraSettings settings,
@@ -98,60 +118,60 @@ namespace UnityEngine.Rendering.HighDefinition
                 switch (target.dimension)
                 {
                     case TextureDimension.Tex2D:
-                        {
+                    {
 #if DEBUG
-                            Debug.LogWarning(
-                                "A static flags bitmask was provided but this is ignored when rendering into a Tex2D"
+                        Debug.LogWarning(
+                            "A static flags bitmask was provided but this is ignored when rendering into a Tex2D"
+                        );
+#endif
+                        Assert.IsNotNull(rtTarget);
+                        camera.targetTexture = rtTarget;
+                        camera.Render();
+                        camera.targetTexture = null;
+                        target.IncrementUpdateCount();
+                        break;
+                    }
+                    case TextureDimension.Cube:
+                    {
+                        Assert.IsTrue(rtTarget != null || cubeTarget != null);
+
+                        var canHandleStaticFlags = false;
+#if UNITY_EDITOR
+                        canHandleStaticFlags = true;
+#endif
+                        // ReSharper disable ConditionIsAlwaysTrueOrFalse
+                        if (canHandleStaticFlags && staticFlags != 0)
+                        // ReSharper restore ConditionIsAlwaysTrueOrFalse
+                        {
+#if UNITY_EDITOR
+                            UnityEditor.Rendering.EditorCameraUtils.RenderToCubemap(
+                                camera,
+                                rtTarget,
+                                -1,
+                                (UnityEditor.StaticEditorFlags)staticFlags
                             );
 #endif
-                            Assert.IsNotNull(rtTarget);
-                            camera.targetTexture = rtTarget;
-                            camera.Render();
-                            camera.targetTexture = null;
-                            target.IncrementUpdateCount();
-                            break;
                         }
-                    case TextureDimension.Cube:
+                        else
                         {
-                            Assert.IsTrue(rtTarget != null || cubeTarget != null);
-
-                            var canHandleStaticFlags = false;
-#if UNITY_EDITOR
-                            canHandleStaticFlags = true;
-#endif
                             // ReSharper disable ConditionIsAlwaysTrueOrFalse
-                            if (canHandleStaticFlags && staticFlags != 0)
-                                // ReSharper restore ConditionIsAlwaysTrueOrFalse
+                            if (!canHandleStaticFlags && staticFlags != 0)
+                            // ReSharper restore ConditionIsAlwaysTrueOrFalse
                             {
-#if UNITY_EDITOR
-                                UnityEditor.Rendering.EditorCameraUtils.RenderToCubemap(
-                                    camera,
-                                    rtTarget,
-                                    -1,
-                                    (UnityEditor.StaticEditorFlags)staticFlags
+                                Debug.LogWarning(
+                                    "A static flags bitmask was provided but this is ignored in player builds"
                                 );
-#endif
-                            }
-                            else
-                            {
-                                // ReSharper disable ConditionIsAlwaysTrueOrFalse
-                                if (!canHandleStaticFlags && staticFlags != 0)
-                                    // ReSharper restore ConditionIsAlwaysTrueOrFalse
-                                {
-                                    Debug.LogWarning(
-                                        "A static flags bitmask was provided but this is ignored in player builds"
-                                    );
-                                }
-
-                                if (rtTarget != null)
-                                    camera.RenderToCubemap(rtTarget);
-                                if (cubeTarget != null)
-                                    camera.RenderToCubemap(cubeTarget);
                             }
 
-                            target.IncrementUpdateCount();
-                            break;
+                            if (rtTarget != null)
+                                camera.RenderToCubemap(rtTarget);
+                            if (cubeTarget != null)
+                                camera.RenderToCubemap(cubeTarget);
                         }
+
+                        target.IncrementUpdateCount();
+                        break;
+                    }
                 }
             }
             finally
@@ -209,14 +229,17 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="position">The probe position to use.</param>
         /// <param name="cameras">Will receives the camera settings.</param>
         /// <param name="cameraPositions">Will receives the camera position settings.</param>
+        /// <param name="cameraCubeFaces">Will receive the camera cube face settings.</param>
         /// <param name="overrideSceneCullingMask">Override of the scene culling mask.</param>
+        /// <param name="renderSteps">The rendering steps to perform for this probe.</param>
         /// <param name="forceFlipY">Whether to force the Y axis flipping.</param>
         /// <param name="referenceFieldOfView">The reference field of view.</param>
         /// <param name="referenceAspect">The reference aspect ratio.</param>
         public static void GenerateRenderingSettingsFor(
             ProbeSettings settings, ProbeCapturePositionSettings position,
-            List<CameraSettings> cameras, List<CameraPositionSettings> cameraPositions,
+            List<CameraSettings> cameras, List<CameraPositionSettings> cameraPositions, List<CubemapFace> cameraCubeFaces,
             ulong overrideSceneCullingMask,
+            ProbeRenderSteps renderSteps,
             bool forceFlipY = false,
             float referenceFieldOfView = 90,
             float referenceAspect = 1
@@ -235,24 +258,29 @@ namespace UnityEngine.Rendering.HighDefinition
             switch (settings.type)
             {
                 case ProbeSettings.ProbeType.PlanarProbe:
-                    {
-                        cameras.Add(cameraSettings);
-                        cameraPositions.Add(cameraPositionSettings);
-                        break;
-                    }
+                {
+                    cameras.Add(cameraSettings);
+                    cameraPositions.Add(cameraPositionSettings);
+                    cameraCubeFaces.Add(CubemapFace.Unknown);
+                    break;
+                }
                 case ProbeSettings.ProbeType.ReflectionProbe:
+                {
+                    for (int i = 0; i < 6; ++i)
                     {
-                        for (int i = 0; i < 6; ++i)
-                        {
-                            var cameraPositionCopy = cameraPositionSettings;
-                            cameraPositionCopy.rotation = cameraPositionCopy.rotation * Quaternion.Euler(
-                                s_GenerateRenderingSettingsFor_Rotations[i]
-                            );
-                            cameras.Add(cameraSettings);
-                            cameraPositions.Add(cameraPositionCopy);
-                        }
-                        break;
+                        CubemapFace face = (CubemapFace)i;
+                        if (!renderSteps.HasCubeFace(face))
+                            continue;
+                        var cameraPositionCopy = cameraPositionSettings;
+                        cameraPositionCopy.rotation = cameraPositionCopy.rotation * Quaternion.Euler(
+                            s_GenerateRenderingSettingsFor_Rotations[i]
+                        );
+                        cameras.Add(cameraSettings);
+                        cameraPositions.Add(cameraPositionCopy);
+                        cameraCubeFaces.Add(face);
                     }
+                    break;
+                }
             }
         }
 
@@ -338,10 +366,10 @@ namespace UnityEngine.Rendering.HighDefinition
         /// </summary>
         /// <param name="cubemapSize">The cubemap size.</param>
         /// <returns>The texture to use as reflection probe target.</returns>
-        [Obsolete("Use CreateReflectionProbeRenderTarget with explicit format instead", true)]
+        [Obsolete("Use CreateReflectionProbeRenderTarget with explicit format instead #from(2021.1) #breakingFrom(2021.1)", true)]
         public static RenderTexture CreateReflectionProbeRenderTarget(int cubemapSize)
         {
-            RenderTexture rt = new RenderTexture(cubemapSize, cubemapSize, 1, GraphicsFormat.R16G16B16A16_SFloat)
+            RenderTexture rt = new RenderTexture(cubemapSize, cubemapSize, 0, GraphicsFormat.R16G16B16A16_SFloat)
             {
                 dimension = TextureDimension.Cube,
                 enableRandomWrite = true,
@@ -360,12 +388,13 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <returns>The texture to use as reflection probe target.</returns>
         public static RenderTexture CreateReflectionProbeRenderTarget(int cubemapSize, GraphicsFormat format)
         {
-            RenderTexture rt = new RenderTexture(cubemapSize, cubemapSize, 1, format)
+            RenderTexture rt = new RenderTexture(cubemapSize, cubemapSize, 0, format)
             {
                 dimension = TextureDimension.Cube,
                 enableRandomWrite = true,
                 useMipMap = true,
-                autoGenerateMips = false
+                autoGenerateMips = false,
+                depth = 0
             };
             rt.Create();
             return rt;
@@ -379,12 +408,13 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <returns>The texture used as planar reflection probe target</returns>
         public static RenderTexture CreatePlanarProbeRenderTarget(int planarSize, GraphicsFormat format)
         {
-            RenderTexture rt = new RenderTexture(planarSize, planarSize, 1, format)
+            RenderTexture rt = new RenderTexture(planarSize, planarSize, 0, format)
             {
                 dimension = TextureDimension.Tex2D,
                 enableRandomWrite = true,
                 useMipMap = true,
-                autoGenerateMips = false
+                autoGenerateMips = false,
+                depth = 0
             };
             rt.Create();
             return rt;
@@ -397,7 +427,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <returns>The texture used as planar reflection probe target</returns>
         public static RenderTexture CreatePlanarProbeDepthRenderTarget(int planarSize)
         {
-            RenderTexture rt = new RenderTexture(planarSize, planarSize, 1, GraphicsFormat.R32_SFloat)
+            RenderTexture rt = new RenderTexture(planarSize, planarSize, 0, GraphicsFormat.R32_SFloat)
             {
                 dimension = TextureDimension.Tex2D,
                 enableRandomWrite = true,

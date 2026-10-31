@@ -1,13 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
-using UnityEditor.Rendering;
+using UnityEngine.Experimental.Rendering;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
     using CurveState = InspectorCurveEditor.CurveState;
 
-    [VolumeComponentEditor(typeof(ColorCurves))]
+    [CustomEditor(typeof(ColorCurves))]
     sealed class ColorCurvesEditor : VolumeComponentEditor
     {
         SerializedDataParameter m_Master;
@@ -40,16 +40,16 @@ namespace UnityEditor.Rendering.HighDefinition
 
         static GUIStyle s_PreLabel;
 
-        static GUIContent[] s_Curves =
+        static string[] s_CurveNames =
         {
-            new GUIContent("Master"),
-            new GUIContent("Red"),
-            new GUIContent("Green"),
-            new GUIContent("Blue"),
-            new GUIContent("Hue Vs Hue"),
-            new GUIContent("Hue Vs Sat"),
-            new GUIContent("Sat Vs Sat"),
-            new GUIContent("Lum Vs Sat")
+            "Master",
+            "Red",
+            "Green",
+            "Blue",
+            "Hue Vs Hue",
+            "Hue Vs Sat",
+            "Sat Vs Sat",
+            "Lum Vs Sat"
         };
 
         public override void OnEnable()
@@ -57,9 +57,9 @@ namespace UnityEditor.Rendering.HighDefinition
             var o = new PropertyFetcher<ColorCurves>(serializedObject);
 
             m_Master = Unpack(o.Find(x => x.master));
-            m_Red    = Unpack(o.Find(x => x.red));
-            m_Green  = Unpack(o.Find(x => x.green));
-            m_Blue   = Unpack(o.Find(x => x.blue));
+            m_Red = Unpack(o.Find(x => x.red));
+            m_Green = Unpack(o.Find(x => x.green));
+            m_Blue = Unpack(o.Find(x => x.blue));
 
             m_HueVsHue = Unpack(o.Find(x => x.hueVsHue));
             m_HueVsSat = Unpack(o.Find(x => x.hueVsSat));
@@ -67,9 +67,9 @@ namespace UnityEditor.Rendering.HighDefinition
             m_LumVsSat = Unpack(o.Find(x => x.lumVsSat));
 
             m_RawMaster = o.Find("master.m_Value.m_Curve");
-            m_RawRed    = o.Find("red.m_Value.m_Curve");
-            m_RawGreen  = o.Find("green.m_Value.m_Curve");
-            m_RawBlue   = o.Find("blue.m_Value.m_Curve");
+            m_RawRed = o.Find("red.m_Value.m_Curve");
+            m_RawGreen = o.Find("green.m_Value.m_Curve");
+            m_RawBlue = o.Find("blue.m_Value.m_Curve");
 
             m_RawHueVsHue = o.Find("hueVsHue.m_Value.m_Curve");
             m_RawHueVsSat = o.Find("hueVsSat.m_Value.m_Curve");
@@ -82,14 +82,14 @@ namespace UnityEditor.Rendering.HighDefinition
             m_CurveEditor = new InspectorCurveEditor();
             m_CurveDict = new Dictionary<SerializedProperty, Color>();
 
-            SetupCurve(m_RawMaster,   new Color(1f,   1f, 1f), 2, false);
-            SetupCurve(m_RawRed,      new Color(1f,   0f, 0f), 2, false);
-            SetupCurve(m_RawGreen,    new Color(0f,   1f, 0f), 2, false);
-            SetupCurve(m_RawBlue,     new Color(0f, 0.5f, 1f), 2, false);
-            SetupCurve(m_RawHueVsHue, new Color(1f,   1f, 1f), 0, true);
-            SetupCurve(m_RawHueVsSat, new Color(1f,   1f, 1f), 0, true);
-            SetupCurve(m_RawSatVsSat, new Color(1f,   1f, 1f), 0, false);
-            SetupCurve(m_RawLumVsSat, new Color(1f,   1f, 1f), 0, false);
+            SetupCurve(m_RawMaster, new Color(1f, 1f, 1f), 2, false);
+            SetupCurve(m_RawRed, new Color(1f, 0f, 0f), 2, false);
+            SetupCurve(m_RawGreen, new Color(0f, 1f, 0f), 2, false);
+            SetupCurve(m_RawBlue, new Color(0f, 0.5f, 1f), 2, false);
+            SetupCurve(m_RawHueVsHue, new Color(1f, 1f, 1f), 0, true);
+            SetupCurve(m_RawHueVsSat, new Color(1f, 1f, 1f), 0, true);
+            SetupCurve(m_RawSatVsSat, new Color(1f, 1f, 1f), 0, false);
+            SetupCurve(m_RawLumVsSat, new Color(1f, 1f, 1f), 0, false);
         }
 
         void SetupCurve(SerializedProperty prop, Color color, uint minPointCount, bool loop)
@@ -128,9 +128,28 @@ namespace UnityEditor.Rendering.HighDefinition
             overrideProp.boolValue = GUILayout.Toggle(overrideProp.boolValue, EditorGUIUtility.TrTextContent("Override"), EditorStyles.toolbarButton);
         }
 
+        string MakeCurveSelectionPopupLabel(int id)
+        {
+            string label = s_CurveNames[id];
+            const string overrideSuffix = " (Overriding)";
+            switch (id)
+            {
+                case 0: if (m_Master.overrideState.boolValue) label += overrideSuffix; break;
+                case 1: if (m_Red.overrideState.boolValue) label += overrideSuffix; break;
+                case 2: if (m_Green.overrideState.boolValue) label += overrideSuffix; break;
+                case 3: if (m_Blue.overrideState.boolValue) label += overrideSuffix; break;
+                case 4: if (m_HueVsHue.overrideState.boolValue) label += overrideSuffix; break;
+                case 5: if (m_HueVsSat.overrideState.boolValue) label += overrideSuffix; break;
+                case 6: if (m_SatVsSat.overrideState.boolValue) label += overrideSuffix; break;
+                case 7: if (m_LumVsSat.overrideState.boolValue) label += overrideSuffix; break;
+            }
+            return label;
+        }
+
         int DoCurveSelectionPopup(int id)
         {
-            GUILayout.Label(s_Curves[id], EditorStyles.toolbarPopup, GUILayout.MaxWidth(150f));
+            var label = MakeCurveSelectionPopupLabel(id);
+            GUILayout.Label(label, EditorStyles.toolbarPopup, GUILayout.MaxWidth(150f));
 
             var lastRect = GUILayoutUtility.GetLastRect();
             var e = Event.current;
@@ -139,13 +158,15 @@ namespace UnityEditor.Rendering.HighDefinition
             {
                 var menu = new GenericMenu();
 
-                for (int i = 0; i < s_Curves.Length; i++)
+                for (int i = 0; i < s_CurveNames.Length; i++)
                 {
                     if (i == 4)
                         menu.AddSeparator("");
 
                     int current = i; // Capture local for closure
-                    menu.AddItem(s_Curves[i], current == id, () =>
+
+                    var menuLabel = MakeCurveSelectionPopupLabel(i);
+                    menu.AddItem(new GUIContent(menuLabel), current == id, () =>
                     {
                         m_SelectedCurve.intValue = current;
                         serializedObject.ApplyModifiedProperties();
@@ -166,7 +187,7 @@ namespace UnityEditor.Rendering.HighDefinition
             float scale = EditorGUIUtility.pixelsPerPoint;
 
             var oldRt = RenderTexture.active;
-            var rt = RenderTexture.GetTemporary(Mathf.CeilToInt(rect.width * scale), Mathf.CeilToInt(rect.height * scale), 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            var rt = RenderTexture.GetTemporary(Mathf.CeilToInt(rect.width * scale), Mathf.CeilToInt(rect.height * scale), 0, GraphicsFormat.R8G8B8A8_SRGB);
             s_MaterialGrid.SetFloat("_DisabledState", GUI.enabled ? 1f : 0.5f);
 
             Graphics.Blit(null, rt, s_MaterialGrid, pass);
@@ -266,10 +287,10 @@ namespace UnityEditor.Rendering.HighDefinition
 
                         switch (curveEditingId)
                         {
-                            case 0: m_RawMaster.animationCurveValue   = AnimationCurve.Linear(0f, 0f, 1f, 1f); break;
-                            case 1: m_RawRed.animationCurveValue      = AnimationCurve.Linear(0f, 0f, 1f, 1f); break;
-                            case 2: m_RawGreen.animationCurveValue    = AnimationCurve.Linear(0f, 0f, 1f, 1f); break;
-                            case 3: m_RawBlue.animationCurveValue     = AnimationCurve.Linear(0f, 0f, 1f, 1f); break;
+                            case 0: m_RawMaster.animationCurveValue = AnimationCurve.Linear(0f, 0f, 1f, 1f); break;
+                            case 1: m_RawRed.animationCurveValue = AnimationCurve.Linear(0f, 0f, 1f, 1f); break;
+                            case 2: m_RawGreen.animationCurveValue = AnimationCurve.Linear(0f, 0f, 1f, 1f); break;
+                            case 3: m_RawBlue.animationCurveValue = AnimationCurve.Linear(0f, 0f, 1f, 1f); break;
                             case 4: m_RawHueVsHue.animationCurveValue = new AnimationCurve(); break;
                             case 5: m_RawHueVsSat.animationCurveValue = new AnimationCurve(); break;
                             case 6: m_RawSatVsSat.animationCurveValue = new AnimationCurve(); break;
@@ -309,7 +330,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
                     for (int i = 1; i < hLines; i++)
                     {
-                        var offset = i * Vector2.right * gridOffset;
+                        var offset = gridOffset * i * Vector2.right;
                         offset.x += gridPadding;
                         Handles.DrawLine(innerRect.position + offset, new Vector2(innerRect.x, innerRect.yMax - 1) + offset);
                     }
@@ -320,7 +341,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
                     for (int i = 1; i < vLines; i++)
                     {
-                        var offset = i * Vector2.up * gridOffset;
+                        var offset = gridOffset * i * Vector2.up;
                         offset.y += gridPadding;
                         Handles.DrawLine(innerRect.position + offset, new Vector2(innerRect.xMax - 1, innerRect.y) + offset);
                     }

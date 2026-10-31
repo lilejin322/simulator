@@ -7,16 +7,6 @@ namespace UnityEngine.Rendering.HighDefinition
 {
     internal class ReflectionKernelGenerator : MonoBehaviour
     {
-        // Start is called before the first frame update
-        void Start()
-        {
-        }
-
-        // Update is called once per frame
-        void Update()
-        {
-        }
-
         public class CameraParameters
         {
             public int width;
@@ -62,8 +52,7 @@ namespace UnityEngine.Rendering.HighDefinition
             localY = Vector3.Cross(localZ, localX);
         }
 
-
-        bool intersectPlane(Vector3 n, Vector3 p0, Vector3 l0, Vector3 l, ref float t) 
+        bool intersectPlane(Vector3 n, Vector3 p0, Vector3 l0, Vector3 l, ref float t)
         {
             float denom = Vector3.Dot(n, l);
             if (Mathf.Abs(denom) > 1e-6)
@@ -72,9 +61,8 @@ namespace UnityEngine.Rendering.HighDefinition
                 t = Vector3.Dot(p0l0, n) / denom;
                 return (t >= 0);
             }
-            return false; 
-        } 
-
+            return false;
+        }
 
         public void GenerateTable(CameraParameters cameraParameters, int angleSubdivision, float brdfPercentage, int outputWidth, int outputHeight)
         {
@@ -109,9 +97,9 @@ namespace UnityEngine.Rendering.HighDefinition
                     Vector3 normalVector = Quaternion.AngleAxis(-currentAngle, Vector3.right) * Vector3.up;
 
                     // Let's compute the reflected direction
-                    Vector3 reflected = incidentViewVector - 2 * normalVector * Vector3.Dot(incidentViewVector, normalVector);
+                    Vector3 reflected = incidentViewVector - 2 * Vector3.Dot(incidentViewVector, normalVector) * normalVector;
 
-                    // Let's compute the local to world matrix 
+                    // Let's compute the local to world matrix
                     Vector3 localX = new Vector3(1.0f, 0.0f, 0.0f);
                     Vector3 localY = new Vector3();
                     GetLocalFrame(reflected, localX, out localY);
@@ -196,9 +184,9 @@ namespace UnityEngine.Rendering.HighDefinition
                     float t = 1.0f / Mathf.Cos(theta);
 
                     // Let's compute the reflected direction
-                    Vector3 reflected = incidentViewVector - 2 * normalVector * Vector3.Dot(incidentViewVector, normalVector);
+                    Vector3 reflected = incidentViewVector - 2 * Vector3.Dot(incidentViewVector, normalVector) * normalVector;
 
-                    // Let's compute the local to world matrix 
+                    // Let's compute the local to world matrix
                     Vector3 localX = new Vector3(1.0f, 0.0f, 0.0f);
                     Vector3 localY = new Vector3();
                     GetLocalFrame(reflected, localX, out localY);
@@ -251,7 +239,7 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 for (int wIdx = 0; wIdx < outputWidth; ++wIdx)
                 {
-                    color.r = outputFilter[2*(wIdx + hIdx * outputWidth)];
+                    color.r = outputFilter[2 * (wIdx + hIdx * outputWidth)];
                     color.g = outputFilter[2 * (wIdx + hIdx * outputWidth) + 1];
                     color.b = 0.0f;
                     color.a = 1.0f;

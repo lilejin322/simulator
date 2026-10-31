@@ -172,7 +172,14 @@ public class UIManager : MonoBehaviour
             {
                 LoaderUICanvas.gameObject.SetActive(true);
                 SimulatorCanvas.gameObject.SetActive(false);
-                SimulatorManager.Instance.CameraManager.SimulatorCamera.cullingMask = 1  << LayerMask.NameToLayer("UI");
+                var simulatorCamera = SimulatorManager.Instance.CameraManager.SimulatorCamera;
+                simulatorCamera.cullingMask = 1  << LayerMask.NameToLayer("UI");
+                // Batch mode shows nothing, so do not render the main view at all; the camera still provides the
+                // frustum NPC spawning and point cloud culling use. Sensors render with their own cameras.
+                if (Application.isBatchMode)
+                {
+                    simulatorCamera.enabled = false;
+                }
             }
 
             var usePauseButton = config.Interactive;

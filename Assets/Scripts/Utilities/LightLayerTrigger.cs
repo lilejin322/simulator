@@ -10,7 +10,7 @@ using UnityEngine.Rendering.HighDefinition;
 
 public class LightLayerTrigger : MonoBehaviour
 {
-    public LightLayerEnum LightLayer = LightLayerEnum.LightLayerDefault;
+    public UnityEngine.Rendering.HighDefinition.RenderingLayerMask LightLayer = UnityEngine.Rendering.HighDefinition.RenderingLayerMask.LightLayerDefault;
 
     void OnTriggerEnter(Collider other)
     {

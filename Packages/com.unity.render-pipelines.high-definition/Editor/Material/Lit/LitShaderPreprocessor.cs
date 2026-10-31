@@ -5,6 +5,8 @@ using UnityEngine.Rendering.HighDefinition;
 using UnityEditor.ShaderGraph;
 using UnityEditor.Rendering.HighDefinition.ShaderGraph;
 
+using static UnityEngine.Rendering.HighDefinition.HDMaterial;
+
 namespace UnityEditor.Rendering.HighDefinition
 {
     class LitShaderPreprocessor : BaseShaderPreprocessor
@@ -13,7 +15,9 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public override int Priority => 50;
 
-        public LitShaderPreprocessor() {}
+        public LitShaderPreprocessor()
+        {
+        }
 
         protected override bool DoShadersStripper(HDRenderPipelineAsset hdrpAsset, Shader shader, ShaderSnippetData snippet, ShaderCompilerData inputData)
         {
@@ -27,11 +31,11 @@ namespace UnityEditor.Rendering.HighDefinition
             // Cache Shader Graph lookup data so we don't continually keep reloading graphs from disk.
             // TODO: Should really be able to answer the questions "is shader graph" and "uses HDLitMasterNode" without
             //       hitting disk on every invoke.
-            if (shader.IsShaderGraph())
+            if (shader.IsShaderGraphAsset())
             {
-                if(shader.TryGetMetadataOfType<HDMetadata>(out var obj))
+                if (shader.TryGetMetadataOfType<HDMetadata>(out var obj))
                 {
-                    isBuiltInLit |= obj.shaderID == HDShaderUtils.ShaderID.SG_Lit;
+                    isBuiltInLit |= obj.shaderID == ShaderID.SG_Lit;
                 }
             }
 
@@ -49,7 +53,8 @@ namespace UnityEditor.Rendering.HighDefinition
                 return true;
 
             // Variant of light layer only exist in GBuffer pass, so we test it here
-            if (inputData.shaderKeywordSet.IsEnabled(m_LightLayers) && isGBufferPass && !hdrpAsset.currentPlatformRenderPipelineSettings.supportLightLayers)
+            bool outputLayers = hdrpAsset.currentPlatformRenderPipelineSettings.supportLightLayers || hdrpAsset.currentPlatformRenderPipelineSettings.renderingLayerMaskBuffer;
+            if (inputData.shaderKeywordSet.IsEnabled(m_RenderingLayers) && isGBufferPass && !outputLayers)
                 return true;
 
             // This test include all Lit variant from Shader Graph (Because we check "DepthOnly" pass)
@@ -67,7 +72,8 @@ namespace UnityEditor.Rendering.HighDefinition
                     return true;
             }
 
-            // Apply following set of rules only to lit shader (remember that LitPreprocessor is call for any shader)
+
+            // Apply following set of rules only to lit shader (remember that LitPreprocessor is called for any shader)
             if (isBuiltInLit)
             {
                 // Forward material don't use keyword for WriteNormalBuffer but #define so we can't test for the keyword outside of isBuiltInLit

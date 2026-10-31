@@ -14,6 +14,11 @@ $RefractionBox:                     #define _REFRACTION_PLANE 1
 $RefractionSphere:                  #define _REFRACTION_SPHERE 1
 $RefractionThin:                    #define _REFRACTION_THIN 1
 
+#if _MATERIAL_FEATURE_COLORED_TRANSMISSION
+    // Colored Transmission doesn't support clear coat
+    #undef _MATERIAL_FEATURE_CLEAR_COAT
+#endif
+
 // If we use subsurface scattering, enable output split lighting (for forward pass)
 #if defined(_MATERIAL_FEATURE_SUBSURFACE_SCATTERING) && !defined(_SURFACE_TYPE_TRANSPARENT)
     #define OUTPUT_SPLIT_LIGHTING
@@ -21,3 +26,10 @@ $RefractionThin:                    #define _REFRACTION_THIN 1
 
 // This shader support recursive rendering for raytracing
 #define HAVE_RECURSIVE_RENDERING
+
+// In Path Tracing, For all single-sided, refractive materials, we want to force a thin refraction model
+#if (SHADERPASS == SHADERPASS_PATH_TRACING) && !defined(_DOUBLESIDED_ON) && (defined(_REFRACTION_PLANE) || defined(_REFRACTION_SPHERE))
+    #undef  _REFRACTION_PLANE
+    #undef  _REFRACTION_SPHERE
+    #define _REFRACTION_THIN
+#endif

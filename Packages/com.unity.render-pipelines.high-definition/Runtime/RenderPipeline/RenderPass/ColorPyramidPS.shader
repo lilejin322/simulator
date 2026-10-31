@@ -8,11 +8,12 @@ Shader "Hidden/ColorPyramidPS"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            ColorMask RGB
 
             HLSLPROGRAM
                 #pragma editor_sync_compilation
                 #pragma target 4.5
-                #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+                #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
                 #pragma vertex Vert
                 #pragma fragment Frag
                 #define DISABLE_TEXTURE2D_X_ARRAY 1
@@ -24,11 +25,12 @@ Shader "Hidden/ColorPyramidPS"
         Pass
         {
             ZWrite Off ZTest Always Blend Off Cull Off
+            ColorMask RGB
 
             HLSLPROGRAM
                 #pragma editor_sync_compilation
                 #pragma target 4.5
-                #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+                #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
                 #pragma vertex Vert
                 #pragma fragment Frag
                 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/RenderPass/ColorPyramidPS.hlsl"

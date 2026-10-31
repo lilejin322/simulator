@@ -101,12 +101,30 @@ public class PedestrianWaypointBehaviour : PedestrianBehaviourBase
     private void InitPedestrian()
     {
         Debug.Assert(LaneData != null);
+        if (!RB.isKinematic) // kinematic bodies have no velocity to clear, and Unity 6 warns when it is set
+        {
+            RB.angularVelocity = Vector3.zero;
+            RB.linearVelocity = Vector3.zero;
+        }
         RB.isKinematic = true;
         // TODO currentSpeed = 0f;
-        RB.angularVelocity = Vector3.zero;
-        RB.velocity = Vector3.zero;
         CurrentIndex = 0;
         CurrentLoopIndex = 0;
+        StopCoroutines();
+        WaypointState = WaypointWalkState.Walk;
+    }
+
+    // The coroutines run on the simulator's FixedUpdateManager, so they outlive this agent unless stopped here:
+    // Unity 6 throws when a coroutine that was not stopped moves the destroyed rigidbody.
+    private void OnDisable()
+    {
+        StopCoroutines();
+    }
+
+    private void StopCoroutines()
+    {
+        if (controller == null || FixedUpdateManager == null)
+            return;
         if (IdleCoroutine != null)
         {
             FixedUpdateManager.StopCoroutine(IdleCoroutine);
@@ -122,7 +140,6 @@ public class PedestrianWaypointBehaviour : PedestrianBehaviourBase
             FixedUpdateManager.StopCoroutine(TriggerCoroutine);
             TriggerCoroutine = null;
         }
-        WaypointState = WaypointWalkState.Walk;
     }
 
     public void SetFollowWaypoints(List<WalkWaypoint> waypoints, bool loop, WaypointsPathType pathType)

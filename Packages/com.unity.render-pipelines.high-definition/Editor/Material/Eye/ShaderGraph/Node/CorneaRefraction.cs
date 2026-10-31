@@ -5,12 +5,12 @@ using UnityEngine.Rendering.HighDefinition;
 namespace UnityEditor.ShaderGraph
 {
     [SRPFilter(typeof(HDRenderPipeline))]
-    [Title("Utility", "High Definition Render Pipeline", "Eye", "CorneaRefraction (Preview)")]
+    [Title("Utility", "High Definition Render Pipeline", "Eye", "CorneaRefraction")]
     class CorneaRefraction : CodeFunctionNode
     {
         public CorneaRefraction()
         {
-            name = "Cornea Refraction (Preview)";
+            name = "Cornea Refraction";
         }
 
         public override bool hasPreview
@@ -33,7 +33,7 @@ namespace UnityEditor.ShaderGraph
         {
             RefractedPositionOS = Vector3.zero;
             return
-                @"
+@"
                 {
                     float eta = 1.0 / (CorneaIOR);
                     CorneaNormalOS = normalize(CorneaNormalOS);

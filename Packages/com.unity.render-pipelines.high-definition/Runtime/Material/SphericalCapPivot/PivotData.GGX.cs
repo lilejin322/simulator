@@ -12,7 +12,7 @@ namespace UnityEngine.Rendering.HighDefinition
         // This table is precomputed and indexed by sqrt(roughness) = PerceptualRoughness
         // and (2*theta)/PI, both in 64 steps.
         // entry[0] == PivotNorm, entry[1] == PivotElevation (rest is pre-integration, not used)
-        public static double[,] s_PivotLUTData = new double[k_PivotLUTResolution * k_PivotLUTResolution, k_PivotLUTEntryDim]
+        public static readonly double[,] s_PivotLUTData = new double[k_PivotLUTResolution * k_PivotLUTResolution, k_PivotLUTEntryDim]
         {
             {0.998002, 0.000000, 1.000000, 1.000000},
             {0.998002, 0.000000, 1.000000, 1.000000},
@@ -4111,5 +4111,8 @@ namespace UnityEngine.Rendering.HighDefinition
             {0.255911, 0.000000, 0.922577, 0.889640},
             {0.255896, 0.000000, 0.922528, 0.887423}
         };
+
+        // s_PivotLUTData is readonly: it is a large precomputed constant lookup table initialized inline
+        // and never reassigned at runtime, so no ResetStaticsOnLoad is needed.
     }
 }

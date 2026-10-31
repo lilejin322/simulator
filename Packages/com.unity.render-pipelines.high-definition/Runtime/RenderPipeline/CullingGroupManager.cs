@@ -2,28 +2,30 @@ using System.Collections.Generic;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
-
     class CullingGroupManager
     {
-        static CullingGroupManager m_Instance;
-        static public CullingGroupManager instance
+        static CullingGroupManager s_Instance;
+
+#if UNITY_EDITOR
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
+        static void ResetStaticsOnLoad()
         {
-            get
-            {
-                if (m_Instance == null)
-                    m_Instance = new CullingGroupManager();
-                return m_Instance;
-            }
+            s_Instance?.Cleanup();
+            s_Instance = null;
         }
+#endif
+
+        public static CullingGroupManager instance => s_Instance ??= new CullingGroupManager();
 
         private Stack<CullingGroup> m_FreeList = new Stack<CullingGroup>();
 
         public CullingGroup Alloc()
         {
             CullingGroup group;
-            if(m_FreeList.Count > 0)
+            if (m_FreeList.Count > 0)
             {
                 group = m_FreeList.Pop();
+                group.enabled = true;
             }
             else
             {
@@ -34,12 +36,14 @@ namespace UnityEngine.Rendering.HighDefinition
 
         public void Free(CullingGroup group)
         {
+            // Disable group to ensure it is not being used anymore during culling
+            group.enabled = false;
             m_FreeList.Push(group);
         }
 
         public void Cleanup()
         {
-            foreach( CullingGroup group in m_FreeList)
+            foreach (CullingGroup group in m_FreeList)
             {
                 group.Dispose();
             }

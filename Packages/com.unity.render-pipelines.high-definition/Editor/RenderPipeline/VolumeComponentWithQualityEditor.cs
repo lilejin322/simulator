@@ -18,13 +18,13 @@ namespace UnityEditor.Rendering.HighDefinition
         {
             private struct QualitySetting
             {
-                public bool   state;
+                public bool state;
                 public object value;
             }
 
             Dictionary<int, QualitySetting> settings = new Dictionary<int, QualitySetting>();
 
-            public static bool IsEqual (QualitySettingsBlob left, QualitySettingsBlob right)
+            public static bool IsEqual(QualitySettingsBlob left, QualitySettingsBlob right)
             {
                 if (right == null && left == null)
                 {
@@ -130,7 +130,7 @@ namespace UnityEditor.Rendering.HighDefinition
         // We use ConditionalWeakTable instead of a Dictionary of InstanceIDs to get automatic clean-up of dead entries in the table
         static ConditionalWeakTable<UnityEngine.Object, QualitySettingsBlob> s_CustomSettingsHistory = new ConditionalWeakTable<UnityEngine.Object, QualitySettingsBlob>();
 
-        static readonly int k_CustomQuality = ScalableSettingLevelParameter.LevelCount;
+        protected static readonly int k_CustomQuality = ScalableSettingLevelParameter.LevelCount;
 
         public override void OnEnable()
         {
@@ -190,7 +190,7 @@ namespace UnityEditor.Rendering.HighDefinition
                             s_CustomSettingsHistory.TryGetValue(serializedObject.targetObject, out history);
                             if (history != null)
                             {
-                                 SaveCustomQualitySettingsAsObject(history);
+                                SaveCustomQualitySettingsAsObject(history);
                             }
                             else
                             {
@@ -200,7 +200,6 @@ namespace UnityEditor.Rendering.HighDefinition
                                 {
                                     s_CustomSettingsHistory.Add(serializedObject.targetObject, history);
                                 }
-
                             }
                         }
                         LoadSettingsFromQualityPreset(pipeline.currentPlatformRenderPipelineSettings, newQualityLevel);
@@ -211,6 +210,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
         protected bool useCustomValue => m_QualitySetting.value.intValue == k_CustomQuality;
         protected bool overrideState => m_QualitySetting.overrideState.boolValue;
+        protected int value => m_QualitySetting.value.intValue;
 
         /// <summary>
         /// This utility can be used to copy a value into a volume component setting visible in the inspector.
@@ -241,7 +241,7 @@ namespace UnityEditor.Rendering.HighDefinition
         /// <summary>
         /// This function should be overriden by a volume component to load a custom preset setting from an opaque binary blob (as returned from SaveCustomQualitySettingsAsObject)
         /// </summary>
-        public virtual void LoadSettingsFromObject(QualitySettingsBlob settings) {}
+        public virtual void LoadSettingsFromObject(QualitySettingsBlob settings) { }
 
         /// <summary>
         /// This function should be overriden by a volume component to enable the quality setting functionality only in certain cases.
@@ -249,5 +249,4 @@ namespace UnityEditor.Rendering.HighDefinition
         /// <returns></returns>
         public virtual bool QualityEnabled() => true;
     }
-
 }

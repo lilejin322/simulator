@@ -13,6 +13,7 @@ namespace UnityEditor.Rendering.HighDefinition
         )
         {
             const ProbeSettingsFields lighting = ProbeSettingsFields.lightingLightLayer
+                | ProbeSettingsFields.importance
                 | ProbeSettingsFields.lightingMultiplier
                 | ProbeSettingsFields.lightingWeight
                 | ProbeSettingsFields.lightingFadeDistance;
@@ -32,13 +33,15 @@ namespace UnityEditor.Rendering.HighDefinition
 
             if ((displayedFields.probe & lighting) != 0)
             {
-
                 using (new EditorGUI.DisabledScope(!hd.currentPlatformRenderPipelineSettings.supportLightLayers))
                 {
-                    PropertyFieldWithoutToggle(ProbeSettingsFields.lightingLightLayer, serialized.lightingLightLayer, EditorGUIUtility.TrTextContent("Light Layer", "Specifies the Light Layer the Reflection Probe uses to capture its view of the Scene. The Probe only uses Lights on the Light Layer you specify."), displayedFields.probe,
+                    PropertyFieldWithoutToggle(ProbeSettingsFields.lightingLightLayer, serialized.lightingLightLayer, EditorGUIUtility.TrTextContent("Rendering Layer Mask", "This Reflection Probe only affects Renderers with a matching Rendering Layer Mask.\nThis is only available when Light Layers are enabled."), displayedFields.probe,
                         (property, label) => EditorGUILayout.PropertyField(property, label)
                     );
                 }
+                PropertyFieldWithoutToggle(ProbeSettingsFields.importance, serialized.importance, EditorGUIUtility.TrTextContent("Importance", "When reflection probes overlap, Unity uses Importance to determine which probe should take priority."), displayedFields.probe);
+                if (serialized.importance.intValue < 0 || serialized.importance.intValue > 32767)
+                    serialized.importance.intValue = Mathf.Clamp(serialized.importance.intValue, 0, 32767);
                 PropertyFieldWithoutToggle(ProbeSettingsFields.lightingMultiplier, serialized.lightingMultiplier, EditorGUIUtility.TrTextContent("Multiplier", "Sets the multiplier value that reflective Materials apply to the results from the Reflection Probe."), displayedFields.probe);
                 PropertyFieldWithoutToggle(ProbeSettingsFields.lightingWeight, serialized.lightingWeight, EditorGUIUtility.TrTextContent("Weight", "Sets the weight of this Reflection Probe. When multiple Probes both affect the same area of a reflective Material, the Material uses the Weight of each Probe to determine their contribution to the reflective effect."), displayedFields.probe);
                 PropertyFieldWithoutToggle(ProbeSettingsFields.lightingFadeDistance, serialized.lightingFadeDistance, EditorGUIUtility.TrTextContent("Fade Distance", "Sets the distance from the camera at which reflections smoothly fadeout before HDRP cuts them completely."), displayedFields.probe);
@@ -69,7 +72,6 @@ namespace UnityEditor.Rendering.HighDefinition
                     (p, l) =>
                     {
                         EditorGUILayout.PropertyField(p, l);
-                        HDProbeUI.Drawer_ToolBarButton(HDProbeUI.ToolBar.CapturePosition, owner, GUILayout.Width(28f), GUILayout.MinHeight(22f));
                     }
                 );
                 PropertyFieldWithoutToggle(ProbeSettingsFields.proxyCaptureRotationProxySpace, serialized.proxyCaptureRotationProxySpace, EditorGUIUtility.TrTextContent("Capture Rotation", "Sets the rotation of the capture point relative to the Transform Rotation."), displayedFields.probe);
@@ -77,7 +79,6 @@ namespace UnityEditor.Rendering.HighDefinition
                     (p, l) =>
                     {
                         EditorGUILayout.PropertyField(p, l);
-                        HDProbeUI.Drawer_ToolBarButton(HDProbeUI.ToolBar.MirrorPosition, owner, GUILayout.Width(28f), GUILayout.MinHeight(22f));
                     }
                 );
             }
@@ -85,16 +86,24 @@ namespace UnityEditor.Rendering.HighDefinition
             CameraSettingsUI.Draw(serialized.cameraSettings, owner, displayedFields.camera);
 
             // Only display the field if it should
-            if (((int)ProbeSettingsFields.resolution & (int)displayedFields.probe) != 0 )
+            if (((int)ProbeSettingsFields.resolution & (int)displayedFields.probe) != 0)
             {
                 var scalableSetting = HDRenderPipeline.currentAsset.currentPlatformRenderPipelineSettings.planarReflectionResolution;
                 serialized.resolutionScalable.LevelAndEnumGUILayout<PlanarReflectionAtlasResolution>(
-                    EditorGUIUtility.TrTextContent("Resolution", "Sets the resolution for the planar probe camera."), scalableSetting, null
+                    EditorGUIUtility.TrTextContent("Resolution", "Sets the resolution for the planar reflection probe camera."), scalableSetting, null
+                );
+            }
+
+            if (((int)ProbeSettingsFields.cubeResolution & (int)displayedFields.probe) != 0)
+            {
+                var scalableSetting = HDRenderPipeline.currentAsset.currentPlatformRenderPipelineSettings.cubeReflectionResolution;
+                serialized.cubeResolution.LevelAndEnumGUILayout<CubeReflectionResolution>(
+                    EditorGUIUtility.TrTextContent("Resolution", "Sets the resolution for the reflection probe camera."), scalableSetting, null
                 );
             }
 
             PropertyFieldWithoutToggle(ProbeSettingsFields.roughReflections, serialized.roughReflections, EditorGUIUtility.TrTextContent("Rough Reflections", "When disabled the reflections evaluated using the planar reflection will be perfectly smooth. This save GPU time when the planar reflection is used as a pure mirror."), displayedFields.probe);
-            
+
             if ((displayedFields.probe & proxy) != 0)
             {
                 PropertyFieldWithoutToggle(ProbeSettingsFields.lightingRangeCompression, serialized.lightingRangeCompressionFactor, EditorGUIUtility.TrTextContent("Range Compression Factor", "The result of the rendering of the probe will be divided by this factor. When the probe is read, this factor is undone as the probe data is read. This is to simply avoid issues with values clamping due to precision of the storing format."), displayedFields.probe);

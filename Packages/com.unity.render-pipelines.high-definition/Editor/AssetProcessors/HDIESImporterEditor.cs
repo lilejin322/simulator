@@ -3,11 +3,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.Rendering;
-#if UNITY_2020_2_OR_NEWER
 using UnityEditor.AssetImporters;
-#else
-using UnityEditor.Experimental.AssetImporters;
-#endif
 
 namespace UnityEditor.Rendering.HighDefinition
 {
@@ -20,7 +16,7 @@ namespace UnityEditor.Rendering.HighDefinition
         /// <summary>
         /// IES Importer Editor, common to Core and HDRP
         /// </summary>
-        public UnityEditor.Rendering.IESImporterEditor iesImporterEditor = new UnityEditor.Rendering.IESImporterEditor();
+        public UnityEditor.Rendering.IESImporterEditor iesImporterEditor { get; set; } = new UnityEditor.Rendering.IESImporterEditor();
 
         internal void SetupRenderPipelinePreviewCamera(Camera camera)
         {
@@ -34,11 +30,10 @@ namespace UnityEditor.Rendering.HighDefinition
 
         internal void SetupRenderPipelinePreviewLight(Light light)
         {
-            HDLightTypeAndShape hdLightTypeAndShape = (light.type == LightType.Point) ? HDLightTypeAndShape.Point : HDLightTypeAndShape.ConeSpot;
+            LightType lightType = (light.type == LightType.Point) ? LightType.Point : LightType.Spot;
+            HDAdditionalLightData hdLight = GameObjectExtension.AddHDLight(light.gameObject, lightType);
 
-            HDAdditionalLightData hdLight = GameObjectExtension.AddHDLight(light.gameObject, hdLightTypeAndShape);
-
-            hdLight.SetIntensity(20000f, LightUnit.Lumen);
+            light.intensity = LightUnitUtils.ConvertIntensity(light, 20000f, LightUnit.Lumen, LightUnit.Candela);
 
             hdLight.affectDiffuse = true;
             hdLight.affectSpecular = false;
@@ -57,16 +52,14 @@ namespace UnityEditor.Rendering.HighDefinition
 
         internal void SetupRenderPipelinePreviewLightIntensity(Light light, SerializedProperty useIESMaximumIntensityProp, SerializedProperty iesMaximumIntensityUnitProp, SerializedProperty iesMaximumIntensityProp)
         {
-            HDAdditionalLightData hdLight = light.GetComponent<HDAdditionalLightData>();
-
             if (useIESMaximumIntensityProp.boolValue)
             {
                 LightUnit lightUnit = (iesMaximumIntensityUnitProp.stringValue == "Lumens") ? LightUnit.Lumen : LightUnit.Candela;
-                hdLight.SetIntensity(iesMaximumIntensityProp.floatValue, lightUnit);
+                light.intensity = LightUnitUtils.ConvertIntensity(light, iesMaximumIntensityProp.floatValue, lightUnit, LightUnit.Candela);
             }
             else
             {
-                hdLight.SetIntensity(20000f, LightUnit.Lumen);
+                light.intensity = LightUnitUtils.ConvertIntensity(light, 20000f, LightUnit.Lumen, LightUnit.Candela);
             }
         }
 
@@ -111,23 +104,23 @@ namespace UnityEditor.Rendering.HighDefinition
         public override bool HasPreviewGUI()
         {
             return iesImporterEditor.CommonHasPreviewGUI(
-                    delegate (Camera camera)
-                    {
-                        SetupRenderPipelinePreviewCamera(camera);
-                    },
-                    delegate (Light light)
-                    {
-                        SetupRenderPipelinePreviewLight(light);
-                    },
-                    delegate (MeshRenderer wallRenderer)
-                    {
-                        SetupRenderPipelinePreviewWallRenderer(wallRenderer);
-                    },
-                    delegate (MeshRenderer floorRenderer)
-                    {
-                        SetupRenderPipelinePreviewFloorRenderer(floorRenderer);
-                    }
-                );
+                delegate (Camera camera)
+                {
+                    SetupRenderPipelinePreviewCamera(camera);
+                },
+                delegate (Light light)
+                {
+                    SetupRenderPipelinePreviewLight(light);
+                },
+                delegate (MeshRenderer wallRenderer)
+                {
+                    SetupRenderPipelinePreviewWallRenderer(wallRenderer);
+                },
+                delegate (MeshRenderer floorRenderer)
+                {
+                    SetupRenderPipelinePreviewFloorRenderer(floorRenderer);
+                }
+            );
         }
 
         /// <summary>
@@ -147,10 +140,10 @@ namespace UnityEditor.Rendering.HighDefinition
         public override void OnPreviewGUI(Rect r, GUIStyle background)
         {
             iesImporterEditor.CommonOnPreviewGUI(r, background, target as IESImporter,
-                                    delegate (Light light, SerializedProperty useIESMaximumIntensityProp, SerializedProperty iesMaximumIntensityUnitProp, SerializedProperty iesMaximumIntensityProp)
-                                    {
-                                        SetupRenderPipelinePreviewLightIntensity(light, useIESMaximumIntensityProp, iesMaximumIntensityUnitProp, iesMaximumIntensityProp);
-                                    });
+                delegate (Light light, SerializedProperty useIESMaximumIntensityProp, SerializedProperty iesMaximumIntensityUnitProp, SerializedProperty iesMaximumIntensityProp)
+                {
+                    SetupRenderPipelinePreviewLightIntensity(light, useIESMaximumIntensityProp, iesMaximumIntensityUnitProp, iesMaximumIntensityProp);
+                });
         }
 
         /// <summary>

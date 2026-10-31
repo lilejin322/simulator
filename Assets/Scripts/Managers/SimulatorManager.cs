@@ -17,6 +17,7 @@ using Simulator.Components;
 using Simulator.Network.Core.Messaging.Data;
 using Simulator.Sensors;
 using UnityEngine.SceneManagement;
+using UnityEngine.VFX;
 using static Simulator.Web.Config;
 
 public class SimulatorManager : MonoBehaviour
@@ -385,6 +386,7 @@ public class SimulatorManager : MonoBehaviour
                     Color segmentationColor = item.IsInstanceSegmenation ? GenerateSimilarColor(item.Color) : item.Color;
 
                     obj.GetComponentsInChildren(true, renderers);
+                    renderers.RemoveAll(IsVisualEffect);
                     renderers.ForEach(renderer =>
                     {
                         if (item.IsInstanceSegmenation)
@@ -487,6 +489,7 @@ public class SimulatorManager : MonoBehaviour
                     Color segmentationColor = item.IsInstanceSegmenation ? GenerateSimilarColor(item.Color) : item.Color;
 
                     obj.GetComponentsInChildren(true, renderers);
+                    renderers.RemoveAll(IsVisualEffect);
                     renderers.ForEach(renderer =>
                     {
                         if (item.IsInstanceSegmenation)
@@ -543,6 +546,9 @@ public class SimulatorManager : MonoBehaviour
         }
     }
 
+    // Visual effects (tire spray) take no segmentation color, and Unity 6 refuses to give them material instances
+    static bool IsVisualEffect(Renderer renderer) => renderer is VFXRenderer;
+
     public void UpdateSegmentationColors(GameObject obj, uint? gtid = null)
     {
         var renderers = new List<Renderer>(1024);
@@ -563,6 +569,7 @@ public class SimulatorManager : MonoBehaviour
                 }
 
                 obj.GetComponentsInChildren(true, renderers);
+                renderers.RemoveAll(IsVisualEffect);
                 renderers.ForEach(renderer =>
                 {
                     if (item.IsInstanceSegmenation || segId > 0)

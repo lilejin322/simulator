@@ -30,7 +30,12 @@ namespace UnityEngine.Rendering.HighDefinition
         RaytracingGBuffer,
         RaytracingSubSurface,
         PathTracing,
+        RayTracingDebug,
         Constant,
         FullScreenDebug,
+        PBRSky,
+        FogVolumePreview,
+        FogVolumeVoxelization,
+        FogVolumeOverdrawDebug,
     }
 }

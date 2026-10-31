@@ -1,23 +1,43 @@
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RayTracingLightCluster.hlsl"
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/RayTracingFallbackHierarchy.cs.hlsl"
 
-#define USE_LIGHT_CLUSTER 
+#define USE_LIGHT_CLUSTER
 
-void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BSDFData bsdfData, BuiltinData builtinData, 
-                float reflectionHierarchyWeight, float refractionHierarchyWeight, float3 reflection, float3 transmission,
-			    out LightLoopOutput lightLoopOutput)
+struct RayContext
+{
+    // Signal that came from a bounced ray
+    float3 reflection;
+    // Weight for the bounced ray
+    float reflectionWeight;
+
+    // Signal that came from a transmitted ray
+    float3 transmission;
+    // Weight for the transmitted ray
+    float transmissionWeight;
+
+    // Should the APV be used for the lightloop ? (in case of multibounce GI)
+    int useAPV;
+};
+
+void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BSDFData bsdfData, BuiltinData builtinData, RayContext rayContext,
+                out LightLoopOutput lightLoopOutput)
 {
     // Init LightLoop output structure
     ZERO_INITIALIZE(LightLoopOutput, lightLoopOutput);
-
+    ApplyCameraRelativeXR(posInput.positionWS);
+    
     LightLoopContext context;
     context.contactShadow    = 1.0;
     context.shadowContext    = InitShadowContext();
     context.shadowValue      = 1.0;
     context.sampleReflection = 0;
+#ifdef APPLY_FOG_ON_SKY_REFLECTIONS
+    context.positionWS       = posInput.positionWS;
+#endif
 
     // Initialize the contactShadow and contactShadowFade fields
     InvalidateConctactShadow(posInput, context);
-    
+
     // Evaluate sun shadows.
     if (_DirectionalShadowIndex >= 0)
     {
@@ -46,7 +66,7 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
     // Indices of the subranges to process
     uint lightStart = 0, lightEnd = 0;
 
-    // The light cluster is in actual world space coordinates, 
+    // The light cluster is in actual world space coordinates,
     #ifdef USE_LIGHT_CLUSTER
     // Get the actual world space position
     float3 actualWSPos = posInput.positionWS;
@@ -58,7 +78,7 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
     GetLightCountAndStartCluster(actualWSPos, LIGHTCATEGORY_PUNCTUAL, lightStart, lightEnd, cellIndex);
     #else
     lightStart = 0;
-    lightEnd = _PunctualLightCountRT;
+    lightEnd = _WorldPunctualLightCount;
     #endif
 
     uint i = 0;
@@ -67,7 +87,7 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
         #ifdef USE_LIGHT_CLUSTER
         LightData lightData = FetchClusterLightIndex(cellIndex, i);
         #else
-        LightData lightData = _LightDatasRT[i];
+        LightData lightData = _WorldLightDatas[i];
         #endif
         if (IsMatchingLightLayer(lightData.lightLayers, builtinData.renderingLayers))
         {
@@ -76,23 +96,73 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
         }
     }
 
-    // Add the traced reflection
-    if (reflectionHierarchyWeight == 1.0)
+    // Initalize the reflection and refraction hierarchy weights
+    float reflectionHierarchyWeight = 0.0;
+    float refractionHierarchyWeight = 0.0;
+
+    // Add the traced reflection (if any)
+    if (rayContext.reflectionWeight == 1.0)
     {
-        IndirectLighting lighting = EvaluateBSDF_RaytracedReflection(context, bsdfData, preLightData, reflection);
+        IndirectLighting lighting = EvaluateBSDF_RaytracedReflection(context, bsdfData, preLightData, rayContext.reflection.xyz);
         AccumulateIndirectLighting(lighting, aggregateLighting);
+        reflectionHierarchyWeight = 1.0;
     }
 
 #if HAS_REFRACTION
-    // Add the traced transmission
-    if (refractionHierarchyWeight == 1.0)
+    // Add the traced transmission (if any)
+    if (rayContext.transmissionWeight == 1.0)
     {
         IndirectLighting indirect;
         ZERO_INITIALIZE(IndirectLighting, indirect);
-        IndirectLighting lighting = EvaluateBSDF_RaytracedRefraction(context, preLightData, transmission);
+        IndirectLighting lighting = EvaluateBSDF_RaytracedRefraction(context, preLightData, rayContext.transmission.xyz);
         AccumulateIndirectLighting(lighting, aggregateLighting);
+        refractionHierarchyWeight = 1.0;
     }
 #endif
+
+#if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+    if (rayContext.useAPV == 1)
+    {
+        // At this point bakeDiffuseLighting only contain emissives when using APV
+        real3 emissive = builtinData.bakeDiffuseLighting;
+
+        if (_EnableProbeVolumes && rayContext.useAPV == 1)
+        {
+            // Reflect normal to get lighting for reflection probe tinting
+            float3 R = reflect(-V, bsdfData.normalWS);
+
+            // This variable is used with APV for reflection probe normalization - see code for LIGHTFEATUREFLAGS_ENV
+            float3 lightInReflDir = float3(-1, -1, -1);
+
+            EvaluateAdaptiveProbeVolume(GetAbsolutePositionWS(posInput.positionWS),
+                bsdfData.normalWS,
+                -bsdfData.normalWS,
+                R,
+                V,
+                posInput.positionSS,
+                _RaytracingAPVLayerMask,
+                builtinData.bakeDiffuseLighting,
+                builtinData.backBakeDiffuseLighting,
+                lightInReflDir);
+        }
+        else // If probe volume is disabled we fallback on the ambient probes
+        {
+            builtinData.bakeDiffuseLighting = EvaluateAmbientProbe(bsdfData.normalWS) * _RayTracingAmbientProbeDimmer;
+            builtinData.backBakeDiffuseLighting = EvaluateAmbientProbe(-bsdfData.normalWS) * _RayTracingAmbientProbeDimmer;
+        }
+
+    #ifdef  MODIFY_BAKED_DIFFUSE_LIGHTING
+        // Make sure the baked diffuse lighting is tinted with the diffuse color
+        ModifyBakedDiffuseLighting(V, posInput, preLightData, bsdfData, builtinData);
+    #endif
+
+        // Add emissiveon top of diffuse
+        builtinData.bakeDiffuseLighting += emissive;
+    }
+#endif
+
+    // This is applied only on bakeDiffuseLighting as ModifyBakedDiffuseLighting combine both bakeDiffuseLighting and backBakeDiffuseLighting
+    builtinData.bakeDiffuseLighting *= GetIndirectDiffuseMultiplier(builtinData.renderingLayers);
 
     // Define macro for a better understanding of the loop
     // TODO: this code is now much harder to understand...
@@ -102,40 +172,42 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
 
 // Environment cubemap test lightlayers, sky don't test it
 #define EVALUATE_BSDF_ENV(envLightData, TYPE, type) if (IsMatchingLightLayer(envLightData.lightLayers, builtinData.renderingLayers)) { EVALUATE_BSDF_ENV_SKY(envLightData, TYPE, type) }
-    
+
     #ifdef USE_LIGHT_CLUSTER
     // Get the punctual light count
     GetLightCountAndStartCluster(actualWSPos, LIGHTCATEGORY_ENV, lightStart, lightEnd, cellIndex);
     #else
     lightStart = 0;
-    lightEnd = _EnvLightCountRT;
+    lightEnd = _WorldEnvLightCount;
     #endif
 
     context.sampleReflection = SINGLE_PASS_CONTEXT_SAMPLE_REFLECTION_PROBES;
-
-    // Scalarized loop, same rationale of the punctual light version
-    uint envLightIdx = lightStart;
-    while (envLightIdx < lightEnd)
+    if (RAYTRACINGFALLBACKHIERACHY_REFLECTION_PROBES & _RayTracingLastBounceFallbackHierarchy)
     {
-        #ifdef USE_LIGHT_CLUSTER
-        EnvLightData envLightData = FetchClusterEnvLightIndex(cellIndex, envLightIdx);
-        #else
-        EnvLightData envLightData = _EnvLightDatasRT[envLightIdx];
-        #endif
+        // Scalarized loop, same rationale of the punctual light version
+        uint envLightIdx = lightStart;
+        while (envLightIdx < lightEnd)
+        {
+            #ifdef USE_LIGHT_CLUSTER
+            EnvLightData envLightData = FetchClusterEnvLightIndex(cellIndex, envLightIdx);
+            #else
+            EnvLightData envLightData = _WorldEnvLightDatas[envLightIdx];
+            #endif
 
-        if (reflectionHierarchyWeight < 1.0)
-        {
-            EVALUATE_BSDF_ENV(envLightData, REFLECTION, reflection);
+            if (reflectionHierarchyWeight < 1.0)
+            {
+                EVALUATE_BSDF_ENV(envLightData, REFLECTION, reflection);
+            }
+            if (refractionHierarchyWeight < 1.0)
+            {
+                EVALUATE_BSDF_ENV(envLightData, REFRACTION, refraction);
+            }
+            envLightIdx++;
         }
-        if (refractionHierarchyWeight < 1.0)
-        {
-            EVALUATE_BSDF_ENV(envLightData, REFRACTION, refraction);
-        }
-        envLightIdx++;
     }
 
     // Only apply the sky IBL if the sky texture is available
-    if (_EnvLightSkyEnabled)
+    if (_EnvLightSkyEnabled && (RAYTRACINGFALLBACKHIERACHY_SKY & _RayTracingLastBounceFallbackHierarchy))
     {
         // The sky is a single cubemap texture separate from the reflection probe texture array (different resolution and compression)
         context.sampleReflection = SINGLE_PASS_CONTEXT_SAMPLE_SKY;
@@ -169,11 +241,11 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
 
 
     #ifdef USE_LIGHT_CLUSTER
-    // Let's loop through all the 
+    // Let's loop through all the
     GetLightCountAndStartCluster(actualWSPos, LIGHTCATEGORY_AREA, lightStart, lightEnd, cellIndex);
     #else
-    lightStart = _PunctualLightCountRT;
-    lightEnd = _PunctualLightCountRT + _AreaLightCountRT;
+    lightStart = _WorldPunctualLightCount;
+    lightEnd = _WorldPunctualLightCount + _WorldAreaLightCount;
     #endif
 
     if (lightEnd != lightStart)
@@ -183,7 +255,7 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
         #ifdef USE_LIGHT_CLUSTER
         LightData lightData = FetchClusterLightIndex(cellIndex, i);
         #else
-        LightData lightData = _LightDatasRT[i];
+        LightData lightData = _WorldLightDatas[i];
         #endif
 
         while (i < last && lightData.lightType == GPULIGHTTYPE_TUBE)
@@ -199,7 +271,7 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
             #ifdef USE_LIGHT_CLUSTER
             lightData = FetchClusterLightIndex(cellIndex, i);
             #else
-            lightData = _LightDatasRT[i];
+            lightData = _WorldLightDatas[i];
             #endif
         }
 
@@ -216,7 +288,7 @@ void LightLoop( float3 V, PositionInputs posInput, PreLightData preLightData, BS
             #ifdef USE_LIGHT_CLUSTER
             lightData = FetchClusterLightIndex(cellIndex, i);
             #else
-            lightData = _LightDatasRT[i];
+            lightData = _WorldLightDatas[i];
             #endif
         }
     }

@@ -1,18 +1,19 @@
 using UnityEngine;
-using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
 using System.Linq;
-using System;
+using UnityEngine.Rendering;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
     static class DiffusionProfileMaterialUI
     {
-        static GUIContent    diffusionProfileNotInHDRPAsset = new GUIContent("Make sure this Diffusion Profile is referenced in either a Diffusion Profile Override or the HDRP Default Settings. If the Diffusion Profile is not referenced in either, HDRP cannot use it. To add a reference to the Diffusion Profile in the HDRP Default Settings, press Fix.", EditorGUIUtility.IconContent("console.infoicon").image);
+        internal static string diffusionProfileNotAssigned = "The diffusion profile on this material is not assigned.\nThe material will be rendered with an error color.";
+        internal static GUIContent diffusionProfileNotInHDRPAsset = new GUIContent("Make sure this Diffusion Profile is referenced in a Diffusion Profile List in either a scene volume or in the HDRP Global Settings default volume profile.\nIf the Diffusion Profile is not referenced in either, HDRP cannot use it. To add a reference to the Diffusion Profile in the HDRP Global Settings, press Fix.", EditorGUIUtility.IconContent("console.infoicon").image);
 
         public static bool IsSupported(MaterialEditor materialEditor)
         {
-            return !materialEditor.targets.Any(o => {
+            return !materialEditor.targets.Any(o =>
+            {
                 Material m = o as Material;
                 return !m.HasProperty("_DiffusionProfileAsset") || !m.HasProperty("_DiffusionProfileHash");
             });
@@ -20,6 +21,9 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public static void OnGUI(MaterialEditor materialEditor, MaterialProperty diffusionProfileAsset, MaterialProperty diffusionProfileHash, int profileIndex, string displayName = "Diffusion Profile")
         {
+            MaterialEditor.BeginProperty(diffusionProfileAsset);
+            MaterialEditor.BeginProperty(diffusionProfileHash);
+
             // We can't cache these fields because of several edge cases like undo/redo or pressing escape in the object picker
             string guid = HDUtils.ConvertVector4ToGUID(diffusionProfileAsset.vectorValue);
             DiffusionProfileSettings diffusionProfile = AssetDatabase.LoadAssetAtPath<DiffusionProfileSettings>(AssetDatabase.GUIDToAssetPath(guid));
@@ -30,13 +34,19 @@ namespace UnityEditor.Rendering.HighDefinition
             if (EditorGUI.EndChangeCheck())
             {
                 Vector4 newGuid = Vector4.zero;
-                float    hash = 0;
+                float hash = 0;
 
                 if (diffusionProfile != null)
                 {
                     guid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(diffusionProfile));
                     newGuid = HDUtils.ConvertGUIDToVector4(guid);
                     hash = HDShadowUtils.Asfloat(diffusionProfile.profile.hash);
+
+                    if (GraphicsSettings.GetRenderPipelineSettings<DiffusionProfileDefaultSettings>().autoRegister)
+                    {
+                        var defaultVolumeProfileSettings = GraphicsSettings.GetRenderPipelineSettings<HDRPDefaultVolumeProfileSettings>();
+                        VolumeUtils.TryAddSingleDiffusionProfile(defaultVolumeProfileSettings.volumeProfile, diffusionProfile);
+                    }
                 }
 
                 // encode back GUID and it's hash
@@ -51,21 +61,35 @@ namespace UnityEditor.Rendering.HighDefinition
                 }
             }
 
-            DrawDiffusionProfileWarning(diffusionProfile);
+            MaterialEditor.EndProperty();
+            MaterialEditor.EndProperty();
+
+            if (diffusionProfile == null)
+                EditorGUILayout.HelpBox(diffusionProfileNotAssigned, MessageType.Error);
+            else
+                DrawDiffusionProfileWarning(diffusionProfile);
         }
 
-        static void DrawDiffusionProfileWarning(DiffusionProfileSettings materialProfile)
+        internal static void DrawDiffusionProfileWarning(DiffusionProfileSettings materialProfile)
         {
-            if (materialProfile != null && !HDRenderPipeline.defaultAsset.diffusionProfileSettingsList.Any(d => d == materialProfile))
+            if (materialProfile != null)
             {
-                using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+                if (GraphicsSettings.TryGetRenderPipelineSettings<HDRPDefaultVolumeProfileSettings>(out var defaultVolumeProfileSettings))
                 {
-                    GUIStyle wordWrap = new GUIStyle(EditorStyles.label);
-                    wordWrap.wordWrap = true;
-                    EditorGUILayout.LabelField(diffusionProfileNotInHDRPAsset, wordWrap);
-                    if (GUILayout.Button("Fix", GUILayout.ExpandHeight(true)))
+                    var volumeProfile = defaultVolumeProfileSettings.volumeProfile;
+                    if (volumeProfile == null)
                     {
-                        HDRenderPipeline.defaultAsset.AddDiffusionProfile(materialProfile);
+                        VolumeUtils.EnsureDefaultVolumeProfile();
+                        volumeProfile = defaultVolumeProfileSettings.volumeProfile;
+                    }
+
+                    if (!VolumeUtils.IsDiffusionProfileRegistered(materialProfile, volumeProfile))
+                    {
+                        CoreEditorUtils.DrawFixMeBox(diffusionProfileNotInHDRPAsset, "Fix", () =>
+                        {
+                            if (VolumeUtils.TryAddSingleDiffusionProfile(volumeProfile, materialProfile))
+                                VolumeManager.instance.OnVolumeProfileChanged(volumeProfile);
+                        });
                     }
                 }
             }

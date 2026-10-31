@@ -5,7 +5,7 @@ using UnityEngine.Rendering;
 namespace UnityEditor.Rendering.HighDefinition
 {
     [CanEditMultipleObjects]
-    [VolumeComponentEditor(typeof(IndirectLightingController))]
+    [CustomEditor(typeof(IndirectLightingController))]
     class IndirectLightingControllerEditor : VolumeComponentEditor
     {
         SerializedDataParameter m_IndirectDiffuseLightingMultiplier;
@@ -31,16 +31,16 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public override void OnInspectorGUI()
         {
-            PropertyField(m_IndirectDiffuseLightingMultiplier, EditorGUIUtility.TrTextContent("Indirect Diffuse Lighting Multiplier", "Sets the multiplier for indirect diffuse lighting.\nIt affect Ambient Probe, Light Probes, Lightmaps, Light Probe Volumes, Screen Space Global Illumination, Raytrace Global Illumination."));
+            PropertyField(m_IndirectDiffuseLightingMultiplier, EditorGUIUtility.TrTextContent("Indirect Diffuse Lighting Multiplier", "Sets the multiplier for indirect diffuse lighting.\nIt affect Ambient Probe, Light Probes, Lightmaps, Adaptive Probe Volumes, Screen Space Global Illumination, Raytrace Global Illumination."));
             using (new EditorGUI.DisabledScope(!HDUtils.hdrpSettings.supportLightLayers))
             {
-                PropertyField(m_IndirectDiffuseLightingLayers, EditorGUIUtility.TrTextContent("Indirect Diffuse Lighting Layers", "Sets the light layer mask for indirect diffuse lighting. Only matching RenderingLayers on Mesh will get affected by the multiplier."));
+                PropertyField(m_IndirectDiffuseLightingLayers, EditorGUIUtility.TrTextContent("Indirect Diffuse Rendering Layer Mask", "The Indirect Diffuse Lighting Multiplier only affects Renderers with a matching Rendering Layer Mask.\nThis is only available when Light Layers are enabled."));
             }
 
             PropertyField(m_ReflectionLightingMultiplier, EditorGUIUtility.TrTextContent("Reflection Lighting Multiplier", "Sets the multiplier for reflected specular lighting.\nIt affect Sky Reflection, Reflection Probes, Planar Probes, Screen Space Reflection, Raytrace Reflection."));
             using (new EditorGUI.DisabledScope(!HDUtils.hdrpSettings.supportLightLayers))
             {
-                PropertyField(m_ReflectionLightingLayers, EditorGUIUtility.TrTextContent("Reflection Lighting Layers", "Sets the light layer mask for reflected specular lighting. Only matching RenderingLayers on Mesh will get affected by the multiplier."));
+                PropertyField(m_ReflectionLightingLayers, EditorGUIUtility.TrTextContent("Reflection Rendering Layer Mask", "Sets the Rendering Layer Mask for reflected specular lighting. Only Renderers with a matching Rendering Layer Mask will get affected by the multiplier.\nThis is only available when Light Layers are enabled."));
             }
             PropertyField(m_ReflectionProbeIntensityMultiplier, EditorGUIUtility.TrTextContent("Reflection/Planar Probe Intensity Multiplier", "Sets the intensity multiplier for Reflection/Planar Probes."));
         }

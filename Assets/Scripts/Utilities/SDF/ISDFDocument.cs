@@ -12,5 +12,5 @@ public interface ISDFDocument
     void LoadWorld(GameObject rootObject, Camera mainCamera = null);
     SDFParserBase RootElement { get; }
     string FileName { get; }
-    PhysicMaterial DefaultPhysicMaterial { get; }
+    PhysicsMaterial DefaultPhysicMaterial { get; }
 }

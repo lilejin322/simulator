@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using System.Collections.Generic;
 using System.Reflection;
+using Unity.Scripting.LifecycleManagement;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -19,7 +20,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 if (char.IsUpper(text[i]))
                     if ((text[i - 1] != ' ' && !char.IsUpper(text[i - 1])) ||
                         (preserveAcronyms && char.IsUpper(text[i - 1]) &&
-                            i < text.Length - 1 && !char.IsUpper(text[i + 1])))
+                         i < text.Length - 1 && !char.IsUpper(text[i + 1])))
                         newText.Append(' ');
                 newText.Append(text[i]);
             }
@@ -42,9 +43,10 @@ namespace UnityEngine.Rendering.HighDefinition
         public readonly FrameSettingsField[] dependencies;
         private readonly int dependencySeparator;
 
-        static int autoOrder = 0;
-
-        private static Dictionary<FrameSettingsField, string> s_FrameSettingsEnumNameMap = null;
+        // No cleanup needed (only modified when FrameSettingsFieldAttribute are instantiated)
+        [NoAutoStaticsCleanup] static int s_AutoOrder = 0;
+        // No cleanup needed (reflection data cache)
+        [NoAutoStaticsCleanup] static Dictionary<FrameSettingsField, string> s_FrameSettingsEnumNameMap = null;
 
         public static Dictionary<FrameSettingsField, string> GetEnumNameMap()
         {
@@ -103,8 +105,8 @@ namespace UnityEngine.Rendering.HighDefinition
             // Editor and Runtime debug menu
             this.group = group;
             if (customOrderInGroup != -1)
-                autoOrder = customOrderInGroup; //start again numbering from this value
-            this.orderInGroup = autoOrder++;
+                s_AutoOrder = customOrderInGroup; //start again numbering from this value
+            this.orderInGroup = s_AutoOrder++;
             this.displayedName = displayedName;
             this.type = type;
             this.targetType = targetType;

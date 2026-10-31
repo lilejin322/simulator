@@ -20,15 +20,17 @@ Shader "Simulator/PointCloud/HDRP/Compose"
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/RenderPass/CustomPass/CustomPassCommon.hlsl"
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/NormalBuffer.hlsl"
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/BuiltinGIUtilities.hlsl"
+    #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Decal/DecalPrepassBuffer.hlsl"
 
     #pragma multi_compile _ _PC_TARGET_GBUFFER _PC_UNLIT_SHADOWS
-    #pragma multi_compile _ LIGHT_LAYERS
+    #pragma multi_compile _ RENDERING_LAYERS
 
     #ifdef _PC_UNLIT_SHADOWS
         #define LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
         #define HAS_LIGHTLOOP 
         #define SHADOW_OPTIMIZE_REGISTER_USAGE 1
         #define SHADOW_LOW
+        #define AREA_SHADOW_LOW
 
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
         #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/Shadow/HDShadowContext.hlsl"
@@ -96,7 +98,7 @@ Shader "Simulator/PointCloud/HDRP/Compose"
         out float4 outGBuffer1 : SV_Target1,
         out float4 outGBuffer2 : SV_Target2,
         out float4 outGBuffer3 : SV_Target3,
-    #ifdef LIGHT_LAYERS
+    #ifdef RENDERING_LAYERS
         out float4 outGBuffer4 : SV_Target4,
     #endif
     #else
@@ -133,7 +135,7 @@ Shader "Simulator/PointCloud/HDRP/Compose"
                 float shadow;
                 float3 shadow3;
                 float3 normalWS = pcNormalDepth.rgb;
-                ShadowLoopMin(shadowContext, posInput, normalWS, asuint(_ShadowsFilter), DEFAULT_LIGHT_LAYERS, shadow3);
+                ShadowLoopMin(shadowContext, posInput, normalWS, asuint(_ShadowsFilter), RENDERING_LAYERS_MASK, shadow3);
                 shadow = dot(shadow3, float3(1.0/3.0, 1.0/3.0, 1.0/3.0));
 
                 float4 shadowTint = float4(0,0,0,0.9);
@@ -155,7 +157,7 @@ Shader "Simulator/PointCloud/HDRP/Compose"
             float4 normalGBuffer;
             EncodeIntoNormalBuffer(nData, insetSS, /* out */ normalGBuffer);
 
-            float multiplier = GetIndirectDiffuseMultiplier(DEFAULT_LIGHT_LAYERS);
+            float multiplier = GetIndirectDiffuseMultiplier(RENDERING_LAYERS_MASK);
             float3 ambient = SampleSH9(pcNormalDepth.rgb) * color * multiplier * GetCurrentExposureMultiplier();
 
             outGBuffer0 = float4(color, 1);
@@ -163,8 +165,12 @@ Shader "Simulator/PointCloud/HDRP/Compose"
             // outGBuffer2 = float4(0, 0, 0, PackFloatInt8bit(/* coat mask */ 0.0, /* GBUFFER_LIT_STANDARD */ 0, 8));
             outGBuffer2 = float4(0, 0, 0, 0);
             outGBuffer3 = float4(ambient, 0);
-            #ifdef LIGHT_LAYERS
-            outGBuffer4 = DEFAULT_LIGHT_LAYERS;
+            #ifdef RENDERING_LAYERS
+            // Point clouds are on every rendering layer
+            DecalPrepassData renderingLayersData;
+            renderingLayersData.geomNormalWS = pcNormalDepth.rgb;
+            renderingLayersData.renderingLayerMask = RENDERING_LAYERS_MASK;
+            EncodeIntoDecalPrepassBuffer(renderingLayersData, outGBuffer4);
             #endif
         #endif
     }

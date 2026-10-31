@@ -47,7 +47,7 @@ namespace Simulator.ScenarioEditor.Agents
         /// <inheritdoc/>
         public override async Task Initialize(IProgress<float> progress)
         {
-            var library = await ConnectionManager.API.GetLibrary<VehicleDetailData>();
+            var library = await BuiltinAssetLibrary.GetLibrary<VehicleDetailData>();
 
             var assetService = new AssetService();
             var vehiclesInDatabase = assetService.List(BundleConfig.BundleTypes.Vehicle);

@@ -28,6 +28,8 @@ namespace UnityEditor.Rendering.HighDefinition
         internal SerializedProperty type;
         internal SerializedProperty mode;
         internal SerializedProperty realtimeMode;
+        internal SerializedProperty timeSlicing;
+        internal SerializedProperty importance;
         internal SerializedProperty lightingMultiplier;
         internal SerializedProperty lightingWeight;
         internal SerializedProperty lightingFadeDistance;
@@ -39,6 +41,7 @@ namespace UnityEditor.Rendering.HighDefinition
         internal SerializedProperty proxyMirrorPositionProxySpace;
         internal SerializedProperty proxyMirrorRotationProxySpace;
         internal SerializedScalableSettingValue resolutionScalable;
+        internal SerializedScalableSettingValue cubeResolution;
         internal SerializedProperty roughReflections;
         internal SerializedProperty distanceBasedRoughness;
         internal SerializedProperty frustumFieldOfViewMode;
@@ -53,6 +56,8 @@ namespace UnityEditor.Rendering.HighDefinition
             type = root.Find((ProbeSettings p) => p.type);
             mode = root.Find((ProbeSettings p) => p.mode);
             realtimeMode = root.Find((ProbeSettings p) => p.realtimeMode);
+            timeSlicing = root.Find((ProbeSettings p) => p.timeSlicing);
+            importance= root.FindPropertyRelative("lighting.importance");
             lightingMultiplier = root.FindPropertyRelative("lighting.multiplier");
             lightingWeight = root.FindPropertyRelative("lighting.weight");
             lightingFadeDistance = root.FindPropertyRelative("lighting.fadeDistance");
@@ -64,6 +69,7 @@ namespace UnityEditor.Rendering.HighDefinition
             proxyMirrorPositionProxySpace = root.FindPropertyRelative("proxySettings.mirrorPositionProxySpace");
             proxyMirrorRotationProxySpace = root.FindPropertyRelative("proxySettings.mirrorRotationProxySpace");
             resolutionScalable = new SerializedScalableSettingValue(root.Find((ProbeSettings p) => p.resolutionScalable));
+            cubeResolution = new SerializedScalableSettingValue(root.Find((ProbeSettings p) => p.cubeResolution));
             roughReflections = root.FindPropertyRelative("roughReflections");
             distanceBasedRoughness = root.FindPropertyRelative("distanceBasedRoughness");
             frustumFieldOfViewMode = root.FindPropertyRelative("frustum.fieldOfViewMode");

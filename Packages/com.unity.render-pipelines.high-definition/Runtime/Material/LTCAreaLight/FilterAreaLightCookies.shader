@@ -2,7 +2,7 @@ Shader "Hidden/CoreResources/FilterAreaLightCookies"
 {
     HLSLINCLUDE
         #pragma target 4.5
-        #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+        #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
         #pragma editor_sync_compilation
 
         #pragma vertex Vert
@@ -54,6 +54,7 @@ Shader "Hidden/CoreResources/FilterAreaLightCookies"
 
     SubShader
     {
+        Tags{ "RenderPipeline" = "HDRenderPipeline" }
         // Simple copy to mip 0
         Pass
         {

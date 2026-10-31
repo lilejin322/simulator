@@ -26,12 +26,17 @@ namespace UnityEngine.Rendering.HighDefinition
             AddReflectionSettings,
             /// <summary>Version Step.</summary>
             AddCustomPostprocessAndCustomPass,
+            /// <summary>Version Step.</summary>
+            UpdateMSAA,
+            /// <summary>Version Step.</summary>
+            UpdatePhysicalCameraPropertiesToCore
         }
 
         [SerializeField, FormerlySerializedAs("version")]
+        [ExcludeCopy]
         Version m_Version = MigrationDescription.LastVersion<Version>();
 
-        static readonly MigrationDescription<Version, HDAdditionalCameraData> k_Migration = MigrationDescription.New(
+        private static readonly MigrationDescription<Version, HDAdditionalCameraData> k_Migration = MigrationDescription.New(
             MigrationStep.New(Version.SeparatePassThrough, (HDAdditionalCameraData data) =>
             {
 #pragma warning disable 618 // Type or member is obsolete
@@ -65,10 +70,32 @@ namespace UnityEngine.Rendering.HighDefinition
             }),
             MigrationStep.New(Version.AddReflectionSettings, (HDAdditionalCameraData data) =>
                 FrameSettings.MigrateToDefaultReflectionSettings(ref data.renderingPathCustomFrameSettings)
-            ),
+                ),
             MigrationStep.New(Version.AddCustomPostprocessAndCustomPass, (HDAdditionalCameraData data) =>
             {
                 FrameSettings.MigrateToCustomPostprocessAndCustomPass(ref data.renderingPathCustomFrameSettings);
+            }),
+            MigrationStep.New(Version.UpdateMSAA, (HDAdditionalCameraData data) =>
+            {
+                FrameSettings.MigrateMSAA(ref data.renderingPathCustomFrameSettings, ref data.renderingPathCustomFrameSettingsOverrideMask);
+            }),
+            MigrationStep.New(Version.UpdatePhysicalCameraPropertiesToCore, (HDAdditionalCameraData data) =>
+            {
+                var camera = data.GetComponent<Camera>();
+#pragma warning disable CS0618 // Type or member is obsolete
+                var physicalProps = data.physicalParameters;
+#pragma warning restore CS0618
+                if (camera != null)
+                {
+                    camera.iso = physicalProps.iso;
+                    camera.shutterSpeed = physicalProps.shutterSpeed;
+                    camera.aperture = physicalProps.aperture;
+                    camera.focusDistance = physicalProps.focusDistance;
+                    camera.bladeCount = physicalProps.bladeCount;
+                    camera.curvature = physicalProps.curvature;
+                    camera.barrelClipping = physicalProps.barrelClipping;
+                    camera.anamorphism = physicalProps.anamorphism;
+                }
             })
         );
 
@@ -77,13 +104,13 @@ namespace UnityEngine.Rendering.HighDefinition
         void Awake() => k_Migration.Migrate(this);
 
 #pragma warning disable 649 // Field never assigned
-        [SerializeField, FormerlySerializedAs("renderingPath"), Obsolete("For Data Migration")]
+        [SerializeField, FormerlySerializedAs("renderingPath"), Obsolete("For Data Migration. #from(2021.1)")]
+        [ExcludeCopy]
         int m_ObsoleteRenderingPath;
         [SerializeField]
-        [FormerlySerializedAs("serializedFrameSettings"), FormerlySerializedAs("m_FrameSettings")]
-#pragma warning disable 618 // Type or member is obsolete
+        [FormerlySerializedAs("serializedFrameSettings"), FormerlySerializedAs("m_FrameSettings"), Obsolete("For Data Migration. #from(2021.1)")]
+        [ExcludeCopy]
         ObsoleteFrameSettings m_ObsoleteFrameSettings;
-#pragma warning restore 618
 #pragma warning restore 649
     }
 }

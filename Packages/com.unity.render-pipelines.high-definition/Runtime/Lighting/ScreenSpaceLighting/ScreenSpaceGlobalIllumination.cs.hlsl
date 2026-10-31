@@ -1,5 +1,5 @@
 //
-// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit / Render Pipeline / Generate Shader Includes ] instead
+// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit > Rendering > Generate Shader Includes ] instead
 //
 
 #ifndef SCREENSPACEGLOBALILLUMINATION_CS_HLSL
@@ -9,7 +9,8 @@
 //
 #define INDIRECTDIFFUSEMODE_OFF (0)
 #define INDIRECTDIFFUSEMODE_SCREEN_SPACE (1)
-#define INDIRECTDIFFUSEMODE_RAYTRACE (2)
+#define INDIRECTDIFFUSEMODE_RAY_TRACED (2)
+#define INDIRECTDIFFUSEMODE_MIXED (3)
 
 
 #endif

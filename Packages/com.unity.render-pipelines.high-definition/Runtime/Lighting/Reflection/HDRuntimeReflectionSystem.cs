@@ -13,7 +13,7 @@ namespace UnityEngine.Rendering.HighDefinition
 {
     class HDRuntimeReflectionSystem : ScriptableRuntimeReflectionSystem
     {
-        #if !REFLECTION_PROBE_UPDATE_CACHED_DATA_AVAILABLE
+#if !REFLECTION_PROBE_UPDATE_CACHED_DATA_AVAILABLE
         static MethodInfo BuiltinUpdate;
 
         static HDRuntimeReflectionSystem()
@@ -23,18 +23,17 @@ namespace UnityEngine.Rendering.HighDefinition
             var method = type.GetMethod("BuiltinUpdate", BindingFlags.Static | BindingFlags.NonPublic);
             BuiltinUpdate = method;
         }
-        #endif
 
-        static HDRuntimeReflectionSystem k_instance = new HDRuntimeReflectionSystem();
+#endif
 
         // We must use a static constructor and only set the system in the Initialize method
         // in case this method is called multiple times.
         // This will be the case when entering play mode without performing the domain reload.
-        [RuntimeInitializeOnLoadMethod]
-        static void Initialize()
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStaticsOnLoad()
         {
             if (GraphicsSettings.currentRenderPipeline is HDRenderPipelineAsset)
-                ScriptableRuntimeReflectionSystemSettings.system = k_instance;
+                ScriptableRuntimeReflectionSystemSettings.system = new HDRuntimeReflectionSystem();
         }
 
         // Note: method bool TickRealtimeProbes() will create GC.Alloc due to Unity binding code
@@ -43,11 +42,11 @@ namespace UnityEngine.Rendering.HighDefinition
 
         public override bool TickRealtimeProbes()
         {
-            #if REFLECTION_PROBE_UPDATE_CACHED_DATA_AVAILABLE
+#if REFLECTION_PROBE_UPDATE_CACHED_DATA_AVAILABLE
             ReflectionProbe.UpdateCachedState();
-            #else
+#else
             BuiltinUpdate.Invoke(null, new object[0]);
-            #endif
+#endif
             return base.TickRealtimeProbes();
         }
     }

@@ -17,7 +17,6 @@ Shader "HDRP/LayeredLit"
         _BaseColorMap1("BaseColorMap1", 2D) = "white" {}
         _BaseColorMap2("BaseColorMap2", 2D) = "white" {}
         _BaseColorMap3("BaseColorMap3", 2D) = "white" {}
-        [HideInInspector] _BaseColorMap0_MipInfo("_BaseColorMap0_MipInfo", Vector) = (0, 0, 0, 0)
 
         _Metallic0("Metallic0", Range(0.0, 1.0)) = 0
         _Metallic1("Metallic1", Range(0.0, 1.0)) = 0
@@ -48,6 +47,16 @@ Shader "HDRP/LayeredLit"
         _SmoothnessRemapMax1("SmoothnessRemapMax1", Range(0.0, 1.0)) = 1.0
         _SmoothnessRemapMax2("SmoothnessRemapMax2", Range(0.0, 1.0)) = 1.0
         _SmoothnessRemapMax3("SmoothnessRemapMax3", Range(0.0, 1.0)) = 1.0
+
+        _AlphaRemapMin0("AlphaRemapMin0", Range(0.0, 1.0)) = 0.0
+        _AlphaRemapMin1("AlphaRemapMin1", Range(0.0, 1.0)) = 0.0
+        _AlphaRemapMin2("AlphaRemapMin2", Range(0.0, 1.0)) = 0.0
+        _AlphaRemapMin3("AlphaRemapMin3", Range(0.0, 1.0)) = 0.0
+
+        _AlphaRemapMax0("AlphaRemapMax0", Range(0.0, 1.0)) = 1.0
+        _AlphaRemapMax1("AlphaRemapMax1", Range(0.0, 1.0)) = 1.0
+        _AlphaRemapMax2("AlphaRemapMax2", Range(0.0, 1.0)) = 1.0
+        _AlphaRemapMax3("AlphaRemapMax3", Range(0.0, 1.0)) = 1.0
 
         _AORemapMin0("AORemapMin0", Range(0.0, 1.0)) = 0.0
         _AORemapMin1("AORemapMin1", Range(0.0, 1.0)) = 0.0
@@ -189,10 +198,20 @@ Shader "HDRP/LayeredLit"
         _SubsurfaceMaskMap2("Subsurface Mask Map2", 2D) = "white" {}
         _SubsurfaceMaskMap3("Subsurface Mask Map3", 2D) = "white" {}
 
-        _Thickness0("Thickness", Range(0.0, 1.0)) = 1.0
-        _Thickness1("Thickness", Range(0.0, 1.0)) = 1.0
-        _Thickness2("Thickness", Range(0.0, 1.0)) = 1.0
-        _Thickness3("Thickness", Range(0.0, 1.0)) = 1.0
+        _TransmissionMask0("Transmission Mask0", Range(0.0, 1.0)) = 1.0
+        _TransmissionMask1("Transmission Mask1", Range(0.0, 1.0)) = 1.0
+        _TransmissionMask2("Transmission Mask2", Range(0.0, 1.0)) = 1.0
+        _TransmissionMask3("Transmission Mask3", Range(0.0, 1.0)) = 1.0
+
+        _TransmissionMaskMap0("Transmission Mask Map0", 2D) = "white" {}
+        _TransmissionMaskMap1("Transmission Mask Map1", 2D) = "white" {}
+        _TransmissionMaskMap2("Transmission Mask Map2", 2D) = "white" {}
+        _TransmissionMaskMap3("Transmission Mask Map3", 2D) = "white" {}
+
+        _Thickness0("Thickness", Float) = 1.0
+        _Thickness1("Thickness", Float) = 1.0
+        _Thickness2("Thickness", Float) = 1.0
+        _Thickness3("Thickness", Float) = 1.0
 
         _ThicknessMap0("Thickness Map", 2D) = "white" {}
         _ThicknessMap1("Thickness Map", 2D) = "white" {}
@@ -235,7 +254,7 @@ Shader "HDRP/LayeredLit"
 
         [HideInInspector] _LayerCount("_LayerCount", Float) = 2.0
 
-        [Enum(None, 0, Multiply, 1, Add, 2)] _VertexColorMode("Vertex color mode", Float) = 0
+        [Enum(None, 0, Multiply, 1, AddSubstract, 2)] _VertexColorMode("Vertex color mode", Float) = 0
 
         [ToggleUI]  _ObjectScaleAffectTile("_ObjectScaleAffectTile", Float) = 0.0
         [Enum(UV0, 0, UV1, 1, UV2, 2, UV3, 3, Planar, 4, Triplanar, 5)] _UVBlendMask("UV Set for blendMask", Float) = 0
@@ -244,7 +263,7 @@ Shader "HDRP/LayeredLit"
 
         // Following are builtin properties
 
-        [Enum(Off, 0, From Ambient Occlusion, 1, From Bent Normals, 2)]  _SpecularOcclusionMode("Specular Occlusion Mode", Int) = 1
+        [Enum(Off, 0, From Ambient Occlusion, 1, From AO and Bent Normals, 2)]  _SpecularOcclusionMode("Specular Occlusion Mode", Int) = 1
 
         [HDR] _EmissiveColor("EmissiveColor", Color) = (0, 0, 0)
         // Used only to serialize the LDR and HDR emissive color in the material UI,
@@ -252,15 +271,26 @@ Shader "HDRP/LayeredLit"
         [HideInInspector] _EmissiveColorLDR("EmissiveColor LDR", Color) = (0, 0, 0)
         _EmissiveColorMap("EmissiveColorMap", 2D) = "white" {}
         [ToggleUI] _AlbedoAffectEmissive("Albedo Affect Emissive", Float) = 0.0
-        [HideInInspector] _EmissiveIntensityUnit("Emissive Mode", Int) = 0
+        _EmissiveIntensityUnit("Emissive Mode", Int) = 0
         [ToggleUI] _UseEmissiveIntensity("Use Emissive Intensity", Int) = 0
         _EmissiveIntensity("Emissive Intensity", Float) = 1
         _EmissiveExposureWeight("Emissive Pre Exposure", Range(0.0, 1.0)) = 1.0
 
+        [ToggleUI]  _UseShadowThreshold("_UseShadowThreshold", Float) = 0.0
         [ToggleUI] _AlphaCutoffEnable("Alpha Cutoff Enable", Float) = 0.0
-
         _AlphaCutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
+        _AlphaCutoffShadow("_AlphaCutoffShadow", Range(0.0, 1.0)) = 0.5
+        _AlphaCutoffPrepass("_AlphaCutoffPrepass", Range(0.0, 1.0)) = 0.5
+        _AlphaCutoffPostpass("_AlphaCutoffPostpass", Range(0.0, 1.0)) = 0.5
         _TransparentSortPriority("_TransparentSortPriority", Float) = 0
+
+        // Transparency
+        [Enum(None, 0, Planar, 1, Sphere, 2, Thin, 3)]_RefractionModel("Refraction Model", Int) = 0
+        _Ior("Index Of Refraction", Range(1.0, 2.5)) = 1.5
+        _TransmittanceColor("Transmittance Color", Color) = (1.0, 1.0, 1.0)
+        _TransmittanceColorMap("TransmittanceColorMap", 2D) = "white" {}
+        _ATDistance("Transmittance Absorption Distance", Float) = 1.0
+        [ToggleUI] _TransparentWritingMotionVec("_TransparentWritingMotionVec", Float) = 0.0
 
         // Stencil state
         // Forward
@@ -277,20 +307,17 @@ Shader "HDRP/LayeredLit"
         [HideInInspector] _StencilWriteMaskMV("_StencilWriteMaskMV", Int) = 32 // StencilUsage.ObjectMotionVector
 
         // Blending state
-        [HideInInspector] _SurfaceType("__surfacetype", Float) = 0.0
-        [HideInInspector] _BlendMode ("__blendmode", Float) = 0.0
+        _SurfaceType("__surfacetype", Float) = 0.0
+        _BlendMode ("__blendmode", Float) = 0.0
         [HideInInspector] _SrcBlend ("__src", Float) = 1.0
         [HideInInspector] _DstBlend ("__dst", Float) = 0.0
         [HideInInspector] _AlphaSrcBlend("__alphaSrc", Float) = 1.0
         [HideInInspector] _AlphaDstBlend("__alphaDst", Float) = 0.0
-        [HideInInspector][ToggleUI]_AlphaToMaskInspectorValue("_AlphaToMaskInspectorValue", Float) = 0 // Property used to save the alpha to mask state in the inspector
-        [HideInInspector][ToggleUI]_AlphaToMask("__alphaToMask", Float) = 0
-
         [HideInInspector][ToggleUI] _ZWrite ("__zw", Float) = 1.0
         [HideInInspector][ToggleUI] _TransparentZWrite("_TransparentZWrite", Float) = 0.0
         [HideInInspector] _CullMode("__cullmode", Float) = 2.0
-        [Enum(UnityEditor.Rendering.HighDefinition.TransparentCullMode)] _TransparentCullMode("_TransparentCullMode", Int) = 2 // Back culling by default
-        [Enum(UnityEditor.Rendering.HighDefinition.OpaqueCullMode)] _OpaqueCullMode("_OpaqueCullMode", Int) = 2 // Back culling by default
+        [Enum(UnityEngine.Rendering.HighDefinition.TransparentCullMode)] _TransparentCullMode("_TransparentCullMode", Int) = 2 // Back culling by default
+        [Enum(UnityEngine.Rendering.HighDefinition.OpaqueCullMode)] _OpaqueCullMode("_OpaqueCullMode", Int) = 2 // Back culling by default
         [HideInInspector] _ZTestDepthEqualForOpaque("_ZTestDepthEqualForOpaque", Int) = 4 // Less equal
         [HideInInspector] _ZTestGBuffer("_ZTestGBuffer", Int) = 4
         [Enum(UnityEngine.Rendering.CompareFunction)] _ZTestTransparent("Transparent ZTest", Int) = 4 // Less equal
@@ -301,12 +328,13 @@ Shader "HDRP/LayeredLit"
         [ToggleUI] _DoubleSidedEnable("Double sided enable", Float) = 0.0
         [Enum(Flip, 0, Mirror, 1, None, 2)] _DoubleSidedNormalMode("Double sided normal mode", Float) = 1
         [HideInInspector] _DoubleSidedConstants("_DoubleSidedConstants", Vector) = (1, 1, -1, 0)
+        [Enum(Auto, 0, On, 1, Off, 2)] _DoubleSidedGIMode("Double sided GI mode", Float) = 0
 
         // For layering, due to combinatorial explosion, we only support SSS/Transmission and Standard. We let other case for the shader graph
         [Enum(Subsurface Scattering, 0, Standard, 1, Translucent, 5)] _MaterialID("MaterialId", Int) = 1 // MaterialId.Standard
         [ToggleUI] _TransmissionEnable("_TransmissionEnable", Float) = 1.0
 
-        [Enum(None, 0, Vertex displacement, 1, Pixel displacement, 2)] _DisplacementMode("DisplacementMode", Int) = 0
+        _DisplacementMode("DisplacementMode", Int) = 0
         [ToggleUI] _DisplacementLockObjectScale("displacement lock object scale", Float) = 1.0
         [ToggleUI] _DisplacementLockTilingScale("displacement lock tiling scale", Float) = 1.0
         [ToggleUI] _DepthOffsetEnable("Depth Offset View space", Float) = 0.0
@@ -324,6 +352,7 @@ Shader "HDRP/LayeredLit"
 
         [Enum(Use Emissive Color, 0, Use Emissive Mask, 1)] _EmissiveColorMode("Emissive color mode", Float) = 1
         [Enum(UV0, 0, UV1, 1, UV2, 2, UV3, 3, Planar, 4, Triplanar, 5, Same as Main layer, 6)] _UVEmissive("UV Set for emissive", Float) = 0
+        [Enum(WorldSpace, 0, ObjectSpace, 1)] _ObjectSpaceUVMappingEmissive("Mapping space", Float) = 0.0
         _TexWorldScaleEmissive("Scale to apply on world coordinate", Float) = 1.0
         [HideInInspector] _UVMappingMaskEmissive("_UVMappingMaskEmissive", Color) = (1, 0, 0, 0)
 
@@ -369,9 +398,9 @@ Shader "HDRP/LayeredLit"
         [ToggleUI] _LinkDetailsWithBase3("LinkDetailsWithBase3", Float) = 1.0
 
         // HACK: GI Baking system relies on some properties existing in the shader ("_MainTex", "_Cutoff" and "_Color") for opacity handling, so we need to store our version of those parameters in the hard-coded name the GI baking system recognizes.
-        _MainTex("Albedo", 2D) = "white" {}
-        _Color("Color", Color) = (1,1,1,1)
-        _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
+        [HideInInspector] _MainTex("Albedo", 2D) = "white" {}
+        [HideInInspector] _Color("Color", Color) = (1,1,1,1)
+        [HideInInspector] _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
 
         [ToggleUI] _SupportDecals("Support Decals", Float) = 1.0
         [ToggleUI] _ReceivesSSR("Receives SSR", Float) = 1.0
@@ -389,68 +418,74 @@ Shader "HDRP/LayeredLit"
 
     #pragma target 4.5
 
-    #pragma shader_feature_local _ALPHATEST_ON
-    #pragma shader_feature_local _ALPHATOMASK_ON
     #pragma shader_feature_local _DEPTHOFFSET_ON
     #pragma shader_feature_local _DOUBLESIDED_ON
     #pragma shader_feature_local _ _VERTEX_DISPLACEMENT _PIXEL_DISPLACEMENT
-    #pragma shader_feature_local _VERTEX_DISPLACEMENT_LOCK_OBJECT_SCALE
+    #pragma shader_feature_local_vertex _VERTEX_DISPLACEMENT_LOCK_OBJECT_SCALE
     #pragma shader_feature_local _DISPLACEMENT_LOCK_TILING_SCALE
-    #pragma shader_feature_local _PIXEL_DISPLACEMENT_LOCK_OBJECT_SCALE
+    #pragma shader_feature_local_fragment _PIXEL_DISPLACEMENT_LOCK_OBJECT_SCALE
 
-    #pragma shader_feature_local _ _EMISSIVE_MAPPING_PLANAR _EMISSIVE_MAPPING_TRIPLANAR _EMISSIVE_MAPPING_BASE
     #pragma shader_feature_local _LAYER_TILING_COUPLED_WITH_UNIFORM_OBJECT_SCALE
     #pragma shader_feature_local _ _LAYER_MAPPING_PLANAR_BLENDMASK _LAYER_MAPPING_TRIPLANAR_BLENDMASK
+
+    #pragma shader_feature_local_fragment _ _EMISSIVE_MAPPING_PLANAR _EMISSIVE_MAPPING_TRIPLANAR _EMISSIVE_MAPPING_BASE
     #pragma shader_feature_local _ _LAYER_MAPPING_PLANAR0 _LAYER_MAPPING_TRIPLANAR0
     #pragma shader_feature_local _ _LAYER_MAPPING_PLANAR1 _LAYER_MAPPING_TRIPLANAR1
     #pragma shader_feature_local _ _LAYER_MAPPING_PLANAR2 _LAYER_MAPPING_TRIPLANAR2
     #pragma shader_feature_local _ _LAYER_MAPPING_PLANAR3 _LAYER_MAPPING_TRIPLANAR3
-    #pragma shader_feature_local _NORMALMAP_TANGENT_SPACE0
-    #pragma shader_feature_local _NORMALMAP_TANGENT_SPACE1
-    #pragma shader_feature_local _NORMALMAP_TANGENT_SPACE2
-    #pragma shader_feature_local _NORMALMAP_TANGENT_SPACE3
+
+    #pragma shader_feature_local_raytracing _ _EMISSIVE_MAPPING_PLANAR _EMISSIVE_MAPPING_TRIPLANAR _EMISSIVE_MAPPING_BASE
+    #pragma shader_feature_local_raytracing _NORMALMAP_TANGENT_SPACE0
+    #pragma shader_feature_local_raytracing _NORMALMAP_TANGENT_SPACE1
+    #pragma shader_feature_local_raytracing _NORMALMAP_TANGENT_SPACE2
+    #pragma shader_feature_local_raytracing _NORMALMAP_TANGENT_SPACE3
+
     #pragma shader_feature_local _ _REQUIRE_UV2 _REQUIRE_UV3
 
-    // We can only have 64 shader_feature_local
-    #pragma shader_feature _NORMALMAP0                                  // Non-local
-    #pragma shader_feature _NORMALMAP1                                  // Non-local
-    #pragma shader_feature _NORMALMAP2                                  // Non-local
-    #pragma shader_feature _NORMALMAP3                                  // Non-local
-    #pragma shader_feature _MASKMAP0                                    // Non-local
-    #pragma shader_feature _MASKMAP1                                    // Non-local
-    #pragma shader_feature _MASKMAP2                                    // Non-local
-    #pragma shader_feature _MASKMAP3                                    // Non-local
-    #pragma shader_feature _BENTNORMALMAP0                              // Non-local
-    #pragma shader_feature _BENTNORMALMAP1                              // Non-local
-    #pragma shader_feature _BENTNORMALMAP2                              // Non-local
-    #pragma shader_feature _BENTNORMALMAP3                              // Non-local
-    #pragma shader_feature _EMISSIVE_COLOR_MAP                          // Non-local
+    #pragma shader_feature_local_raytracing _NORMALMAP0
+    #pragma shader_feature_local_raytracing _NORMALMAP1
+    #pragma shader_feature_local_raytracing _NORMALMAP2
+    #pragma shader_feature_local_raytracing _NORMALMAP3
+    #pragma shader_feature_local_raytracing _MASKMAP0
+    #pragma shader_feature_local_raytracing _MASKMAP1
+    #pragma shader_feature_local_raytracing _MASKMAP2
+    #pragma shader_feature_local_raytracing _MASKMAP3
+    #pragma shader_feature_local_raytracing _BENTNORMALMAP0
+    #pragma shader_feature_local_raytracing _BENTNORMALMAP1
+    #pragma shader_feature_local_raytracing _BENTNORMALMAP2
+    #pragma shader_feature_local_raytracing _BENTNORMALMAP3
+    #pragma shader_feature_local_raytracing _EMISSIVE_COLOR_MAP
+
 
     // _ENABLESPECULAROCCLUSION keyword is obsolete but keep here for compatibility. Do not used
     // _ENABLESPECULAROCCLUSION and _SPECULAR_OCCLUSION_X can't exist at the same time (the new _SPECULAR_OCCLUSION replace it)
     // When _ENABLESPECULAROCCLUSION is found we define _SPECULAR_OCCLUSION_X so new code to work
-    #pragma shader_feature _ENABLESPECULAROCCLUSION                     // Non-local
-    #pragma shader_feature _ _SPECULAR_OCCLUSION_NONE _SPECULAR_OCCLUSION_FROM_BENT_NORMAL_MAP // Non-local
+    #pragma shader_feature_local_fragment _ENABLESPECULAROCCLUSION
+    #pragma shader_feature_local_fragment _ _SPECULAR_OCCLUSION_NONE _SPECULAR_OCCLUSION_FROM_BENT_NORMAL_MAP
+    #pragma shader_feature_local_raytracing _ENABLESPECULAROCCLUSION
+    #pragma shader_feature_local_raytracing _ _SPECULAR_OCCLUSION_NONE _SPECULAR_OCCLUSION_FROM_BENT_NORMAL_MAP
+
     #ifdef _ENABLESPECULAROCCLUSION
     #define _SPECULAR_OCCLUSION_FROM_BENT_NORMAL_MAP
     #endif
 
-    #pragma shader_feature _DETAIL_MAP0                                 // Non-local
-    #pragma shader_feature _DETAIL_MAP1                                 // Non-local
-    #pragma shader_feature _DETAIL_MAP2                                 // Non-local
-    #pragma shader_feature _DETAIL_MAP3                                 // Non-local
-    #pragma shader_feature _HEIGHTMAP0                                  // Non-local
-    #pragma shader_feature _HEIGHTMAP1                                  // Non-local
-    #pragma shader_feature _HEIGHTMAP2                                  // Non-local
-    #pragma shader_feature _HEIGHTMAP3                                  // Non-local
-    #pragma shader_feature _SUBSURFACE_MASK_MAP0                        // Non-local
-    #pragma shader_feature _SUBSURFACE_MASK_MAP1                        // Non-local
-    #pragma shader_feature _SUBSURFACE_MASK_MAP2                        // Non-local
-    #pragma shader_feature _SUBSURFACE_MASK_MAP3                        // Non-local
-    #pragma shader_feature _THICKNESSMAP0                               // Non-local
-    #pragma shader_feature _THICKNESSMAP1                               // Non-local
-    #pragma shader_feature _THICKNESSMAP2                               // Non-local
-    #pragma shader_feature _THICKNESSMAP3                               // Non-local
+    #pragma shader_feature_local_raytracing _DETAIL_MAP0
+    #pragma shader_feature_local_raytracing _DETAIL_MAP1
+    #pragma shader_feature_local_raytracing _DETAIL_MAP2
+    #pragma shader_feature_local_raytracing _DETAIL_MAP3
+
+    #pragma shader_feature_local _HEIGHTMAP0
+    #pragma shader_feature_local _HEIGHTMAP1
+    #pragma shader_feature_local _HEIGHTMAP2
+    #pragma shader_feature_local _HEIGHTMAP3
+    #pragma shader_feature_local_raytracing _SUBSURFACE_MASK_MAP0
+    #pragma shader_feature_local_raytracing _SUBSURFACE_MASK_MAP1
+    #pragma shader_feature_local_raytracing _SUBSURFACE_MASK_MAP2
+    #pragma shader_feature_local_raytracing _SUBSURFACE_MASK_MAP3
+    #pragma shader_feature_local_raytracing _THICKNESSMAP0
+    #pragma shader_feature_local_raytracing _THICKNESSMAP1
+    #pragma shader_feature_local_raytracing _THICKNESSMAP2
+    #pragma shader_feature_local_raytracing _THICKNESSMAP3
 
     #pragma shader_feature_local _ _LAYER_MASK_VERTEX_COLOR_MUL _LAYER_MASK_VERTEX_COLOR_ADD
     #pragma shader_feature_local _MAIN_LAYER_INFLUENCE_MODE
@@ -459,24 +494,19 @@ Shader "HDRP/LayeredLit"
     #pragma shader_feature_local _HEIGHT_BASED_BLEND
     #pragma shader_feature_local _ _LAYEREDLIT_3_LAYERS _LAYEREDLIT_4_LAYERS
 
-    #pragma shader_feature_local _DISABLE_DECALS
-    #pragma shader_feature_local _DISABLE_SSR
-    #pragma shader_feature_local _ENABLE_GEOMETRIC_SPECULAR_AA
-
-    #pragma shader_feature_local _ADD_PRECOMPUTED_VELOCITY
-
-
-    // Keyword for transparent
-    #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
-    #pragma shader_feature_local _ENABLE_FOG_ON_TRANSPARENT
+    #pragma shader_feature_local_raytracing _DISABLE_SSR
 
     // MaterialFeature are used as shader feature to allow compiler to optimize properly
-    #pragma shader_feature_local _MATERIAL_FEATURE_SUBSURFACE_SCATTERING
-    #pragma shader_feature_local _MATERIAL_FEATURE_TRANSMISSION
+    #pragma shader_feature_local_raytracing _MATERIAL_FEATURE_SUBSURFACE_SCATTERING
+    #pragma shader_feature_local_raytracing _MATERIAL_FEATURE_TRANSMISSION
 
     //-------------------------------------------------------------------------------------
     // Define
     //-------------------------------------------------------------------------------------
+
+    // Enable the support of global mip bias in the shader.
+    // Only has effect if the global mip bias is enabled in shader config and DRS is enabled.
+    #define SUPPORT_GLOBAL_MIP_BIAS
 
     // This shader support recursive rendering for raytracing
     #define HAVE_RECURSIVE_RENDERING
@@ -504,9 +534,22 @@ Shader "HDRP/LayeredLit"
     // Explicitely said that we are a layered shader as we share code between lit and layered lit
     #define LAYERED_LIT_SHADER
 
+    // Define _DEFERRED_CAPABLE_MATERIAL for shader capable to run in deferred pass
+    #ifndef _SURFACE_TYPE_TRANSPARENT
+    #define _DEFERRED_CAPABLE_MATERIAL
+    #endif
+
+    // In this shader, the heightmap implies depth offsets away from the camera.
+    #if defined(_HEIGHTMAP0) || defined(_HEIGHTMAP1) || defined(_HEIGHTMAP2) || defined(_HEIGHTMAP3)
+    #define _CONSERVATIVE_DEPTH_OFFSET
+    #endif
+
     //-------------------------------------------------------------------------------------
     // Include
     //-------------------------------------------------------------------------------------
+
+    // Disable half-precision types in the lit shader since this causes visual corruption in some cases
+    #define PREFER_HALF 0
 
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
@@ -543,12 +586,14 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
             #pragma instancing_options renderinglayer
             #pragma multi_compile _ LOD_FADE_CROSSFADE
+
+            #pragma shader_feature_local _ALPHATEST_ON
 
             // Note: Require _SelectionID variable
 
@@ -579,12 +624,14 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
             #pragma instancing_options renderinglayer
             #pragma multi_compile _ LOD_FADE_CROSSFADE
+
+            #pragma shader_feature_local _ALPHATEST_ON
 
             // Note: Require _ObjectId and _PassValue variables
 
@@ -624,7 +671,7 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -633,12 +680,61 @@ Shader "HDRP/LayeredLit"
 
             #pragma multi_compile _ DEBUG_DISPLAY
             #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile _ LIGHTMAP_BICUBIC_SAMPLING
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
             #pragma multi_compile _ DYNAMICLIGHTMAP_ON
-            #pragma multi_compile _ SHADOWS_SHADOWMASK
+            #pragma multi_compile _ USE_LEGACY_LIGHTMAPS
+            #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
+            #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             // Setup DECALS_OFF so the shader stripper can remove variants
-            #pragma multi_compile DECALS_OFF DECALS_3RT DECALS_4RT
-            #pragma multi_compile _ LIGHT_LAYERS
+            #pragma multi_compile_fragment DECALS_OFF DECALS_3RT DECALS_4RT
+            #pragma multi_compile_fragment _ DECAL_SURFACE_GRADIENT
+            #pragma multi_compile_fragment _ RENDERING_LAYERS
+
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE0
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE1
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE2
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE3
+
+            // We can only have 64 shader_feature_local
+            #pragma shader_feature_local _NORMALMAP0
+            #pragma shader_feature_local _NORMALMAP1
+            #pragma shader_feature_local _NORMALMAP2
+            #pragma shader_feature_local _NORMALMAP3
+            #pragma shader_feature_local_fragment _MASKMAP0
+            #pragma shader_feature_local_fragment _MASKMAP1
+            #pragma shader_feature_local_fragment _MASKMAP2
+            #pragma shader_feature_local_fragment _MASKMAP3
+            #pragma shader_feature_local_fragment _BENTNORMALMAP0
+            #pragma shader_feature_local_fragment _BENTNORMALMAP1
+            #pragma shader_feature_local_fragment _BENTNORMALMAP2
+            #pragma shader_feature_local_fragment _BENTNORMALMAP3
+            #pragma shader_feature_local_fragment _EMISSIVE_COLOR_MAP
+
+            #pragma shader_feature_local_fragment _DETAIL_MAP0
+            #pragma shader_feature_local_fragment _DETAIL_MAP1
+            #pragma shader_feature_local_fragment _DETAIL_MAP2
+            #pragma shader_feature_local_fragment _DETAIL_MAP3
+
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP0
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP1
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP2
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP3
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP0
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP1
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP2
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP3
+            #pragma shader_feature_local_fragment _THICKNESSMAP0
+            #pragma shader_feature_local_fragment _THICKNESSMAP1
+            #pragma shader_feature_local_fragment _THICKNESSMAP2
+            #pragma shader_feature_local_fragment _THICKNESSMAP3
+
+            #pragma shader_feature_local_fragment _MATERIAL_FEATURE_SUBSURFACE_SCATTERING
+            #pragma shader_feature_local_fragment _MATERIAL_FEATURE_TRANSMISSION
+
+            #pragma shader_feature_local_fragment _DISABLE_SSR
+            #pragma shader_feature_local _DISABLE_DECALS
+            #pragma shader_feature_local_fragment _ENABLE_GEOMETRIC_SPECULAR_AA
 
         #ifndef DEBUG_DISPLAY
             // When we have alpha test, we will force a depth prepass so we always bypass the clip instruction in the GBuffer
@@ -651,7 +747,7 @@ Shader "HDRP/LayeredLit"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Debug/DebugDisplay.hlsl"
             #endif
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassGBuffer.hlsl"
@@ -663,7 +759,7 @@ Shader "HDRP/LayeredLit"
         }
 
         // Extracts information for lightmapping, GI (emission, albedo, ...)
-        // This pass it not used during regular rendering.
+        // This pass is not used during regular rendering.
         Pass
         {
             Name "META"
@@ -673,7 +769,7 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -684,12 +780,64 @@ Shader "HDRP/LayeredLit"
             // DYNAMICLIGHTMAP_ON is used when we have an "enlighten lightmap" ie a lightmap updated at runtime by enlighten.This lightmap contain indirect lighting from realtime lights and realtime emissive material.Offline baked lighting(from baked material / light,
             // both direct and indirect lighting) will hand up in the "regular" lightmap->LIGHTMAP_ON.
 
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE0
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE1
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE2
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE3
+
+            // We can only have 64 shader_feature_local
+            #pragma shader_feature_local _NORMALMAP0
+            #pragma shader_feature_local _NORMALMAP1
+            #pragma shader_feature_local _NORMALMAP2
+            #pragma shader_feature_local _NORMALMAP3
+            #pragma shader_feature_local_fragment _MASKMAP0
+            #pragma shader_feature_local_fragment _MASKMAP1
+            #pragma shader_feature_local_fragment _MASKMAP2
+            #pragma shader_feature_local_fragment _MASKMAP3
+            #pragma shader_feature_local_fragment _BENTNORMALMAP0
+            #pragma shader_feature_local_fragment _BENTNORMALMAP1
+            #pragma shader_feature_local_fragment _BENTNORMALMAP2
+            #pragma shader_feature_local_fragment _BENTNORMALMAP3
+            #pragma shader_feature_local_fragment _EMISSIVE_COLOR_MAP
+
+            #pragma shader_feature_local_fragment _DETAIL_MAP0
+            #pragma shader_feature_local_fragment _DETAIL_MAP1
+            #pragma shader_feature_local_fragment _DETAIL_MAP2
+            #pragma shader_feature_local_fragment _DETAIL_MAP3
+
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP0
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP1
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP2
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP3
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP0
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP1
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP2
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP3
+            #pragma shader_feature_local_fragment _THICKNESSMAP0
+            #pragma shader_feature_local_fragment _THICKNESSMAP1
+            #pragma shader_feature_local_fragment _THICKNESSMAP2
+            #pragma shader_feature_local_fragment _THICKNESSMAP3
+
+            #pragma shader_feature_local_fragment _MATERIAL_FEATURE_SUBSURFACE_SCATTERING
+            #pragma shader_feature_local_fragment _MATERIAL_FEATURE_TRANSMISSION
+
+            #pragma shader_feature_local _DISABLE_DECALS
+            #pragma shader_feature_local_fragment _ENABLE_GEOMETRIC_SPECULAR_AA
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ALPHATEST_ON
+
             #define SHADERPASS SHADERPASS_LIGHT_TRANSPORT
+            #pragma shader_feature EDITOR_VISUALIZATION
+
+            // Use Unity's built-in matrices for meta pass rendering
+            #define SCENEPICKINGPASS
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/PickingSpaceTransforms.hlsl"
+
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassLightTransport.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassLightTransport.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -712,13 +860,13 @@ Shader "HDRP/LayeredLit"
             }
 
             Cull[_CullMode]
-            AlphaToMask [_AlphaToMask]
+            AlphaToMask [_AlphaCutoffEnable]
 
             ZWrite On
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -726,8 +874,33 @@ Shader "HDRP/LayeredLit"
             #pragma multi_compile _ LOD_FADE_CROSSFADE
 
             #pragma multi_compile _ WRITE_NORMAL_BUFFER
-            #pragma multi_compile _ WRITE_DECAL_BUFFER
-            #pragma multi_compile _ WRITE_MSAA_DEPTH
+            #pragma multi_compile_fragment _ WRITE_MSAA_DEPTH
+            #pragma multi_compile _ WRITE_DECAL_BUFFER_AND_RENDERING_LAYER
+
+            #pragma shader_feature_local _NORMALMAP0
+            #pragma shader_feature_local _NORMALMAP1
+            #pragma shader_feature_local _NORMALMAP2
+            #pragma shader_feature_local _NORMALMAP3
+            #pragma shader_feature_local_fragment _BENTNORMALMAP0
+            #pragma shader_feature_local_fragment _BENTNORMALMAP1
+            #pragma shader_feature_local_fragment _BENTNORMALMAP2
+            #pragma shader_feature_local_fragment _BENTNORMALMAP3
+            #pragma shader_feature_local_fragment _DETAIL_MAP0
+            #pragma shader_feature_local_fragment _DETAIL_MAP1
+            #pragma shader_feature_local_fragment _DETAIL_MAP2
+            #pragma shader_feature_local_fragment _DETAIL_MAP3
+
+            #pragma shader_feature_local _ADD_PRECOMPUTED_VELOCITY
+
+            #pragma shader_feature_local _DISABLE_DECALS
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ALPHATEST_ON
+
+            // We can't name this keyword WRITE_DECAL_BUFFER directly because we want to enable it at a different
+            // frequency than WRITE_DECAL_BUFFER defined in the DepthForwardOnly pass
+            #ifdef WRITE_DECAL_BUFFER_AND_RENDERING_LAYER
+            #define WRITE_DECAL_BUFFER
+            #endif
 
             #define SHADERPASS SHADERPASS_MOTION_VECTORS
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
@@ -737,8 +910,8 @@ Shader "HDRP/LayeredLit"
             #else
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitMotionVectorPass.hlsl"
             #endif
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassMotionVectors.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassMotionVectors.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -761,19 +934,21 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
             #pragma instancing_options renderinglayer
             #pragma multi_compile _ LOD_FADE_CROSSFADE
 
+            #pragma shader_feature_local _ALPHATEST_ON
+
             #define SHADERPASS SHADERPASS_SHADOWS
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitDepthPass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDepthOnly.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDepthOnly.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -787,7 +962,7 @@ Shader "HDRP/LayeredLit"
             Tags{ "LightMode" = "DepthOnly" }
 
             Cull[_CullMode]
-            AlphaToMask [_AlphaToMask]
+            AlphaToMask [_AlphaCutoffEnable]
 
             // To be able to tag stencil with disableSSR information for forward
             Stencil
@@ -802,7 +977,7 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -812,8 +987,31 @@ Shader "HDRP/LayeredLit"
             // In deferred, depth only pass don't output anything.
             // In forward it output the normal buffer
             #pragma multi_compile _ WRITE_NORMAL_BUFFER
-            #pragma multi_compile _ WRITE_DECAL_BUFFER
-            #pragma multi_compile _ WRITE_MSAA_DEPTH
+            #pragma multi_compile_fragment _ WRITE_MSAA_DEPTH
+            #pragma multi_compile _ WRITE_DECAL_BUFFER WRITE_RENDERING_LAYER
+
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE0
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE1
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE2
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE3
+
+            // We can only have 64 shader_feature_local
+            #pragma shader_feature_local _NORMALMAP0
+            #pragma shader_feature_local _NORMALMAP1
+            #pragma shader_feature_local _NORMALMAP2
+            #pragma shader_feature_local _NORMALMAP3
+            #pragma shader_feature_local_fragment _MASKMAP0
+            #pragma shader_feature_local_fragment _MASKMAP1
+            #pragma shader_feature_local_fragment _MASKMAP2
+            #pragma shader_feature_local_fragment _MASKMAP3
+            #pragma shader_feature_local_fragment _BENTNORMALMAP0
+            #pragma shader_feature_local_fragment _BENTNORMALMAP1
+            #pragma shader_feature_local_fragment _BENTNORMALMAP2
+            #pragma shader_feature_local_fragment _BENTNORMALMAP3
+
+            #pragma shader_feature_local _DISABLE_DECALS
+            #pragma shader_feature_local_fragment _ENABLE_GEOMETRIC_SPECULAR_AA
+            #pragma shader_feature_local _ALPHATEST_ON
 
             #define SHADERPASS SHADERPASS_DEPTH_ONLY
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
@@ -825,8 +1023,8 @@ Shader "HDRP/LayeredLit"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitDepthPass.hlsl"
             #endif
 
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDepthOnly.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassDepthOnly.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -848,6 +1046,8 @@ Shader "HDRP/LayeredLit"
             }
 
             Blend [_SrcBlend] [_DstBlend], [_AlphaSrcBlend] [_AlphaDstBlend]
+            Blend 1 One OneMinusSrcAlpha // target 1 alpha blend required for VT feedback
+
             // In case of forward we want to have depth equal for opaque mesh
             ZTest [_ZTestDepthEqualForOpaque]
             ZWrite [_ZWrite]
@@ -855,7 +1055,7 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
             //enable GPU instancing support
             #pragma multi_compile_instancing
             #pragma multi_compile _ DOTS_INSTANCING_ON
@@ -864,17 +1064,80 @@ Shader "HDRP/LayeredLit"
 
             #pragma multi_compile _ DEBUG_DISPLAY
             #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile _ LIGHTMAP_BICUBIC_SAMPLING
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
             #pragma multi_compile _ DYNAMICLIGHTMAP_ON
-            #pragma multi_compile _ SHADOWS_SHADOWMASK
-            #pragma multi_compile SCREEN_SPACE_SHADOWS_OFF SCREEN_SPACE_SHADOWS_ON
+            #pragma multi_compile _ USE_LEGACY_LIGHTMAPS
+            #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
+            #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+            #pragma multi_compile_fragment SCREEN_SPACE_SHADOWS_OFF SCREEN_SPACE_SHADOWS_ON
+            #pragma multi_compile_fragment _ CONTACT_SHADOWS_OFF
             // Setup DECALS_OFF so the shader stripper can remove variants
-            #pragma multi_compile DECALS_OFF DECALS_3RT DECALS_4RT
+            #pragma multi_compile_fragment DECALS_OFF DECALS_3RT DECALS_4RT
+            #pragma multi_compile_fragment _ DECAL_SURFACE_GRADIENT
 
             // Supported shadow modes per light type
-            #pragma multi_compile SHADOW_LOW SHADOW_MEDIUM SHADOW_HIGH
+	        #pragma multi_compile_fragment PUNCTUAL_SHADOW_LOW PUNCTUAL_SHADOW_MEDIUM PUNCTUAL_SHADOW_HIGH
+	        #pragma multi_compile_fragment DIRECTIONAL_SHADOW_LOW DIRECTIONAL_SHADOW_MEDIUM DIRECTIONAL_SHADOW_HIGH
+            #pragma multi_compile_fragment AREA_SHADOW_MEDIUM AREA_SHADOW_HIGH
 
-            #pragma multi_compile USE_FPTL_LIGHTLIST USE_CLUSTERED_LIGHTLIST
+            #pragma multi_compile_fragment USE_FPTL_LIGHTLIST USE_CLUSTERED_LIGHTLIST
+
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE0
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE1
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE2
+            #pragma shader_feature_local_fragment _NORMALMAP_TANGENT_SPACE3
+
+            // We can only have 64 shader_feature_local
+            #pragma shader_feature_local _NORMALMAP0
+            #pragma shader_feature_local _NORMALMAP1
+            #pragma shader_feature_local _NORMALMAP2
+            #pragma shader_feature_local _NORMALMAP3
+            #pragma shader_feature_local_fragment _MASKMAP0
+            #pragma shader_feature_local_fragment _MASKMAP1
+            #pragma shader_feature_local_fragment _MASKMAP2
+            #pragma shader_feature_local_fragment _MASKMAP3
+            #pragma shader_feature_local_fragment _BENTNORMALMAP0
+            #pragma shader_feature_local_fragment _BENTNORMALMAP1
+            #pragma shader_feature_local_fragment _BENTNORMALMAP2
+            #pragma shader_feature_local_fragment _BENTNORMALMAP3
+            #pragma shader_feature_local_fragment _EMISSIVE_COLOR_MAP
+
+            #pragma shader_feature_local_fragment _DETAIL_MAP0
+            #pragma shader_feature_local_fragment _DETAIL_MAP1
+            #pragma shader_feature_local_fragment _DETAIL_MAP2
+            #pragma shader_feature_local_fragment _DETAIL_MAP3
+
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP0
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP1
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP2
+            #pragma shader_feature_local_fragment _SUBSURFACE_MASK_MAP3
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP0
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP1
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP2
+            #pragma shader_feature_local_fragment _TRANSMISSION_MASK_MAP3
+            #pragma shader_feature_local_fragment _THICKNESSMAP0
+            #pragma shader_feature_local_fragment _THICKNESSMAP1
+            #pragma shader_feature_local_fragment _THICKNESSMAP2
+            #pragma shader_feature_local_fragment _THICKNESSMAP3
+
+            #pragma shader_feature_local_fragment _MATERIAL_FEATURE_SUBSURFACE_SCATTERING
+            #pragma shader_feature_local_fragment _MATERIAL_FEATURE_TRANSMISSION
+
+            #pragma shader_feature_local _ADD_PRECOMPUTED_VELOCITY
+
+            #pragma shader_feature_local_fragment _DISABLE_SSR
+            #pragma shader_feature_local _DISABLE_DECALS
+            #pragma shader_feature_local_fragment _ENABLE_GEOMETRIC_SPECULAR_AA
+            #pragma shader_feature_local_fragment _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_local_fragment _ENABLE_FOG_ON_TRANSPARENT
+            #pragma shader_feature _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local _ALPHATEST_ON
+
+            #ifndef SHADER_STAGE_FRAGMENT
+            #define SHADOW_LOW
+            #define USE_FPTL_LIGHTLIST
+            #endif
 
             #define SHADERPASS SHADERPASS_FORWARD
             // In case of opaque we don't want to perform the alpha test, it is done in depth prepass and we use depth equal for ztest (setup from UI)
@@ -903,8 +1166,8 @@ Shader "HDRP/LayeredLit"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoop.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
-			#include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForward.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassForward.hlsl"
 
             #pragma vertex Vert
             #pragma fragment Frag
@@ -924,7 +1187,8 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+            #pragma multi_compile _ DOTS_INSTANCING_ON
 
             #define SHADERPASS SHADERPASS_CONSTANT
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
@@ -951,7 +1215,11 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+            //enable GPU instancing support
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #pragma multi_compile _ DOTS_INSTANCING_ON
             // enable dithering LOD crossfade
             #pragma multi_compile _ LOD_FADE_CROSSFADE
 
@@ -971,6 +1239,7 @@ Shader "HDRP/LayeredLit"
 
     SubShader
     {
+        Tags{ "RenderPipeline" = "HDRenderPipeline" }
         Pass
         {
             Name "IndirectDXR"
@@ -978,26 +1247,36 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
-
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ DEBUG_DISPLAY
             #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile _ LIGHTMAP_BICUBIC_SAMPLING
+            #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+            #pragma multi_compile _ DYNAMICLIGHTMAP_ON
+
+            #pragma multi_compile DECALS_OFF DECALS_3RT DECALS_4RT
+            #pragma multi_compile _ DECAL_SURFACE_GRADIENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_INDIRECT
 
             // multi compile that allows us to
             #pragma multi_compile _ MULTI_BOUNCE_INDIRECT
 
+            #pragma shader_feature_local_raytracing _DISABLE_DECALS
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
+
             // We use the low shadow maps for raytracing
             #define SHADOW_LOW
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracingLightLoop.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/Lighting.hlsl"
 
@@ -1006,8 +1285,9 @@ Shader "HDRP/LayeredLit"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoopDef.hlsl"
             #define HAS_LIGHTLOOP
+            #define PATH_TRACING_CLUSTERED_DECALS
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitRayTracing.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingLightLoop.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassRaytracingIndirect.hlsl"
@@ -1022,23 +1302,33 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
-
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ DEBUG_DISPLAY
             #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile _ LIGHTMAP_BICUBIC_SAMPLING
+            #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+            #pragma multi_compile _ DYNAMICLIGHTMAP_ON
+
+            #pragma multi_compile DECALS_OFF DECALS_3RT DECALS_4RT
+            #pragma multi_compile _ DECAL_SURFACE_GRADIENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_FORWARD
+
+            #pragma shader_feature_local_raytracing _DISABLE_DECALS
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
 
             // We use the low shadow maps for raytracing
             #define SHADOW_LOW
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracingLightLoop.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/Lighting.hlsl"
 
@@ -1047,8 +1337,9 @@ Shader "HDRP/LayeredLit"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoopDef.hlsl"
             #define HAS_LIGHTLOOP
+            #define PATH_TRACING_CLUSTERED_DECALS
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitRayTracing.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingLightLoop.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassRaytracingForward.hlsl"
@@ -1063,29 +1354,40 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
-
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ DEBUG_DISPLAY
             #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile _ LIGHTMAP_BICUBIC_SAMPLING
+            #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+            #pragma multi_compile _ DYNAMICLIGHTMAP_ON
+
+            #pragma multi_compile DECALS_OFF DECALS_3RT DECALS_4RT
+            #pragma multi_compile _ DECAL_SURFACE_GRADIENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_GBUFFER
 
+            #pragma shader_feature_local_raytracing _DISABLE_DECALS
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
+
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracingLightLoop.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/Deferred/RaytracingIntersectonGBuffer.hlsl"
 
+            #define PATH_TRACING_CLUSTERED_DECALS
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/StandardLit/StandardLit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/LitRayTracing.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassRaytracingGBuffer.hlsl"
 
             ENDHLSL
@@ -1098,16 +1400,20 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
-
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #define SHADERPASS SHADERPASS_RAYTRACING_VISIBILITY
 
+            #pragma shader_feature_local_raytracing _DISABLE_DECALS
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
+
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingIntersection.hlsl"
 
@@ -1125,20 +1431,27 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
-
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ DEBUG_DISPLAY
             #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile _ LIGHTMAP_BICUBIC_SAMPLING
+            #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+            #pragma multi_compile _ DYNAMICLIGHTMAP_ON
+
+            #pragma shader_feature_local_raytracing _DISABLE_DECALS
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
 
             #define SHADERPASS SHADERPASS_RAYTRACING_SUB_SURFACE
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/SubSurface/RayTracingIntersectionSubSurface.hlsl"
 
@@ -1151,6 +1464,36 @@ Shader "HDRP/LayeredLit"
             ENDHLSL
         }
 
+
+        Pass
+        {
+            Name "DebugDXR"
+            Tags{ "LightMode" = "DebugDXR" }
+
+            HLSLPROGRAM
+
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
+            #pragma raytracing surface_shader
+
+            #pragma shader_feature_local_raytracing _DISABLE_DECALS
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
+
+            #define SHADERPASS SHADERPASS_RAYTRACING_DEBUG
+
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
+
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingIntersection.hlsl"
+
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RayTracingCommon.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/ShaderPass/ShaderPassRayTracingDebug.hlsl"
+
+            ENDHLSL
+        }
+
         Pass
         {
             Name "PathTracingDXR"
@@ -1158,23 +1501,37 @@ Shader "HDRP/LayeredLit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11
-
+            #pragma only_renderers d3d11 xboxseries ps5 switch2
             #pragma raytracing surface_shader
 
             #pragma multi_compile _ DEBUG_DISPLAY
             #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile _ LIGHTMAP_BICUBIC_SAMPLING
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+            #pragma multi_compile _ SENSORSDK_OVERRIDE_REFLECTANCE
+
+            #ifdef SENSORSDK_OVERRIDE_REFLECTANCE
+                #define SENSORSDK_ENABLE_LIDAR
+            #endif
 
             #define SHADERPASS SHADERPASS_PATH_TRACING
+
+            #pragma multi_compile DECALS_OFF DECALS_3RT DECALS_4RT
+            #pragma multi_compile _ DECAL_SURFACE_GRADIENT
+
+            #pragma shader_feature_local_raytracing _DISABLE_DECALS
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
 
             // We use the low shadow maps for raytracing
             #define SHADOW_LOW
 
+            #define LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RaytracingMacros.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/Lighting.hlsl"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/ShaderPass/LitSharePass.hlsl"
@@ -1182,6 +1539,9 @@ Shader "HDRP/LayeredLit"
 
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/LightLoopDef.hlsl"
             #define HAS_LIGHTLOOP
+            #define PATH_TRACING_CLUSTERED_DECALS
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/ShaderVariablesRaytracingLightLoop.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RayTracingLightCluster.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/RenderPipeline/Raytracing/Shaders/RayTracingCommon.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Lit/Lit.hlsl"
             #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/LayeredLit/LayeredLitData.hlsl"
@@ -1192,5 +1552,6 @@ Shader "HDRP/LayeredLit"
         }
     }
 
+    FallBack "Hidden/HDRP/FallbackError"
     CustomEditor "UnityEditor.Rendering.HighDefinition.LayeredLitGUI"
 }

@@ -120,7 +120,7 @@ namespace Simulator.Controllable
             var rb = obj.gameObject.GetComponent<Rigidbody>();
             if (rb != null)
             {
-                rb.velocity = velocity;
+                rb.linearVelocity = velocity;
                 rb.angularVelocity = angVelocity;
             }
 

@@ -1,5 +1,5 @@
 //
-// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit / Render Pipeline / Generate Shader Includes ] instead
+// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit > Rendering > Generate Shader Includes ] instead
 //
 
 #ifndef CUSTOMPASSINJECTIONPOINT_CS_HLSL
@@ -9,6 +9,8 @@
 //
 #define CUSTOMPASSINJECTIONPOINT_BEFORE_RENDERING (0)
 #define CUSTOMPASSINJECTIONPOINT_AFTER_OPAQUE_DEPTH_AND_NORMAL (5)
+#define CUSTOMPASSINJECTIONPOINT_AFTER_OPAQUE_COLOR (7)
+#define CUSTOMPASSINJECTIONPOINT_AFTER_OPAQUE_AND_SKY (6)
 #define CUSTOMPASSINJECTIONPOINT_BEFORE_PRE_REFRACTION (4)
 #define CUSTOMPASSINJECTIONPOINT_BEFORE_TRANSPARENT (1)
 #define CUSTOMPASSINJECTIONPOINT_BEFORE_POST_PROCESS (2)

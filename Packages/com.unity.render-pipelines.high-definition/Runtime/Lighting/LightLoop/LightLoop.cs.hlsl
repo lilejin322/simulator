@@ -1,16 +1,14 @@
 //
-// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit / Render Pipeline / Generate Shader Includes ] instead
+// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit > Rendering > Generate Shader Includes ] instead
 //
 
 #ifndef LIGHTLOOP_CS_HLSL
 #define LIGHTLOOP_CS_HLSL
 //
-// UnityEngine.Rendering.HighDefinition.LightVolumeType:  static fields
+// UnityEngine.Rendering.HighDefinition.ClusterDebugMode:  static fields
 //
-#define LIGHTVOLUMETYPE_CONE (0)
-#define LIGHTVOLUMETYPE_SPHERE (1)
-#define LIGHTVOLUMETYPE_BOX (2)
-#define LIGHTVOLUMETYPE_COUNT (3)
+#define CLUSTERDEBUGMODE_VISUALIZE_OPAQUE (0)
+#define CLUSTERDEBUGMODE_VISUALIZE_SLICE (1)
 
 //
 // UnityEngine.Rendering.HighDefinition.LightCategory:  static fields
@@ -18,10 +16,8 @@
 #define LIGHTCATEGORY_PUNCTUAL (0)
 #define LIGHTCATEGORY_AREA (1)
 #define LIGHTCATEGORY_ENV (2)
-#define LIGHTCATEGORY_PROBE_VOLUME (3)
-#define LIGHTCATEGORY_DECAL (4)
-#define LIGHTCATEGORY_DENSITY_VOLUME (5)
-#define LIGHTCATEGORY_COUNT (6)
+#define LIGHTCATEGORY_DECAL (3)
+#define LIGHTCATEGORY_COUNT (4)
 
 //
 // UnityEngine.Rendering.HighDefinition.LightFeatureFlags:  static fields
@@ -33,12 +29,28 @@
 #define LIGHTFEATUREFLAGS_SKY (65536)
 #define LIGHTFEATUREFLAGS_SSREFRACTION (131072)
 #define LIGHTFEATUREFLAGS_SSREFLECTION (262144)
-#define LIGHTFEATUREFLAGS_PROBE_VOLUME (524288)
+
+//
+// UnityEngine.Rendering.HighDefinition.LightVolumeType:  static fields
+//
+#define LIGHTVOLUMETYPE_CONE (0)
+#define LIGHTVOLUMETYPE_SPHERE (1)
+#define LIGHTVOLUMETYPE_BOX (2)
+#define LIGHTVOLUMETYPE_COUNT (3)
+
+//
+// UnityEngine.Rendering.HighDefinition.WorldLightFlags:  static fields
+//
+#define WORLDLIGHTFLAGS_NONE (0)
+#define WORLDLIGHTFLAGS_ACTIVE (1)
+#define WORLDLIGHTFLAGS_RAYTRACING (2)
+#define WORLDLIGHTFLAGS_PATHTRACING (4)
+#define WORLDLIGHTFLAGS_ACTIVE_RAYTRACING (3)
+#define WORLDLIGHTFLAGS_ACTIVE_PATHTRACING (5)
 
 //
 // UnityEngine.Rendering.HighDefinition.LightDefinitions:  static fields
 //
-#define MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE (512)
 #define VIEWPORT_SCALE_Z (1)
 #define USE_LEFT_HAND_CAMERA_SPACE (1)
 #define TILE_SIZE_FPTL (16)
@@ -49,9 +61,6 @@
 #define TILE_INDEX_SHIFT_Y (15)
 #define TILE_INDEX_SHIFT_EYE (30)
 #define NUM_FEATURE_VARIANTS (29)
-#define LIGHT_LIST_MAX_COARSE_ENTRIES (64)
-#define LIGHT_LIST_MAX_PRUNED_ENTRIES (24)
-#define LIGHT_CLUSTER_MAX_COARSE_ENTRIES (128)
 #define LIGHT_FEATURE_MASK_FLAGS (16773120)
 #define LIGHT_FEATURE_MASK_FLAGS_OPAQUE (16642048)
 #define LIGHT_FEATURE_MASK_FLAGS_TRANSPARENT (16510976)
@@ -60,24 +69,10 @@
 #define SCREEN_SPACE_COLOR_SHADOW_FLAG (256)
 #define INVALID_SCREEN_SPACE_SHADOW (255)
 #define SCREEN_SPACE_SHADOW_INDEX_MASK (255)
-
-//
-// UnityEngine.Rendering.HighDefinition.ClusterDebugMode:  static fields
-//
-#define CLUSTERDEBUGMODE_VISUALIZE_OPAQUE (0)
-#define CLUSTERDEBUGMODE_VISUALIZE_SLICE (1)
-
-// Generated from UnityEngine.Rendering.HighDefinition.SFiniteLightBound
-// PackingRules = Exact
-struct SFiniteLightBound
-{
-    float3 boxAxisX;
-    float3 boxAxisY;
-    float3 boxAxisZ;
-    float3 center;
-    float scaleXY;
-    float radius;
-};
+#define CONTACT_SHADOW_FADE_BITS (8)
+#define CONTACT_SHADOW_MASK_BITS (24)
+#define CONTACT_SHADOW_FADE_MASK (255)
+#define CONTACT_SHADOW_MASK_MASK (16777215)
 
 // Generated from UnityEngine.Rendering.HighDefinition.LightVolumeData
 // PackingRules = Exact
@@ -94,7 +89,19 @@ struct LightVolumeData
     float3 boxInnerDist;
     uint featureFlags;
     float3 boxInvRange;
-    float unused2;
+    int affectVolumetric;
+};
+
+// Generated from UnityEngine.Rendering.HighDefinition.SFiniteLightBound
+// PackingRules = Exact
+struct SFiniteLightBound
+{
+    float3 boxAxisX;
+    float3 boxAxisY;
+    float3 boxAxisZ;
+    float3 center;
+    float scaleXY;
+    float radius;
 };
 
 // Generated from UnityEngine.Rendering.HighDefinition.ShaderVariablesLightList
@@ -112,39 +119,8 @@ CBUFFER_START(ShaderVariablesLightList)
     int g_iNumSamplesMSAA;
     uint _EnvLightIndexShift;
     uint _DecalIndexShift;
-    uint _DensityVolumeIndexShift;
-    uint _ProbeVolumeIndexShift;
-    uint _Pad0_SVLL;
-    uint _Pad1_SVLL;
 CBUFFER_END
 
-//
-// Accessors for UnityEngine.Rendering.HighDefinition.SFiniteLightBound
-//
-float3 GetBoxAxisX(SFiniteLightBound value)
-{
-    return value.boxAxisX;
-}
-float3 GetBoxAxisY(SFiniteLightBound value)
-{
-    return value.boxAxisY;
-}
-float3 GetBoxAxisZ(SFiniteLightBound value)
-{
-    return value.boxAxisZ;
-}
-float3 GetCenter(SFiniteLightBound value)
-{
-    return value.center;
-}
-float GetScaleXY(SFiniteLightBound value)
-{
-    return value.scaleXY;
-}
-float GetRadius(SFiniteLightBound value)
-{
-    return value.radius;
-}
 //
 // Accessors for UnityEngine.Rendering.HighDefinition.LightVolumeData
 //
@@ -192,9 +168,36 @@ float3 GetBoxInvRange(LightVolumeData value)
 {
     return value.boxInvRange;
 }
-float GetUnused2(LightVolumeData value)
+int GetAffectVolumetric(LightVolumeData value)
 {
-    return value.unused2;
+    return value.affectVolumetric;
+}
+//
+// Accessors for UnityEngine.Rendering.HighDefinition.SFiniteLightBound
+//
+float3 GetBoxAxisX(SFiniteLightBound value)
+{
+    return value.boxAxisX;
+}
+float3 GetBoxAxisY(SFiniteLightBound value)
+{
+    return value.boxAxisY;
+}
+float3 GetBoxAxisZ(SFiniteLightBound value)
+{
+    return value.boxAxisZ;
+}
+float3 GetCenter(SFiniteLightBound value)
+{
+    return value.center;
+}
+float GetScaleXY(SFiniteLightBound value)
+{
+    return value.scaleXY;
+}
+float GetRadius(SFiniteLightBound value)
+{
+    return value.radius;
 }
 
 #endif

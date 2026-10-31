@@ -475,7 +475,7 @@ namespace Simulator.Editor
                 }
 
                 var activeScenePath = SceneManager.GetActiveScene().path;
-                for (int i = 0; i < EditorSceneManager.loadedSceneCount; i++)
+                for (int i = 0; i < SceneManager.loadedSceneCount; i++)
                 {
                     var scene = SceneManager.GetSceneAt(i);
                     openScenePaths.Add(scene.path);
@@ -1045,9 +1045,24 @@ namespace Simulator.Editor
             return "unknown";
         }
 
-        static void RunPlayerBuild(BuildTarget target, string folder, bool development)
+        static string[] RefreshBuiltinAssets()
+        {
+            var scenes = BuiltinMapBuild.GetBuildScenes();
+            BuiltinVehicleBuild.Refresh();
+            BuiltinSensorBuild.Refresh();
+            BuiltinBridgeBuild.Refresh();
+            BuiltinNpcBuild.Refresh();
+            BuiltinPedestrianBuild.Refresh();
+            BuiltinControllableBuild.Refresh();
+            BuiltinAssetBuild.Refresh();
+            return scenes;
+        }
+
+        /// <param name="assetManifest">YAML source-folder switches for all built-in asset categories.</param>
+        static void RunPlayerBuild(BuildTarget target, string folder, bool development, string assetManifest = BuiltinSelection.DefaultPath)
         {
             var oldGraphicsJobSetting = PlayerSettings.graphicsJobs;
+            var restoreBuiltinAssets = false;
             try
             {
                 UnityEditor.BuildTarget buildTarget;
@@ -1090,23 +1105,32 @@ namespace Simulator.Editor
                     return;
                 }
 
-                var build = new BuildPlayerOptions()
+                UnityEditor.Build.Reporting.BuildReport r;
+                using (BuiltinSelection.Use(assetManifest))
                 {
-                    scenes = new[] { "Assets/Scenes/LoaderScene.unity", "Assets/Scenes/ScenarioEditor.unity" },
-                    locationPathName = location,
-                    targetGroup = BuildTargetGroup.Standalone,
-                    target = buildTarget,
-                    options = BuildOptions.CompressWithLz4 | BuildOptions.StrictMode,
-                };
+                    restoreBuiltinAssets = true;
+                    var build = new BuildPlayerOptions()
+                    {
+                        scenes = RefreshBuiltinAssets(),
+                        locationPathName = location,
+                        targetGroup = BuildTargetGroup.Standalone,
+                        target = buildTarget,
+                        options = BuildOptions.CompressWithLz4 | BuildOptions.StrictMode,
+                    };
+                    Debug.Log($"Building {build.scenes.Length - 2} built-in maps; asset manifest: {assetManifest}");
 
-                if (development)
-                {
-                    build.options |= BuildOptions.Development;
+                    if (development)
+                    {
+                        build.options |= BuildOptions.Development;
+                    }
+
+                    r = BuildPipeline.BuildPlayer(build);
+                    if (r.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded)
+                        BuiltinSelection.WriteManifest(folder);
                 }
-
-                var r = BuildPipeline.BuildPlayer(build);
                 if (r.summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded)
                 {
+                    CopyFFmpeg(target, folder);
                     Debug.Log("Player build succeeded!");
                 }
                 else
@@ -1119,7 +1143,34 @@ namespace Simulator.Editor
             finally
             {
                 PlayerSettings.graphicsJobs = oldGraphicsJobSetting;
+                if (restoreBuiltinAssets)
+                {
+                    // Restore all catalogs, metadata and bridge linker settings even after a failed build.
+                    RefreshBuiltinAssets();
+                }
             }
+        }
+
+        // The Video Recording sensor encodes with ffmpeg from the player's Plugins folder (Jenkins/build-simulator.sh did this copy)
+        static void CopyFFmpeg(BuildTarget target, string folder)
+        {
+            string ffmpeg;
+            if (target == BuildTarget.Linux)
+            {
+                ffmpeg = Path.Combine("linux", "ffmpeg");
+            }
+            else if (target == BuildTarget.Windows)
+            {
+                ffmpeg = Path.Combine("windows", "ffmpeg.exe");
+            }
+            else
+            {
+                return;
+            }
+
+            var plugins = Path.Combine(folder, "simulator_Data", "Plugins");
+            Directory.CreateDirectory(plugins);
+            File.Copy(Path.Combine(Application.dataPath, "Plugins", "VideoCapture", "ffmpeg", ffmpeg), Path.Combine(plugins, Path.GetFileName(ffmpeg)), true);
         }
 
         private void BuildBundles(string outputFolder, Action onComplete = null)
@@ -1163,6 +1214,7 @@ namespace Simulator.Editor
 
             string buildPlayer = null;
             bool buildBundles = false;
+            string assetManifest = BuiltinSelection.DefaultPath;
 
             bool developmentBuild = false;
 
@@ -1221,6 +1273,16 @@ namespace Simulator.Editor
                 else if (args[i] == "-developmentBuild")
                 {
                     developmentBuild = true;
+                }
+                else if (args[i] == "-builtinMaps" || args[i] == "-builtinVehicles")
+                {
+                    throw new Exception($"{args[i]} was replaced by {BuiltinSelection.DefaultPath}; set exact source folders to true or false");
+                }
+                else if (args[i] == "-assetManifest")
+                {
+                    if (i == args.Length - 1 || args[i + 1].StartsWith("-"))
+                        throw new Exception("-assetManifest expects a YAML file path");
+                    assetManifest = args[++i];
                 }
                 else
                 {
@@ -1286,7 +1348,7 @@ namespace Simulator.Editor
             {
                 if (!string.IsNullOrEmpty(buildPlayer))
                 {
-                    RunPlayerBuild(buildTarget.Value, buildPlayer, developmentBuild);
+                    RunPlayerBuild(buildTarget.Value, buildPlayer, developmentBuild, assetManifest);
                 }
 
                 if (buildBundles)
@@ -1325,15 +1387,10 @@ namespace Simulator.Editor
 
         void OnGUI()
         {
-            EditorGUILayout.LabelField($"Would you like to go to {Web.Config.CloudUrl} to upload built asset?", EditorStyles.wordWrappedLabel);
+            EditorGUILayout.LabelField("Bundles built. This simulator does not load bundles: it uses the assets built into it, " +
+                "from their sources in Assets/.", EditorStyles.wordWrappedLabel);
             GUILayout.Space(30);
-            if (GUILayout.Button("Yes"))
-            {
-                Application.OpenURL(Web.Config.CloudUrl);
-                this.Close();
-            }
-            GUILayout.Space(10);
-            if (GUILayout.Button("No"))
+            if (GUILayout.Button("Close"))
             {
                 this.Close();
             }

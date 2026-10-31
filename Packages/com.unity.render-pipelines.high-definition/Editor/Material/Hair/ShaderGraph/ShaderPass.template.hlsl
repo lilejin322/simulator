@@ -1,13 +1,7 @@
-void ApplyDecalToSurfaceData(DecalSurfaceData decalSurfaceData, float3 vtxNormal, inout SurfaceData surfaceData)
+void ApplyDecalToSurfaceDataNoNormal(DecalSurfaceData decalSurfaceData, inout SurfaceData surfaceData)
 {
     // using alpha compositing https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch23.html
     surfaceData.diffuseColor.xyz = surfaceData.diffuseColor.xyz * decalSurfaceData.baseColor.w + decalSurfaceData.baseColor.xyz;
-
-    // Always test the normal as we can have decompression artifact
-    if (decalSurfaceData.normalWS.w < 1.0)
-    {
-        surfaceData.normalWS.xyz = SafeNormalize(surfaceData.normalWS.xyz * decalSurfaceData.normalWS.w + decalSurfaceData.normalWS.xyz);
-    }
 
 #ifdef DECALS_4RT // only smoothness in 3RT mode
     // Don't apply any metallic modification
@@ -27,19 +21,31 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     surfaceData.specularOcclusion = 1.0;
 
     // copy across graph values, if defined
-    $SurfaceDescription.BaseColor:                      surfaceData.diffuseColor =                  surfaceDescription.BaseColor;
-    $SurfaceDescription.SpecularOcclusion:              surfaceData.specularOcclusion =             surfaceDescription.SpecularOcclusion;
-    $SurfaceDescription.Smoothness:                     surfaceData.perceptualSmoothness =          surfaceDescription.Smoothness;
-    $SurfaceDescription.Occlusion:                      surfaceData.ambientOcclusion =              surfaceDescription.Occlusion;
-    $SurfaceDescription.Transmittance:                  surfaceData.transmittance =                 surfaceDescription.Transmittance;
-    $SurfaceDescription.RimTransmissionIntensity:       surfaceData.rimTransmissionIntensity =      surfaceDescription.RimTransmissionIntensity;
+    $SurfaceDescription.BaseColor:                   surfaceData.diffuseColor =                   surfaceDescription.BaseColor;
 
-    $SurfaceDescription.SpecularTint:                   surfaceData.specularTint =                  surfaceDescription.SpecularTint;
-    $SurfaceDescription.SpecularShift:                  surfaceData.specularShift =                 surfaceDescription.SpecularShift;
+    $SurfaceDescription.AbsorptionCoefficient:       surfaceData.absorption =                     surfaceDescription.AbsorptionCoefficient;
 
-    $SurfaceDescription.SecondarySmoothness:            surfaceData.secondaryPerceptualSmoothness = surfaceDescription.SecondarySmoothness;
-    $SurfaceDescription.SecondarySpecularTint:          surfaceData.secondarySpecularTint =         surfaceDescription.SecondarySpecularTint;
-    $SurfaceDescription.SecondarySpecularShift:         surfaceData.secondarySpecularShift =        surfaceDescription.SecondarySpecularShift;
+    $SurfaceDescription.Eumelanin:                   surfaceData.eumelanin =                      surfaceDescription.Eumelanin;
+    $SurfaceDescription.Pheomelanin:                 surfaceData.pheomelanin =                    surfaceDescription.Pheomelanin;
+\
+    $SurfaceDescription.SpecularOcclusion:           surfaceData.specularOcclusion =              surfaceDescription.SpecularOcclusion;
+    $SurfaceDescription.Smoothness:                  surfaceData.perceptualSmoothness =           surfaceDescription.Smoothness;
+    $SurfaceDescription.Occlusion:                   surfaceData.ambientOcclusion =               surfaceDescription.Occlusion;
+    $SurfaceDescription.Transmittance:               surfaceData.transmittance =                  surfaceDescription.Transmittance;
+    $SurfaceDescription.RimTransmissionIntensity:    surfaceData.rimTransmissionIntensity =       surfaceDescription.RimTransmissionIntensity;
+
+    $SurfaceDescription.SpecularTint:                surfaceData.specularTint =                   surfaceDescription.SpecularTint;
+    $SurfaceDescription.SpecularShift:               surfaceData.specularShift =                  surfaceDescription.SpecularShift;
+
+    $SurfaceDescription.SecondarySmoothness:         surfaceData.secondaryPerceptualSmoothness =  surfaceDescription.SecondarySmoothness;
+    $SurfaceDescription.SecondarySpecularTint:       surfaceData.secondarySpecularTint =          surfaceDescription.SecondarySpecularTint;
+    $SurfaceDescription.SecondarySpecularShift:      surfaceData.secondarySpecularShift =         surfaceDescription.SecondarySpecularShift;
+
+    $SurfaceDescription.RadialSmoothness:            surfaceData.perceptualRadialSmoothness =     surfaceDescription.RadialSmoothness;
+    $SurfaceDescription.PrimaryReflectionSmoothness: surfaceData.primaryReflectionSmoothness =    surfaceDescription.PrimaryReflectionSmoothness;
+    $SurfaceDescription.CuticleAngle:                surfaceData.cuticleAngle =                   surfaceDescription.CuticleAngle;
+
+    $SurfaceDescription.StrandCountProbe:            surfaceData.strandCountProbe =               surfaceDescription.StrandCountProbe;
 
     // These static material feature allow compile time optimization
     surfaceData.materialFeatures = 0;
@@ -49,16 +55,17 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
         surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_HAIR_KAJIYA_KAY;
     #endif
 
-    #ifdef _DOUBLESIDED_ON
-        float3 doubleSidedConstants = _DoubleSidedConstants.xyz;
-    #else
-        float3 doubleSidedConstants = float3(1.0, 1.0, 1.0);
+    #ifdef _MATERIAL_FEATURE_HAIR_MARSCHNER
+        surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_HAIR_MARSCHNER;
     #endif
 
-    // normal delivered to master node
-    $SurfaceDescription.NormalOS: surfaceData.normalWS = TransformObjectToWorldNormal(surfaceDescription.NormalOS);
-    $SurfaceDescription.NormalTS: GetNormalWS(fragInputs, surfaceDescription.NormalTS, surfaceData.normalWS, doubleSidedConstants);
-    $SurfaceDescription.NormalWS: surfaceData.normalWS = surfaceDescription.NormalWS;
+    #ifdef _MATERIAL_FEATURE_HAIR_MARSCHNER_CINEMATIC
+        surfaceData.materialFeatures |= MATERIALFEATUREFLAGS_HAIR_MARSCHNER_CINEMATIC;
+    #endif
+
+    float3 doubleSidedConstants = GetDoubleSidedConstants();
+
+    ApplyDecalAndGetNormal(fragInputs, posInput, surfaceDescription, surfaceData);
 
     surfaceData.geomNormalWS = fragInputs.tangentToWorld[2];
 
@@ -96,18 +103,6 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     // We reflect this normal for transmitted GI.
     // For the highlight shift hack (along the tangent), we use the user-provided normal.
 
-    #if HAVE_DECALS
-        if (_EnableDecals)
-        {
-            float alpha = 1.0;
-            $SurfaceDescription.Alpha: alpha = surfaceDescription.Alpha;
-
-            // Both uses and modifies 'surfaceData.normalWS'.
-            DecalSurfaceData decalSurfaceData = GetDecalSurfaceData(posInput, fragInputs, alpha);
-            ApplyDecalToSurfaceData(decalSurfaceData, fragInputs.tangentToWorld[2], surfaceData);
-        }
-    #endif
-
     #if (_USE_LIGHT_FACING_NORMAL)
         float3 viewFacingNormalWS = ComputeViewFacingNormal(V, surfaceData.hairStrandDirectionWS);
         float3 N = viewFacingNormalWS; // Not affected by decals
@@ -118,12 +113,19 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
     bentNormalWS = N;
 
     $BentNormal: GetNormalWS(fragInputs, surfaceDescription.BentNormal, bentNormalWS, doubleSidedConstants);
-        
+
     #ifdef DEBUG_DISPLAY
+    #if !defined(SHADER_STAGE_RAY_TRACING)
+        // Mipmap mode debugging isn't supported with ray tracing as it relies on derivatives
         if (_DebugMipMapMode != DEBUGMIPMAPMODE_NONE)
         {
-            // TODO: need to update mip info
+            #ifdef FRAG_INPUTS_USE_TEXCOORD0
+                surfaceData.diffuseColor = GET_TEXTURE_STREAMING_DEBUG(posInput.positionSS, fragInputs.texCoord0);
+            #else
+                surfaceData.diffuseColor = GET_TEXTURE_STREAMING_DEBUG_NO_UV(posInput.positionSS);
+            #endif
         }
+    #endif
 
         // We need to call ApplyDebugToSurfaceData after filling the surfarcedata and before filling builtinData
         // as it can modify attribute use for static lighting
@@ -134,7 +136,7 @@ void BuildSurfaceData(FragInputs fragInputs, inout SurfaceDescription surfaceDes
         // Just use the value passed through via the slot (not active otherwise)
     #elif defined(_SPECULAR_OCCLUSION_FROM_AO_BENT_NORMAL)
         // If we have bent normal and ambient occlusion, process a specular occlusion
-        surfaceData.specularOcclusion = GetSpecularOcclusionFromBentAO(V, bentNormalWS, N, surfaceData.ambientOcclusion, PerceptualSmoothnessToPerceptualRoughness(surfaceData.perceptualSmoothness));
+        surfaceData.specularOcclusion = GetSpecularOcclusionFromBentAO(V, bentNormalWS, N, surfaceData.ambientOcclusion, PerceptualSmoothnessToRoughness(surfaceData.perceptualSmoothness));
     #elif defined(_AMBIENT_OCCLUSION) && defined(_SPECULAR_OCCLUSION_FROM_AO)
         surfaceData.specularOcclusion = GetSpecularOcclusionFromAmbientOcclusion(ClampNdotV(dot(N, V)), surfaceData.ambientOcclusion, PerceptualSmoothnessToRoughness(surfaceData.perceptualSmoothness));
     #endif

@@ -1,4 +1,6 @@
 using System;
+using Unity.Mathematics;
+using static Unity.Mathematics.math;
 
 namespace UnityEngine.Rendering.HighDefinition
 {
@@ -65,17 +67,46 @@ namespace UnityEngine.Rendering.HighDefinition
         }
     } // struct Frustum
 
+    // This structure holds all the information that can be requested during the water patch frustum culling
+    [GenerateHLSL(PackingRules.Exact, false)]
+    struct FrustumGPU
+    {
+        // The data of the 6 planes of the frustum
+        public Vector3 normal0;
+        public float dist0;
+        public Vector3 normal1;
+        public float dist1;
+        public Vector3 normal2;
+        public float dist2;
+        public Vector3 normal3;
+        public float dist3;
+        public Vector3 normal4;
+        public float dist4;
+        public Vector3 normal5;
+        public float dist5;
+
+        // The data of the 8 corners of the frustum
+        public Vector4 corner0;
+        public Vector4 corner1;
+        public Vector4 corner2;
+        public Vector4 corner3;
+        public Vector4 corner4;
+        public Vector4 corner5;
+        public Vector4 corner6;
+        public Vector4 corner7;
+    }
+
     [GenerateHLSL]
     struct OrientedBBox
     {
         // 3 x float4 = 48 bytes.
         // TODO: pack the axes into 16-bit UNORM per channel, and consider a quaternionic representation.
         public Vector3 right;
-        public float   extentX;
+        public float extentX;
         public Vector3 up;
-        public float   extentY;
+        public float extentY;
         public Vector3 center;
-        public float   extentZ;
+        public float extentZ;
 
         public Vector3 forward { get { return Vector3.Cross(up, right); } }
 
@@ -108,7 +139,7 @@ namespace UnityEngine.Rendering.HighDefinition
             for (int i = 0; overlap && i < numPlanes; i++)
             {
                 Vector3 n = frustum.planes[i].normal;
-                float   d = frustum.planes[i].distance;
+                float d = frustum.planes[i].distance;
 
                 // Max projection of the half-diagonal onto the normal (always positive).
                 float maxHalfDiagProj = obb.extentX * Mathf.Abs(Vector3.Dot(n, obb.right))
@@ -133,11 +164,11 @@ namespace UnityEngine.Rendering.HighDefinition
             // We can exploit the symmetry of the box by only testing against 3 planes rather than 6.
             var planes = stackalloc Plane[3];
 
-            planes[0].normal   = obb.right;
+            planes[0].normal = obb.right;
             planes[0].distance = obb.extentX;
-            planes[1].normal   = obb.up;
+            planes[1].normal = obb.up;
             planes[1].distance = obb.extentY;
-            planes[2].normal   = obb.forward;
+            planes[2].normal = obb.forward;
             planes[2].distance = obb.extentZ;
 
             for (int i = 0; overlap && i < 3; i++)
@@ -194,14 +225,14 @@ namespace UnityEngine.Rendering.HighDefinition
             var inversion = sourceProjection.inverse;
 
             var cps = new Vector4(
-                    Mathf.Sign(clipPlane.x),
-                    Mathf.Sign(clipPlane.y),
-                    1.0f,
-                    1.0f);
+                Mathf.Sign(clipPlane.x),
+                Mathf.Sign(clipPlane.y),
+                1.0f,
+                1.0f);
             var q = inversion * cps;
             Vector4 M4 = new Vector4(projection[3], projection[7], projection[11], projection[15]);
 
-            var c = clipPlane * ((2.0f*Vector4.Dot(M4, q)) / Vector4.Dot(clipPlane, q));
+            var c = clipPlane * ((2.0f * Vector4.Dot(M4, q)) / Vector4.Dot(clipPlane, q));
 
             projection[2] = c.x - M4.x;
             projection[6] = c.y - M4.y;
@@ -259,6 +290,28 @@ namespace UnityEngine.Rendering.HighDefinition
             else
                 return Matrix4x4.Perspective(camera.GetGateFittedFieldOfView(), camera.aspect, camera.nearClipPlane, camera.farClipPlane);
         }
+
+        // https://iquilezles.org/www/articles/distfunctions/distfunctions.htm
+        static float DistanceToOriginAABB(Vector3 point, Vector3 aabbSize)
+        {
+            float3 q = abs(point) - float3(aabbSize);
+            return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f);
+        }
+
+        // Optimized version of https://www.sciencedirect.com/topics/computer-science/oriented-bounding-box
+        public static float DistanceToOBB(OrientedBBox obb, Vector3 point)
+        {
+            float3 offset = point - obb.center;
+            float3 boxForward = normalize(cross(obb.right, obb.up));
+            float3 axisAlignedPoint = float3(dot(offset, normalize(obb.right)), dot(offset, normalize(obb.up)), dot(offset, boxForward));
+
+            return DistanceToOriginAABB(axisAlignedPoint, float3(obb.extentX, obb.extentY, obb.extentZ));
+        }
+
+        public static Bounds OBBToAABB(float3 right, float3 up, float3 forward, float3 extent, float3 center)
+        {
+            float3 aabbExtents = abs(right * extent.x) + abs(up * extent.y) + abs(forward * extent.z);
+            return new Bounds(center, aabbExtents);
+        }
     } // class GeometryUtils
 }
-

@@ -126,7 +126,7 @@ namespace Simulator.ScenarioEditor.Managers
         {
             if (IsInitialized)
                 return;
-            var library = await ConnectionManager.API.GetLibrary<MapDetailData>();
+            var library = await BuiltinAssetLibrary.GetLibrary<MapDetailData>();
 
             var assetService = new AssetService();
             var mapsInDatabase = assetService.List(BundleConfig.BundleTypes.Environment);

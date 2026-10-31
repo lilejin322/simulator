@@ -10,23 +10,17 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using ICSharpCode.SharpZipLib.Core;
-using ICSharpCode.SharpZipLib.Zip;
 using Simulator.Api;
 using Simulator.Bridge;
 using Simulator.Database;
 using Simulator.Database.Services;
-using Simulator.FMU;
 using Simulator.Network.Core.Configs;
 using Simulator.Network.Shared;
-using Simulator.PointCloud.Trees;
 using Simulator.Utilities;
 using Simulator.Web;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using VirtualFileSystem;
 
 namespace Simulator
 {
@@ -64,7 +58,7 @@ namespace Simulator
             else
 #endif
             {
-                AssetBundle = Web.WebUtilities.GenerateLocalPath(vehicleData.AssetGuid, BundleConfig.BundleTypes.Vehicle);
+                AssetBundle = BuiltinVehicleCatalog.TryGetPath(vehicleData.AssetGuid, out var builtinPath) ? builtinPath : null;
             }
             Sensors = vehicleData.Sensors;
 
@@ -218,13 +212,6 @@ namespace Simulator
             if (previous == newStatus)
                 return;
 
-            if (ConnectionManager.instance != null &&
-                ConnectionManager.Status != ConnectionManager.ConnectionStatus.Offline &&
-                CurrentSimulation != null)
-            {
-                ConnectionManager.instance.UpdateStatus(newStatus, CurrentSimulation.Id, message);
-            }
-
             if (value == SimulatorStatus.Idle)
             {
                 currentSimulation = null;
@@ -307,7 +294,6 @@ namespace Simulator
 
         public async void StartSimulation(SimulationData simData)
         {
-            CloudAPI API = null;
             if (Instance.Status != SimulatorStatus.Idle)
             {
                 Debug.LogWarning($"Received start simulation command while Simulator is not idle. (status: {Instance.Status})");
@@ -315,33 +301,6 @@ namespace Simulator
             }
             try
             {
-#if UNITY_EDITOR
-                // downloads still need simulator to be online, but in developer mode we don't have ConnectionManager
-                if (ConnectionManager.instance == null)
-                {
-                    if (string.IsNullOrEmpty(Config.CloudProxy))
-                    {
-                        API = new CloudAPI(new Uri(Config.CloudUrl), Config.SimID);
-                    }
-                    else
-                    {
-                        API = new CloudAPI(new Uri(Config.CloudUrl), Config.SimID, new Uri(Config.CloudProxy));
-                    }
-
-                    var simInfo = CloudAPI.GetInfo();
-                    var reader = await API.Connect(simInfo);
-                    var streamReader = await API.EnsureConnectSuccess();
-                    EditorApplication.playModeStateChanged += (PlayModeStateChange state) =>
-                    {
-                        if (state == PlayModeStateChange.ExitingPlayMode)
-                        {
-                            streamReader.Close();
-                            streamReader.Dispose();
-                            API.Disconnect();
-                        }
-                    };
-                }
-#endif
                 currentSimulation = simData;
                 reportStatus(SimulatorStatus.Loading);
                 Network.Initialize(Config.SimID, simData.Cluster, NetworkSettings);
@@ -367,11 +326,11 @@ namespace Simulator
                     foreach (var vehicle in simData.Vehicles.Where(v => v.Bridge != null))
                     {
 #if UNITY_EDITOR
-                        // as of now, developer settings cannot look up bridge assetguid while offline.
+                        // developer settings may store the bridge without its assetguid
                         if (string.IsNullOrEmpty(vehicle.Bridge.AssetGuid))
                         {
                             Debug.Log("missing assetguid on bridge, looking up by id " + vehicle.Bridge.Id);
-                            var bridge = await API.GetByIdOrName<PluginDetailData>(vehicle.Bridge.Id);
+                            var bridge = await BuiltinAssetLibrary.GetByIdOrName<PluginDetailData>(vehicle.Bridge.Id);
                             if (bridge != null)
                             {
                                 vehicle.Bridge.AssetGuid = bridge.AssetGuid;
@@ -403,11 +362,10 @@ namespace Simulator
                                 Debug.Log($"Sensor {plugin.Name} is not being downloaded, but used from cache or local sources. (Developer Debug Mode)");
                                 continue;
                             }
-                            // WISE stopped sending us assetGuids when in edit mode (no simId),
-                            // so we have to look up while in play mode.
+                            // developer settings may store sensors without their assetguid
                             if (plugin.Plugin.AssetGuid == null)
                             {
-                                var detail = await API.GetByIdOrName<PluginDetailData>(plugin.Plugin.Id);
+                                var detail = await BuiltinAssetLibrary.GetByIdOrName<PluginDetailData>(plugin.Plugin.Id);
                                 plugin.Plugin.AssetGuid = detail.AssetGuid;
                             }
 #endif
@@ -430,7 +388,6 @@ namespace Simulator
 
                 if (ConnectionUI.instance != null)
                 {
-                    ConnectionUI.instance.SetLinkingButtonActive(false);
                     ConnectionUI.instance.SetVSEButtonActive(false);
                 }
 
@@ -444,23 +401,17 @@ namespace Simulator
                 {
                     foreach (var vehicle in simData.Vehicles)
                     {
-                        if (vehicle.Bridge != null)
+                        // GetAsset above failed for any bridge or sensor that is not built in
+                        if (vehicle.Bridge?.AssetGuid != null)
                         {
-                            if (vehicle.Bridge.AssetGuid != null)
-                            {
-                                var dir = Path.Combine(Config.PersistentDataPath, "Bridges");
-                                var vfs = VfsEntry.makeRoot(dir);
-                                Config.CheckDir(vfs.GetChild(vehicle.Bridge.AssetGuid), Config.LoadBridgePlugin);
-                            }
+                            BuiltinBridgeCatalog.TryRegister(vehicle.Bridge.AssetGuid);
                         }
 
                         foreach (var sensor in vehicle.Sensors)
                         {
-                            if (sensor.Plugin?.AssetGuid != null) // TODO cleaner check for development mode sensors
+                            if (sensor.Plugin?.AssetGuid != null) // Sensors register after the vehicle bridge.
                             {
-                                var dir = Path.Combine(Config.PersistentDataPath, "Sensors");
-                                var vfs = VfsEntry.makeRoot(dir);
-                                Config.CheckDir(vfs.GetChild(sensor.Plugin.AssetGuid), Config.LoadSensorPlugin);
+                                BuiltinSensorCatalog.TryRegister(sensor.Plugin.AssetGuid);
                             }
                         }
                     }
@@ -502,15 +453,6 @@ namespace Simulator
                     reportStatus(SimulatorStatus.Idle);
                 }
             }
-#if UNITY_EDITOR
-            finally
-            {
-                if (API != null)
-                {
-                    API.Disconnect();
-                }
-            }
-#endif
         }
 
         public void StartAsync(SimulationData simulation)
@@ -527,11 +469,6 @@ namespace Simulator
             {
                 try
                 {
-                    if (Config.Headless && (simulation.Headless))
-                    {
-                        throw new Exception("Simulator is configured to run in headless mode, only headless simulations are allowed");
-                    }
-
                     if (ConnectionUI != null)
                     {
                         ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.PROGRESS);
@@ -544,6 +481,12 @@ namespace Simulator
                     {
                         var API = Instantiate(ApiManagerPrefab);
                         API.name = "ApiManager";
+                        // ApiManager.Awake only logs it when the server cannot listen, e.g. the port is in use
+                        if ((!Network.IsClusterSimulation || Network.IsMaster) && !API.IsListening)
+                        {
+                            Destroy(API.gameObject);
+                            throw new Exception($"Python API cannot listen on {Config.ApiHost}:{Config.ApiPort}, is the port in use?");
+                        }
 
                         ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.READY);
 
@@ -552,15 +495,12 @@ namespace Simulator
                     }
                     else if (simulation.Map != null)
                     {
-                        var callback = new Action<bool, string, string>((isDone, sceneName, mapBundlePath) =>
+                        // BuiltinMap.LoadSceneAsync has found the map's point-cloud data
+                        var callback = new Action<bool, string, string>((isDone, sceneName, scenePath) =>
                         {
                             SimConfig.MapName = sceneName;
                             SimConfig.MapAssetGuid = simulation.Map.AssetGuid;
                             if (!isDone) return;
-                            var loaders = FindObjectsOfType<NodeTreeLoader>();
-                            foreach (var l in loaders)
-                                l.UpdateData(mapBundlePath, Utility.StringToGUID(l.GetDataPath()).ToString());
-
                             SetupScene(simulation);
                         });
                         LoadMap(simulation.Map.AssetGuid, simulation.Map.Name, LoadSceneMode.Single, callback);
@@ -570,38 +510,28 @@ namespace Simulator
                         SetupScene(simulation);
                     }
                 }
-                catch (ZipException ex)
-                {
-                    Debug.Log($"Failed to start '{simulation.Name}' simulation");
-                    Debug.LogException(ex);
-
-                    reportStatus(SimulatorStatus.Error, ex.Message);
-
-                    if (SceneManager.GetActiveScene().name != LoaderScene)
-                    {
-                        reportStatus(SimulatorStatus.Stopping);
-                        SceneManager.LoadScene(LoaderScene);
-                        reportStatus(SimulatorStatus.Idle);
-                    }
-
-                    AssetBundle.UnloadAllAssetBundles(true);
-                    await Network.Deinitialize();
-                }
                 catch (Exception ex)
                 {
                     Debug.Log($"Failed to start '{simulation.Name}' simulation");
                     Debug.LogException(ex);
 
                     reportStatus(SimulatorStatus.Error, ex.Message);
+                    // only Stopping may go back to Idle, also when the loader scene is still active (e.g. API Only failed)
+                    reportStatus(SimulatorStatus.Stopping);
 
                     if (SceneManager.GetActiveScene().name != LoaderScene)
                     {
-                        reportStatus(SimulatorStatus.Stopping);
                         SceneManager.LoadScene(LoaderScene);
                     }
 
                     reportStatus(SimulatorStatus.Idle);
                     await Network.Deinitialize();
+
+                    if (ConnectionUI != null)
+                    {
+                        ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.START);
+                        ConnectionUI.UpdateStatusText($"Failed to start '{simulation.Name}': {ex.Message}");
+                    }
                 }
             });
         }
@@ -642,10 +572,7 @@ namespace Simulator
                     return;
                 }
 
-                if (ConnectionManager.Status != ConnectionManager.ConnectionStatus.Offline)
-                {
-                    Network?.BroadcastStopCommand();
-                }
+                Network?.BroadcastStopCommand();
 
                 if (SimulatorManager.InstanceAvailable)
                 {
@@ -707,97 +634,13 @@ namespace Simulator
 
         public static void LoadMap(string assetGuid, string mapName, LoadSceneMode loadMode, Action<bool, string, string> callback)
         {
-            var mapBundlePath = WebUtilities.GenerateLocalPath(assetGuid, BundleConfig.BundleTypes.Environment);
-            AssetBundle textureBundle = null;
-            AssetBundle mapBundle = null;
-            ZipFile zip = new ZipFile(mapBundlePath);
-            try
+            if (!BuiltinMap.TryGetScenePath(assetGuid, out var scenePath))
             {
-                string manfile;
-                ZipEntry entry = zip.GetEntry("manifest.json");
-                using (var ms = zip.GetInputStream(entry))
-                {
-                    int streamSize = (int)entry.Size;
-                    byte[] buffer = new byte[streamSize];
-                    streamSize = ms.Read(buffer, 0, streamSize);
-                    manfile = Encoding.UTF8.GetString(buffer);
-                }
-
-                Manifest manifest;
-
-                try
-                {
-                    manifest = Newtonsoft.Json.JsonConvert.DeserializeObject<Manifest>(manfile);
-                }
-                catch
-                {
-                    throw new Exception("Out of date AssetBundle, rebuild or download latest AssetBundle.");
-                }
-
-                if (manifest.assetFormat != BundleConfig.Versions[BundleConfig.BundleTypes.Environment])
-                {
-                    zip.Close();
-
-                    throw new ZipException($"BundleFormat: {manifest.assetName} ({manifest.assetGuid}) is for bundle" +
-                                           $" version {manifest.assetFormat}, but currently running simulator supports" +
-                                           $" only {BundleConfig.Versions[BundleConfig.BundleTypes.Environment]} bundle" +
-                                           $" version");
-                }
-
-                if (zip.FindEntry($"{manifest.assetGuid}_environment_textures", false) != -1)
-                {
-                    entry = zip.GetEntry($"{manifest.assetGuid}_environment_textures");
-                    var texStream = VirtualFileSystem.VirtualFileSystem.EnsureSeekable(zip.GetInputStream(entry), entry.Size);
-                    textureBundle = AssetBundle.LoadFromStream(texStream, 0, 1 << 20);
-                    texStream.Close();
-                    texStream.Dispose();
-                }
-
-                string platform = SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows
-                    ? "windows"
-                    : "linux";
-                entry = zip.GetEntry($"{manifest.assetGuid}_environment_main_{platform}");
-                var mapStream = VirtualFileSystem.VirtualFileSystem.EnsureSeekable(zip.GetInputStream(entry), entry.Size);
-                mapBundle = AssetBundle.LoadFromStream(mapStream, 0, 1 << 20);
-                mapStream.Close();
-                mapStream.Dispose();
-
-                if (mapBundle == null)
-                {
-                    throw new Exception($"Failed to load environment from '{mapName}' asset bundle");
-                }
-
-                if (textureBundle != null)
-                    textureBundle.LoadAllAssets();
-
-                var scenes = mapBundle.GetAllScenePaths();
-                if (scenes.Length != 1)
-                {
-                    throw new Exception(
-                        $"Unsupported environment in '{mapName}' asset bundle, only 1 scene expected");
-                }
-
-                var sceneName = Path.GetFileNameWithoutExtension(scenes[0]);
-                var loader = SceneManager.LoadSceneAsync(sceneName, loadMode);
-                loader.completed += op =>
-                {
-                    callback?.Invoke(op.isDone, sceneName, mapBundlePath);
-                    zip.Close();
-                    if (textureBundle != null)
-                        textureBundle.Unload(false);
-                    if (mapBundle != null)
-                        mapBundle.Unload(false);
-                };
+                throw new Exception($"Map '{mapName}' ({assetGuid}) is not built into the simulator");
             }
-            catch (Exception)
-            {
-                zip.Close();
-                if (textureBundle != null)
-                    textureBundle.Unload(true);
-                if (mapBundle != null)
-                    mapBundle.Unload(true);
-                throw;
-            }
+
+            var operation = BuiltinMap.LoadSceneAsync(scenePath, loadMode);
+            operation.completed += op => callback?.Invoke(op.isDone, Path.GetFileNameWithoutExtension(scenePath), scenePath);
         }
 
         void SetupScene(SimulationData simulation)
@@ -815,38 +658,6 @@ namespace Simulator
                         continue;
                     }
 #if UNITY_EDITOR
-                    if (EditorPrefs.GetBool("Simulator/Developer Debug Mode", false) == true && !bundlePath.EndsWith(".prefab"))
-                    {
-                        string assetName = "";
-                        using (ZipFile zip = new ZipFile(bundlePath))
-                        {
-                            Manifest manifest;
-                            ZipEntry entry = zip.GetEntry("manifest.json");
-                            using (var ms = zip.GetInputStream(entry))
-                            {
-                                int streamSize = (int)entry.Size;
-                                byte[] buffer = new byte[streamSize];
-                                streamSize = ms.Read(buffer, 0, streamSize);
-
-                                try
-                                {
-                                    manifest = Newtonsoft.Json.JsonConvert.DeserializeObject<Manifest>(Encoding.UTF8.GetString(buffer, 0, streamSize));
-                                    assetName = manifest.assetName;
-                                }
-                                catch
-                                {
-                                    throw new Exception("Out of date AssetBundle, rebuild or download latest AssetBundle.");
-                                }
-                            }
-                        }
-
-                        string filePath = Path.Combine(BundleConfig.ExternalBase, "Vehicles", assetName, $"{assetName}.prefab");
-                        if (File.Exists(filePath))
-                        {
-                            bundlePath = filePath;
-                        }
-                    }
-
                     if (bundlePath.EndsWith(".prefab"))
                     {
                         agentConfig.Prefab = (GameObject)UnityEditor.AssetDatabase.LoadAssetAtPath(bundlePath, typeof(GameObject));
@@ -854,7 +665,7 @@ namespace Simulator
                     else
 #endif
                     {
-                        agentConfig.Prefab = LoadVehicleBundle(bundlePath);
+                        agentConfig.Prefab = LoadVehicle(bundlePath);
                     }
                     cachedVehicles.Add(agentConfig.AssetGuid, agentConfig.Prefab);
                 }
@@ -870,13 +681,6 @@ namespace Simulator
                 // Flash main window to let user know simulation is ready
                 WindowFlasher.Flash();
             }
-            catch (ZipException ex)
-            {
-                Debug.Log($"Failed to start '{simulation.Name}' simulation - out of date asset bundles");
-                Debug.LogException(ex);
-                reportStatus(SimulatorStatus.Error, ex.Message);
-                ResetLoaderScene(simulation);
-            }
             catch (Exception ex)
             {
                 Debug.Log($"Failed to start '{simulation.Name}' simulation");
@@ -886,138 +690,13 @@ namespace Simulator
             }
         }
 
-        public static GameObject LoadVehicleBundle(string bundlePath)
+        public static GameObject LoadVehicle(string path)
         {
-            AssetBundle textureBundle = null;
-            AssetBundle vehicleBundle = null;
-            using (ZipFile zip = new ZipFile(bundlePath))
+            if (!BuiltinVehicleCatalog.TryLoad(path, out var prefab))
             {
-                Manifest manifest;
-                ZipEntry entry = zip.GetEntry("manifest.json");
-                using (var ms = zip.GetInputStream(entry))
-                {
-                    int streamSize = (int)entry.Size;
-                    byte[] buffer = new byte[streamSize];
-                    streamSize = ms.Read(buffer, 0, streamSize);
-
-                    try
-                    {
-                        manifest = Newtonsoft.Json.JsonConvert.DeserializeObject<Manifest>(Encoding.UTF8.GetString(buffer, 0, streamSize));
-                    }
-                    catch
-                    {
-                        throw new Exception("Out of date AssetBundle, rebuild or download latest AssetBundle.");
-                    }
-                }
-
-                if (manifest.assetFormat != BundleConfig.Versions[BundleConfig.BundleTypes.Vehicle])
-                {
-                    zip.Close();
-
-                    throw new ZipException($"BundleFormat: {manifest.assetName} ({manifest.assetGuid}) is for bundle" +
-                                           $" version {manifest.assetFormat}, but currently running simulator supports" +
-                                           $" only {BundleConfig.Versions[BundleConfig.BundleTypes.Environment]} bundle" +
-                                           $" version");
-                }
-
-                if (zip.FindEntry($"{manifest.assetGuid}_vehicle_textures", true) != -1)
-                {
-                    var texStream = zip.GetInputStream(zip.GetEntry($"{manifest.assetGuid}_vehicle_textures"));
-                    textureBundle = AssetBundle.LoadFromStream(texStream, 0, 1 << 20);
-                }
-
-                string platform = SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows ? "windows" : "linux";
-                var mapStream = zip.GetInputStream(zip.GetEntry($"{manifest.assetGuid}_vehicle_main_{platform}"));
-
-                vehicleBundle = AssetBundle.LoadFromStream(mapStream, 0, 1 << 20);
-
-                if (vehicleBundle == null)
-                {
-                    throw new Exception($"Failed to load '{manifest.assetName}' vehicle asset bundle");
-                }
-
-                try
-                {
-                    var vehicleAssets = vehicleBundle.GetAllAssetNames();
-                    if (vehicleAssets.Length != 1)
-                    {
-                        throw new Exception($"Unsupported '{manifest.assetName}' vehicle asset bundle, only 1 asset expected");
-                    }
-
-                    //Import main assembly
-                    var assembly = zip.GetEntry($"{manifest.assetName}.dll");
-                    if (assembly != null)
-                    {
-                        using (var s = zip.GetInputStream(assembly))
-                        {
-                            byte[] buffer = new byte[s.Length];
-                            s.Read(buffer, 0, (int)s.Length);
-                            Assembly.Load(buffer);
-                        }
-                    }
-
-                    if (manifest.fmuName != "")
-                    {
-                        var fmuDirectory = Path.Combine(Config.PersistentDataPath, manifest.assetName);
-                        if (platform == "windows")
-                        {
-                            var dll = zip.GetEntry($"{manifest.fmuName}_windows.dll");
-                            if (dll == null)
-                            {
-                                throw new ArgumentException($"{manifest.fmuName}.dll not found in Zip {bundlePath}");
-                            }
-
-                            using (Stream s = zip.GetInputStream(dll))
-                            {
-                                byte[] buffer = new byte[4096];
-                                Directory.CreateDirectory(fmuDirectory);
-                                var path = Path.Combine(Config.PersistentDataPath, manifest.assetName, $"{manifest.fmuName}.dll");
-                                using (FileStream streamWriter = File.Create(path))
-                                {
-                                    StreamUtils.Copy(s, streamWriter, buffer);
-                                }
-                                vehicleBundle.LoadAsset<GameObject>(vehicleAssets[0]).GetComponent<VehicleFMU>().FMUData.Path = path;
-                            }
-                        }
-                        else
-                        {
-                            var dll = zip.GetEntry($"{manifest.fmuName}_linux.so");
-                            if (dll == null)
-                            {
-                                throw new ArgumentException($"{manifest.fmuName}.so not found in Zip {bundlePath}");
-                            }
-
-                            using (Stream s = zip.GetInputStream(dll))
-                            {
-                                byte[] buffer = new byte[4096];
-                                Directory.CreateDirectory(fmuDirectory);
-                                var path = Path.Combine(Config.PersistentDataPath, manifest.assetName, $"{manifest.fmuName}.so");
-                                using (FileStream streamWriter = File.Create(path))
-                                {
-                                    StreamUtils.Copy(s, streamWriter, buffer);
-                                }
-                                vehicleBundle.LoadAsset<GameObject>(vehicleAssets[0]).GetComponent<VehicleFMU>().FMUData.Path = path;
-                            }
-                        }
-
-                    }
-
-                    // TODO: make this async
-                    if (!AssetBundle.GetAllLoadedAssetBundles().Contains(textureBundle))
-                    {
-                        textureBundle?.LoadAllAssets();
-                    }
-
-                    return vehicleBundle.LoadAsset<GameObject>(vehicleAssets[0]);
-
-                }
-                finally
-                {
-                    textureBundle?.Unload(false);
-                    vehicleBundle.Unload(false);
-                }
+                throw new Exception($"Vehicle {path} is not built into the simulator");
             }
-
+            return prefab;
         }
 
         public void ResetLoaderScene(SimulationData simulation)
@@ -1036,40 +715,31 @@ namespace Simulator
         public async Task EnterScenarioEditor()
         {
             ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.PROGRESS);
-            ConnectionUI.SetLinkingButtonActive(false);
             ConnectionUI.SetVSEButtonActive(false);
-                
+
             if (SimulatorManager.InstanceAvailable || ApiManager.Instance)
             {
-                ConnectionUI.UpdateStatusText("Cannot enter Scenario Editor during a simulation.");
-                Debug.LogWarning("Cannot enter Scenario Editor during a simulation.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Cannot enter Scenario Editor during a simulation, stop it first.");
                 return;
             }
 
-            if (ConnectionManager.Status != ConnectionManager.ConnectionStatus.Online)
+            if (!BuiltinAssetLibrary.HasAssets)
             {
-                ConnectionUI.UpdateStatusText("Cannot enter Scenario Editor when connection is not established.");
-                Debug.LogWarning("Cannot enter Scenario Editor when connection is not established.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Scenario Editor requires assets, but none are built into this simulator.");
                 return;
             }
 
-            var maps = await ConnectionManager.API.GetLibrary<MapDetailData>();
+            var maps = await BuiltinAssetLibrary.GetLibrary<MapDetailData>();
             if (maps.Length == 0)
             {
-                ConnectionUI.UpdateStatusText("Scenario Editor requires at least one map added to the library.");
-                Debug.LogWarning("Scenario Editor requires at least one map added to the library.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Scenario Editor requires at least one map added to the library.");
                 return;
             }
 
-            var egos = await ConnectionManager.API.GetLibrary<VehicleDetailData>();
+            var egos = await BuiltinAssetLibrary.GetLibrary<VehicleDetailData>();
             if (egos.Length == 0)
             {
-                ConnectionUI.UpdateStatusText("Scenario Editor requires at least one ego vehicle added to the library.");
-                Debug.LogWarning("Scenario Editor requires at least one ego vehicle added to the library.");
-                ExitScenarioEditor();
+                CancelScenarioEditor("Scenario Editor requires at least one ego vehicle added to the library.");
                 return;
             }
 
@@ -1077,6 +747,17 @@ namespace Simulator
             {
                 IsInScenarioEditor = true;
                 SceneManager.LoadScene(ScenarioEditorSceneName);
+            }
+        }
+
+        void CancelScenarioEditor(string reason)
+        {
+            Debug.LogWarning(reason);
+            // back to the loader screen first, which resets the status line, then show why
+            ExitScenarioEditor();
+            if (ConnectionUI != null)
+            {
+                ConnectionUI.UpdateStatusText(reason);
             }
         }
 
@@ -1090,9 +771,7 @@ namespace Simulator
 
             if (ConnectionUI != null)
             {
-                ConnectionUI.SetLinkingButtonActive(true);
-                ConnectionUI.SetVSEButtonActive(true);
-                ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.READY);
+                ConnectionUI.SetLoaderUIState(ConnectionUI.LoaderUIStateType.START);
             }
         }
 

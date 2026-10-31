@@ -27,19 +27,26 @@ namespace UnityEngine.Rendering.HighDefinition
             Count = 4
         };
 
+        [GenerateHLSL]
+        public enum DecalAtlasTextureType
+        {
+            Diffuse,
+            Normal,
+            Mask,
+            Count
+        }
+
         //-----------------------------------------------------------------------------
         // DBuffer management
         //-----------------------------------------------------------------------------
 
         // should this be combined into common class shared with Lit.cs???
-        static public int GetMaterialDBufferCount() { return (int)DBufferMaterial.Count; }
+        public static int GetMaterialDBufferCount() => (int)DBufferMaterial.Count;
 
-        static GraphicsFormat[] m_RTFormat = { GraphicsFormat.R8G8B8A8_SRGB, GraphicsFormat.R8G8B8A8_UNorm, GraphicsFormat.R8G8B8A8_UNorm, GraphicsFormat.R8G8_UNorm};
+        const int k_RTFormatMask = (int)GraphicsFormat.R8G8B8A8_SRGB << 0 | (int)GraphicsFormat.R8G8B8A8_UNorm << 8 | (int)GraphicsFormat.R8G8B8A8_UNorm << 16 | (int)GraphicsFormat.R8G8_UNorm << 24;
+        const int k_RTFormatMaskHP = (int)GraphicsFormat.R8G8B8A8_SRGB << 0 | (int)GraphicsFormat.R16G16B16A16_SFloat << 8 | (int)GraphicsFormat.R8G8B8A8_UNorm << 16 | (int)GraphicsFormat.R8G8_UNorm << 24;
 
-        static public void GetMaterialDBufferDescription(out GraphicsFormat[] RTFormat)
-        {
-            RTFormat = m_RTFormat;
-        }
+        public static GraphicsFormat GetMaterialDBufferDescription(int index, bool useHighPrecision) => (GraphicsFormat)(0xFF & (useHighPrecision ? k_RTFormatMaskHP : k_RTFormatMask ) >> (index << 3));
     }
 
     // normal to world only uses 3x3 for actual matrix so some data is packed in the unused space
@@ -60,7 +67,9 @@ namespace UnityEngine.Rendering.HighDefinition
         public Vector4 maskScaleBias;
         public Vector4 baseColor;
         public Vector4 remappingAOS;
-        public Vector4 scalingBAndRemappingM; // x unused, y blue mask map, zw metallic remapping
+        public Vector2 remappingMetallic;   // (min, max) or metallic value if no texture is used
+        public float scalingBlueMaskMap;
+        public float sampleNormalAlpha;
         public Vector3 blendParams; // x normal blend source, y mask blend source, z mask blend mode
         public uint decalLayerMask;
     };

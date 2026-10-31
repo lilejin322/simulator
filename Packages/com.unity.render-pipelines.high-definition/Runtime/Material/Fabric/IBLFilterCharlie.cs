@@ -2,10 +2,9 @@ namespace UnityEngine.Rendering.HighDefinition
 {
     class IBLFilterCharlie : IBLFilterBSDF
     {
-        public IBLFilterCharlie(RenderPipelineResources renderPipelineResources, MipGenerator mipGenerator)
+        public IBLFilterCharlie(HDRenderPipeline renderPipeline, MipGenerator mipGenerator)
+            : base(renderPipeline, mipGenerator)
         {
-            m_RenderPipelineResources = renderPipelineResources;
-            m_MipGenerator = mipGenerator;
         }
 
         public override bool IsInitialized()
@@ -17,7 +16,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             if (!m_convolveMaterial)
             {
-                m_convolveMaterial = CoreUtils.CreateEngineMaterial(m_RenderPipelineResources.shaders.charlieConvolvePS);
+                m_convolveMaterial = CoreUtils.CreateEngineMaterial(m_RenderPipeline.runtimeShaders.charlieConvolvePS);
             }
 
             for (int i = 0; i < 6; ++i)
@@ -49,15 +48,11 @@ namespace UnityEngine.Rendering.HighDefinition
                 // Solid angle associated with a texel of the cubemap.
                 float invOmegaP = (6.0f * source.width * source.width) / (4.0f * Mathf.PI);
 
-                // Copy the first mip
-                for (int f = 0; f < 6; f++)
-                {
-                    cmd.CopyTexture(source, f, 0, target, f, 0);
-                }
-
                 var props = new MaterialPropertyBlock();
                 props.SetTexture("_MainTex", source);
                 props.SetFloat("_InvOmegaP", invOmegaP);
+                float invFaceCenterTexelSolidAngle = 1.0f / (((4.0f * Mathf.PI) / 6.0f) * 4.0f / (3.173436852f * source.width * source.width)); // inverse of the solid angle of the face center texel
+                props.SetFloat("_InvFaceCenterTexelSolidAngle", invFaceCenterTexelSolidAngle);
 
                 for (int mip = 0; mip < (int)EnvConstants.ConvolutionMipCount; ++mip)
                 {

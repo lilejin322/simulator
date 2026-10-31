@@ -1,6 +1,8 @@
 // Note: This shader is supposed to be removed at some point when Graphics.ConvertTexture can take a RenderTexture as a destination (it's only used by sky manager for now).
 Shader "Hidden/BlitCubemap" {
     SubShader {
+
+        Tags{ "RenderPipeline" = "HDRenderPipeline" }
         // Cubemap blit.  Takes a face index.
         Pass {
             ZTest Always Cull Off ZWrite Off
@@ -10,6 +12,7 @@ Shader "Hidden/BlitCubemap" {
             #pragma vertex vert
             #pragma fragment frag
             #pragma target 4.5
+            #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 

@@ -1,17 +1,15 @@
 using System.Collections.Generic;
 using System.Linq;
-using UnityEditor.VFX.Block;
-using UnityEngine;
 
-namespace UnityEditor.VFX
+namespace UnityEditor.VFX.HDRP
 {
-    [VFXInfo(experimental = true)]
+    [VFXInfo(name = "Output Particle|HDRP Lit|Cube", category = "#5Output Debug", experimental = true, synonyms = new []{ "Box" })]
     class VFXLitCubeOutput : VFXAbstractParticleHDRPLitOutput
     {
-        public override string name { get { return "Output Particle Lit Cube"; } }
-        public override string codeGeneratorTemplate { get { return RenderPipeTemplate("VFXParticleLitCube"); } }
-        public override VFXTaskType taskType { get { return VFXTaskType.ParticleHexahedronOutput; } }
-        public override bool implementsMotionVector { get { return true; } }
+        public override string name => "Output Particle".AppendLabel("HDRP Lit", false) + "\nCube";
+        public override string codeGeneratorTemplate => RenderPipeTemplate("VFXParticleLitCube");
+        public override VFXTaskType taskType => VFXTaskType.ParticleHexahedronOutput;
+        public override bool implementsMotionVector => true;
 
 
         public override void OnEnable()
@@ -52,8 +50,23 @@ namespace UnityEditor.VFX
                 foreach (var setting in base.filteredOutSettings)
                     yield return setting;
 
-                yield return "blendMode";
-                yield return "shaderGraph";
+                yield return nameof(blendMode);
+                yield return nameof(shaderGraph);
+                yield return nameof(enableRayTracing);
+            }
+        }
+
+        protected override IEnumerable<string> untransferableSettings
+        {
+            get
+            {
+                foreach (var setting in base.untransferableSettings)
+                {
+                    yield return setting;
+                }
+                yield return nameof(blendMode);
+                yield return nameof(shaderGraph);
+                yield return nameof(enableRayTracing);
             }
         }
     }

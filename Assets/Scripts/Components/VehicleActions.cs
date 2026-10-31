@@ -333,7 +333,7 @@ public class VehicleActions : MonoBehaviour, IVehicleActions, IMessageSender, IM
         //Update visual effects spawn rate
         if (EnviroManager != null && RB != null)
         {
-            var localVel = transform.InverseTransformDirection(RB.velocity);
+            var localVel = transform.InverseTransformDirection(RB.linearVelocity);
             var lerp = 0f;
 
             if (EnviroManager.Wet <= 0.25f)

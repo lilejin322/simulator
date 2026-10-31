@@ -19,7 +19,7 @@ public class VehicleLaneFollowSMI : MonoBehaviour, IVehicleDynamics
     private Rigidbody RB;
     private IVehicleActions VA;
 
-    public Vector3 Velocity => RB.velocity;
+    public Vector3 Velocity => RB.linearVelocity;
     public Vector3 AngularVelocity => RB.angularVelocity;
     public Transform BaseLink { get { return BaseLinkTransform; } }
     public Transform BaseLinkTransform;
@@ -363,7 +363,7 @@ public class VehicleLaneFollowSMI : MonoBehaviour, IVehicleDynamics
         StopAllCoroutines();
 
         RB.angularVelocity = Vector3.zero;
-        RB.velocity = Vector3.zero;
+        RB.linearVelocity = Vector3.zero;
         simpleVelocity = Vector3.zero;
         simpleAngularVelocity = Vector3.zero;
         currentMapLane = null;
@@ -952,7 +952,7 @@ public class VehicleLaneFollowSMI : MonoBehaviour, IVehicleDynamics
         float elapsedTime = 0f;
         while (elapsedTime < 5f)
         {
-            if (aC.AgentGameObject.GetComponent<Rigidbody>().velocity.magnitude > 0.01f)
+            if (aC.AgentGameObject.GetComponent<Rigidbody>().linearVelocity.magnitude > 0.01f)
             {
                 isWaitingToDodge = false;
                 yield break;

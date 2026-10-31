@@ -17,13 +17,13 @@ namespace UnityEngine.Rendering.HighDefinition
         // Counter of input texture that have been fed to this structure
         private int m_NumTextures;
         // Array that maps input textureIDs into the slices indexes
-        Dictionary<uint, int> m_LocatorInSliceDictionnary;
+        Dictionary<EntityId, int> m_LocatorInSliceDictionnary;
 
         // This structure defines the mapping between an input texture and the internal structure
         private struct SliceEntry
         {
             // ID of the internal structure
-            public uint texId;
+            public EntityId texId;
             // This counter tracks the number of frames since this slice was requested. The mechanic behind this is due to the fact that the number storage of the cache is limited
             public uint countLRU;
             // Hash that tracks the version of the input texture (allows us to know if it needs an update)
@@ -39,8 +39,7 @@ namespace UnityEngine.Rendering.HighDefinition
         private Texture[] m_autoContentArray = new Texture[1];
 
         // Constant values
-        private static uint g_MaxFrameCount = unchecked((uint)(-1));
-        private static uint g_InvalidTexID = (uint)0;
+        const uint k_MaxFrameCount = unchecked((uint)(-1));
 
         protected const int k_FP16SizeInByte = 2;
         protected const int k_NbChannel = 4;
@@ -59,6 +58,7 @@ namespace UnityEngine.Rendering.HighDefinition
         {
             return true;
         }
+
         public string GetCacheName()
         {
             return m_CacheName;
@@ -76,13 +76,13 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 m_SliceArray = new SliceEntry[numTextures];
                 m_SortedIdxArray = new int[numTextures];
-                m_LocatorInSliceDictionnary = new Dictionary<uint, int>();
+                m_LocatorInSliceDictionnary = new Dictionary<EntityId, int>();
 
                 m_NumTextures = numTextures / m_SliceSize;
                 for (int i = 0; i < m_NumTextures; i++)
                 {
-                    m_SliceArray[i].countLRU = g_MaxFrameCount;         // never used before
-                    m_SliceArray[i].texId = g_InvalidTexID;
+                    m_SliceArray[i].countLRU = k_MaxFrameCount;         // never used before
+                    m_SliceArray[i].texId = EntityId.None;
                     m_SortedIdxArray[i] = i;
                 }
             }
@@ -92,20 +92,8 @@ namespace UnityEngine.Rendering.HighDefinition
         // This function returns the internal storage texture of the cache. It is specified by the child class.
         abstract public Texture GetTexCache();
 
-        // Function that allows us to do the mapping between a texture value and an identifier
-        public uint GetTextureHash(Texture texture)
-        {
-            uint textureHash  = texture.updateCount;
-            // For baked probes in the editor we need to factor in the actual hash of texture because we can't increment the update count of a texture that's baked on the disk.
-            // This code leaks logic from reflection probe baking into the texture cache which is not good... TODO: Find a way to do that outside of the texture cache.
-#if UNITY_EDITOR
-            textureHash += (uint)texture.imageContentsHash.GetHashCode();
-#endif
-            return textureHash;
-        }
-
         // Function that reserves a slice using a texture and it returns a update flag that tells if the stored value matches the input one
-        public int ReserveSlice(Texture texture, out bool needUpdate)
+        public int ReserveSlice(Texture texture, uint textureHash, out bool needUpdate)
         {
             // Reset the update flag
             needUpdate = false;
@@ -113,17 +101,14 @@ namespace UnityEngine.Rendering.HighDefinition
             // Check the validity of the input texture
             if (texture == null)
                 return -1;
-            var texId = (uint)texture.GetInstanceID();
-            if (texId == g_InvalidTexID)
+            var texId = texture.GetEntityId();
+            if (texId == EntityId.None)
                 return -1;
 
             // Search for existing copy in the texId to slice index dictionary
             var sliceIndex = -1;
             if (m_LocatorInSliceDictionnary.TryGetValue(texId, out sliceIndex))
             {
-                // Compute the new hash of the texture
-                var textureHash  = GetTextureHash(texture);
-
                 // We need to update the texture if the hash does not match the one in the slice
                 needUpdate |= (m_SliceArray[sliceIndex].sliceEntryHash != textureHash);
 
@@ -148,7 +133,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 {
                     needUpdate = true;
                     // if we are replacing an existing entry delete it from m_locatorInSliceArray.
-                    if (m_SliceArray[idx].texId != g_InvalidTexID)
+                    if (m_SliceArray[idx].texId != EntityId.None)
                     {
                         m_LocatorInSliceDictionnary.Remove(m_SliceArray[idx].texId);
                     }
@@ -205,10 +190,10 @@ namespace UnityEngine.Rendering.HighDefinition
         // Push the content to the internal target slice. Should be overridden by the child class. It will return fals if it fails to update (mainly sub-textures's size do not match)
         protected abstract bool TransferToSlice(CommandBuffer cmd, int sliceIndex, Texture[] textureArray);
 
-        public int FetchSlice(CommandBuffer cmd, Texture texture, bool forceReinject = false)
+        public int FetchSlice(CommandBuffer cmd, Texture texture, uint textureHash, bool forceReinject = false)
         {
             bool needUpdate = false;
-            var sliceIndex = ReserveSlice(texture, out needUpdate);
+            var sliceIndex = ReserveSlice(texture, textureHash, out needUpdate);
 
             var bSwapSlice = forceReinject || needUpdate;
 
@@ -217,13 +202,13 @@ namespace UnityEngine.Rendering.HighDefinition
             if (sliceIndex != -1 && bSwapSlice)
             {
                 m_autoContentArray[0] = texture;
-                UpdateSlice(cmd, sliceIndex, m_autoContentArray, GetTextureHash(texture));
+                UpdateSlice(cmd, sliceIndex, m_autoContentArray, textureHash);
             }
 
             return sliceIndex;
         }
 
-        private static List<int> s_TempIntList = new List<int>();
+        private static readonly List<int> s_TempIntList = new List<int>(); // No clear needed for static member, always cleared before usage
         public void NewFrame()
         {
             var numNonZeros = 0;
@@ -250,7 +235,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
             for (int i = 0; i < m_NumTextures; i++)
             {
-                if (m_SliceArray[i].countLRU < g_MaxFrameCount) ++m_SliceArray[i].countLRU;     // next frame
+                if (m_SliceArray[i].countLRU < k_MaxFrameCount) ++m_SliceArray[i].countLRU;     // next frame
             }
 
             //for(int q=1; q<m_numTextures; q++)
@@ -260,10 +245,10 @@ namespace UnityEngine.Rendering.HighDefinition
         // should not really be used in general. Assuming lights are culled properly entries will automatically be replaced efficiently.
         public void RemoveEntryFromSlice(Texture texture)
         {
-            var texId = (uint)texture.GetInstanceID();
+            var texId = texture.GetEntityId();
 
             //assert(TexID!=g_InvalidTexID);
-            if (texId == g_InvalidTexID) return;
+            if (texId == EntityId.None) return;
 
             // search for existing copy
             if (!m_LocatorInSliceDictionnary.ContainsKey(texId))
@@ -294,8 +279,8 @@ namespace UnityEngine.Rendering.HighDefinition
 
             // delete from m_locatorInSliceArray and m_pSliceArray.
             m_LocatorInSliceDictionnary.Remove(texId);
-            m_SliceArray[sliceIndex].countLRU = g_MaxFrameCount;            // never used before
-            m_SliceArray[sliceIndex].texId = g_InvalidTexID;
+            m_SliceArray[sliceIndex].countLRU = k_MaxFrameCount;            // never used before
+            m_SliceArray[sliceIndex].texId = EntityId.None;
         }
 
         protected int GetNumMips(int width, int height)
@@ -328,20 +313,6 @@ namespace UnityEngine.Rendering.HighDefinition
 #else
                 return Application.isMobilePlatform;
 #endif
-            }
-        }
-
-        public static TextureFormat GetPreferredHDRCompressedTextureFormat
-        {
-            get
-            {
-                var format = TextureFormat.RGBAHalf;
-                var probeFormat = TextureFormat.BC6H;
-
-                if (SystemInfo.SupportsTextureFormat(probeFormat) && !UnityEngine.Rendering.GraphicsSettings.HasShaderDefine(UnityEngine.Rendering.BuiltinShaderDefine.UNITY_NO_DXT5nm))
-                    format = probeFormat;
-
-                return format;
             }
         }
 

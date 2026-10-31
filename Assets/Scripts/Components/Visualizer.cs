@@ -208,6 +208,43 @@ namespace Simulator.Sensors.UI
             }
         }
 
+        // Used by the door state sensor plugin: one door at a time, switched with the left and right buttons, as its
+        // window picture when there is one and as its values otherwise
+        public void UpdateRenderTextureDoor(Texture2D door1, Texture2D door2, Texture2D door3, Texture2D door4,
+            Dictionary<string, object> values1, Dictionary<string, object> values2,
+            Dictionary<string, object> values3, Dictionary<string, object> values4)
+        {
+            var textures = new[] { door1, door2, door3, door4 };
+            var values = new[] { values1, values2, values3, values4 };
+            var index = (CurrentIndex % textures.Length + textures.Length) % textures.Length;
+
+            var texture = textures[index];
+            if (texture != null)
+            {
+                ToggleVisualizerElements(true, textures.Length);
+                fitter.aspectRatio = (float) texture.width / texture.height;
+                CameraRawImage.texture = texture;
+                return;
+            }
+
+            ToggleVisualizerElements(false, textures.Length);
+            if (elapsedTime >= 1)
+            {
+                sb.Clear();
+                sb.AppendLine($"Door {index + 1}");
+                foreach (var data in values[index])
+                {
+                    sb.AppendLine($"{data.Key}: {data.Value}");
+                }
+                ValuesText.text = sb.ToString();
+                elapsedTime = 0f;
+            }
+            else
+            {
+                elapsedTime += Time.unscaledDeltaTime;
+            }
+        }
+
         private void ToggleVisualizerElements(bool isCamera, int availableElements)
         {
             if (!HeaderGO.activeInHierarchy)

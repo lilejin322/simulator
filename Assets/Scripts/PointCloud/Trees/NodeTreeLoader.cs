@@ -57,7 +57,14 @@ namespace Simulator.PointCloud.Trees
             {
                 if (!enabled)
                     return null;
-                
+
+#if UNITY_EDITOR
+                // Building a player loads every scene in the editor. The data of a built-in map is found when the player
+                // loads the map (BuiltinMap.PreparePointCloudData); its stored path may not exist on this machine.
+                if (UnityEditor.BuildPipeline.isBuildingPlayer)
+                    return null;
+#endif
+
                 if (!string.Equals(dataPath, lastUsedDataPath))
                     Cleanup();
                 

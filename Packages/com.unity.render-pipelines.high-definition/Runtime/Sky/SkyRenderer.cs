@@ -33,7 +33,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="builtinParams">Engine parameters that you can use to render the sky.</param>
         /// <param name="renderForCubemap">Pass in true if you want to render the sky into a cubemap for lighting. This is useful when the sky renderer needs a different implementation in this case.</param>
         /// <param name="renderSunDisk">If the sky renderer supports the rendering of a sun disk, it must not render it if this is set to false.</param>
-        [System.Obsolete("Please override PreRenderSky(BuiltinSkyParameters) instead.")]
+        [System.Obsolete("Please override PreRenderSky(BuiltinSkyParameters) instead. #from(2021.2)")]
         public virtual void PreRenderSky(BuiltinSkyParameters builtinParams, bool renderForCubemap, bool renderSunDisk)
         {
             PreRenderSky(builtinParams);
@@ -43,7 +43,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// Preprocess for rendering the sky. Called before the DepthPrePass operations
         /// </summary>
         /// <param name="builtinParams">Engine parameters that you can use to render the sky.</param>
-        public virtual void PreRenderSky(BuiltinSkyParameters builtinParams) {}
+        public virtual void PreRenderSky(BuiltinSkyParameters builtinParams) { }
 
 
         /// <summary>
@@ -51,7 +51,15 @@ namespace UnityEngine.Rendering.HighDefinition
         /// </summary>
         /// <param name="builtinParams">Engine parameters that you can use to render the sky.</param>
         /// <returns>True if the PreRenderSky step is required.</returns>
+        [System.Obsolete("Please implement RequiresPreRender instead. #from(2022.2)")]
         public virtual bool RequiresPreRenderSky(BuiltinSkyParameters builtinParams) { return false; }
+
+        /// <summary>
+        /// Whether the PreRenderSky step is required or not.
+        /// </summary>
+        /// <param name="skySettings">Sky setting for the current sky.</param>
+        /// <returns>True if the sky needs a pre-render pass.</returns>
+        public virtual bool RequiresPreRender(SkySettings skySettings) { return false; }
 
 
         /// <summary>
@@ -80,18 +88,43 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="builtinParams">Sky system builtin parameters.</param>
         public virtual void SetGlobalSkyData(CommandBuffer cmd, BuiltinSkyParameters builtinParams)
         {
+            // bind empty resources for non-PBR sky.
+            if (ShaderConfig.s_PrecomputedAtmosphericAttenuation == 0)
+            {
+                cmd.SetGlobalTexture(HDShaderIDs._AirSingleScatteringTexture, (RenderTargetIdentifier)CoreUtils.blackVolumeTexture);
+                cmd.SetGlobalTexture(HDShaderIDs._AerosolSingleScatteringTexture, (RenderTargetIdentifier)CoreUtils.blackVolumeTexture);
+                cmd.SetGlobalTexture(HDShaderIDs._MultipleScatteringTexture, (RenderTargetIdentifier)CoreUtils.blackVolumeTexture);
+            }
+            else
+                cmd.SetGlobalTexture(HDShaderIDs._AtmosphericScatteringLUT, (RenderTargetIdentifier)CoreUtils.blackVolumeTexture);
 
+            cmd.SetGlobalBuffer(HDShaderIDs._CelestialBodyDatas, builtinParams.emptyCelestialBodyBuffer);
         }
 
         internal bool DoUpdate(BuiltinSkyParameters parameters)
         {
             if (m_LastFrameUpdate < parameters.frameIndex)
             {
+                // Here we need a temporary command buffer to be executed because this is called during render graph construction.
+                // This means that we don't have a proper command buffer to provide unless in a render graph pass.
+                // Besides, we need this function to be executed immediately to retrieve the return value so it cannot be executed later as a proper render graph pass.
+                var previousCommandBuffer = parameters.commandBuffer;
+                var commandBuffer = CommandBufferPool.Get("SkyUpdate");
+                parameters.commandBuffer = commandBuffer;
                 m_LastFrameUpdate = parameters.frameIndex;
-                return Update(parameters);
+                var result = Update(parameters);
+                Graphics.ExecuteCommandBuffer(commandBuffer);
+                CommandBufferPool.Release(commandBuffer);
+                parameters.commandBuffer = previousCommandBuffer;
+                return result;
             }
 
             return false;
+        }
+
+        internal void Reset()
+        {
+            m_LastFrameUpdate = -1;
         }
     }
 }

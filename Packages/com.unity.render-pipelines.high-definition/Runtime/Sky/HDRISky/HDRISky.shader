@@ -6,15 +6,18 @@ Shader "Hidden/HDRP/Sky/HDRISky"
 
     #pragma editor_sync_compilation
     #pragma target 4.5
-    #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+    #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
-    #pragma multi_compile_local _ SKY_MOTION
-    #pragma multi_compile_local _ USE_FLOWMAP
+    #define LIGHTLOOP_DISABLE_TILE_AND_CLUSTER
 
-    #pragma multi_compile _ DEBUG_DISPLAY
-    #pragma multi_compile SHADOW_LOW SHADOW_MEDIUM SHADOW_HIGH
+    #pragma multi_compile_local_fragment _ DISTORTION_PROCEDURAL DISTORTION_FLOWMAP
 
-    #pragma multi_compile USE_FPTL_LIGHTLIST USE_CLUSTERED_LIGHTLIST
+    #pragma multi_compile_fragment _ DEBUG_DISPLAY
+    #pragma multi_compile_fragment PUNCTUAL_SHADOW_LOW PUNCTUAL_SHADOW_MEDIUM PUNCTUAL_SHADOW_HIGH
+    #pragma multi_compile_fragment DIRECTIONAL_SHADOW_LOW DIRECTIONAL_SHADOW_MEDIUM DIRECTIONAL_SHADOW_HIGH
+    #pragma multi_compile_fragment AREA_SHADOW_MEDIUM AREA_SHADOW_HIGH
+
+    #pragma multi_compile_fragment USE_FPTL_LIGHTLIST USE_CLUSTERED_LIGHTLIST
 
     #define ATTRIBUTES_NEED_NORMAL
     #define ATTRIBUTES_NEED_TANGENT
@@ -30,6 +33,7 @@ Shader "Hidden/HDRP/Sky/HDRISky"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
+    #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
     #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Sky/SkyUtils.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SDF2D.hlsl"
@@ -47,7 +51,8 @@ Shader "Hidden/HDRP/Sky/HDRISky"
 
     TEXTURECUBE(_Cubemap);
     SAMPLER(sampler_Cubemap);
-    
+    float4 _Cubemap_HDR;
+
     TEXTURE2D(_Flowmap);
     SAMPLER(sampler_Flowmap);
 
@@ -59,7 +64,7 @@ Shader "Hidden/HDRP/Sky/HDRISky"
     uint   _BackplateShadowFilter;
 
     float4 _FlowmapParam; // x upper hemisphere only, y scroll factor, zw scroll direction (cosPhi and sinPhi)
-    
+
     #define _Intensity          _SkyParam.x
     #define _CosPhi             _SkyParam.z
     #define _SinPhi             _SkyParam.w
@@ -105,14 +110,6 @@ Shader "Hidden/HDRP/Sky/HDRISky"
         UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
         output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID, UNITY_RAW_FAR_CLIP_VALUE);
         return output;
-    }
-
-    float3 RotationUp(float3 p, float2 cos_sin)
-    {
-        float3 rotDirX = float3(cos_sin.x, 0, -cos_sin.y);
-        float3 rotDirY = float3(cos_sin.y, 0,  cos_sin.x);
-
-        return float3(dot(rotDirX, p), p.y, dot(rotDirY, p));
     }
 
     // TODO: cf. dir.y == 0
@@ -182,12 +179,12 @@ Shader "Hidden/HDRP/Sky/HDRISky"
 
     float3 GetSkyColor(float3 dir)
     {
-#if SKY_MOTION
+#if defined(DISTORTION_PROCEDURAL) || defined(DISTORTION_FLOWMAP)
         if (dir.y >= 0 || !_UpperHemisphere)
         {
             float2 alpha = frac(float2(_ScrollFactor, _ScrollFactor + 0.5)) - 0.5;
 
-#ifdef USE_FLOWMAP
+#ifdef DISTORTION_FLOWMAP
             float3 tangent = normalize(cross(dir, float3(0.0, 1.0, 0.0)));
             float3 bitangent = cross(tangent, dir);
 
@@ -196,14 +193,13 @@ Shader "Hidden/HDRP/Sky/HDRISky"
 
             float3 dd = flow.x * tangent + flow.y * bitangent;
 #else
-            float3 windDir = RotationUp(float3(0, 0, 1), _ScrollDirection);
-            windDir.x *= -1.0;
+            float3 windDir = float3(_ScrollDirection.x, 0.0f, _ScrollDirection.y);
             float3 dd = windDir*sin(dir.y*PI*0.5);
 #endif
 
             // Sample twice
-            float3 color1 = SAMPLE_TEXTURECUBE_LOD(_Cubemap, sampler_Cubemap, dir - alpha.x*dd, 0).rgb;
-            float3 color2 = SAMPLE_TEXTURECUBE_LOD(_Cubemap, sampler_Cubemap, dir - alpha.y*dd, 0).rgb;
+            float3 color1 = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_Cubemap, sampler_Cubemap, dir + alpha.x * dd, 0), _Cubemap_HDR);
+            float3 color2 = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_Cubemap, sampler_Cubemap, dir + alpha.y * dd, 0), _Cubemap_HDR);
 
             // Blend color samples
             return lerp(color1, color2, abs(2.0 * alpha.x));
@@ -211,7 +207,7 @@ Shader "Hidden/HDRP/Sky/HDRISky"
         else
 #endif
 
-        return SAMPLE_TEXTURECUBE_LOD(_Cubemap, sampler_Cubemap, dir, 0).rgb;
+        return DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_Cubemap, sampler_Cubemap, dir, 0), _Cubemap_HDR);
     }
 
     float4 GetColorWithRotation(float3 dir, float exposure, float2 cos_sin)
@@ -252,10 +248,8 @@ Shader "Hidden/HDRP/Sky/HDRISky"
 
         HDShadowContext shadowContext = InitShadowContext();
         float shadow;
-        // Use uniform directly - The float need to be cast to uint (as unity don't support to set a uint as uniform)
-        uint renderingLayers = GetMeshRenderingLightLayer();
         float3 shadow3;
-        ShadowLoopMin(shadowContext, posInput, float3(0.0, 1.0, 0.0), _ShadowFilter, renderingLayers, shadow3);
+        ShadowLoopMin(shadowContext, posInput, float3(0.0, 1.0, 0.0), _ShadowFilter, RENDERING_LAYERS_MASK, shadow3);
         shadow = dot(shadow3, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
 
         float3 shadowColor = ComputeShadowColor(shadow, _ShadowTint, 0.0);
@@ -352,10 +346,12 @@ Shader "Hidden/HDRP/Sky/HDRISky"
 
     SubShader
     {
+        Tags{ "RenderPipeline" = "HDRenderPipeline" }
         // Regular HDRI Sky
         // For cubemap
         Pass
         {
+            Name "FragBaking"
             ZWrite Off
             ZTest Always
             Blend Off
@@ -369,6 +365,7 @@ Shader "Hidden/HDRP/Sky/HDRISky"
         // For fullscreen Sky
         Pass
         {
+            Name "FragRender"
             ZWrite Off
             ZTest LEqual
             Blend Off
@@ -382,6 +379,7 @@ Shader "Hidden/HDRP/Sky/HDRISky"
         // For fullscreen Sky with Backplate
         Pass
         {
+            Name "FragRenderBackplate"
             ZWrite Off
             ZTest Always
             Blend Off
@@ -395,6 +393,7 @@ Shader "Hidden/HDRP/Sky/HDRISky"
         // DepthOnly For fullscreen Sky with Backplate
         Pass
         {
+            Name "FragRenderBackplateDepth"
             ZWrite On
             ZTest LEqual
             Blend Off

@@ -23,7 +23,8 @@ namespace UnityEngine.Rendering.HighDefinition
     /// A volume component that holds settings for the Vignette effect.
     /// </summary>
     [Serializable, VolumeComponentMenu("Post-processing/Vignette")]
-    [HelpURL(Documentation.baseURL + Documentation.version + Documentation.subURL + "Post-Processing-Vignette" + Documentation.endURL)]
+    [SupportedOnRenderPipeline(typeof(HDRenderPipelineAsset))]
+    [HDRPHelpURL("Post-Processing-Vignette")]
     public sealed class Vignette : VolumeComponent, IPostProcessComponent
     {
         /// <summary>
@@ -48,7 +49,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// Controls the strength of the vignette effect.
         /// </summary>
-        [Tooltip("Controls the strength of the vignette effect.")]
+        [Tooltip("Use the slider to set the strength of the Vignette effect.")]
         public ClampedFloatParameter intensity = new ClampedFloatParameter(0f, 0f, 1f);
 
         /// <summary>
@@ -73,7 +74,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// Specifies a black and white mask Texture to use as a vignette.
         /// </summary>
         [Tooltip("Specifies a black and white mask Texture to use as a vignette.")]
-        public TextureParameter mask = new TextureParameter(null);
+        public Texture2DParameter mask = new Texture2DParameter(null);
 
         /// <summary>
         /// Controls the opacity of the mask vignette. Lower values result in a more transparent vignette.

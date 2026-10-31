@@ -9,6 +9,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
     // - Always clears the stencil buffer
     // - Clears the alpha channel if desired
     // - Clears the RGB channel to the color of a texture using a specified stretching mode
+    [HideInInspector]
     internal class CustomClear : CustomPass
     {
         internal class ShaderIDs
@@ -19,12 +20,9 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             public static readonly int k_ClearAlpha = Shader.PropertyToID("_ClearAlpha");
         }
 
-        enum PassType
-        {
-            ClearColorAndStencil = 0,
-            DrawTextureAndClearStencil = 1
-        };
         Material m_FullscreenPassMaterial;
+        int m_ClearColorAndStencilPassIndex;
+        int m_DrawTextureAndClearStencilPassIndex;
 
         // It can be used to configure render targets and their clear state. Also to create temporary render target textures.
         // When empty this render pass will render to the active camera render target.
@@ -32,12 +30,17 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
         // The render pipeline will ensure target setup and clearing happens in an performance manner.
         protected override void Setup(ScriptableRenderContext renderContext, CommandBuffer cmd)
         {
+            if (!HDRenderPipeline.isReady)
+                return;
+
+            var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<HDRenderPipelineRuntimeShaders>();
+
             // Setup code here
             if (string.IsNullOrEmpty(name)) name = "CustomClear";
 
-            var hdrpAsset = HDRenderPipeline.defaultAsset;
-            if (hdrpAsset != null)
-                m_FullscreenPassMaterial = CoreUtils.CreateEngineMaterial(hdrpAsset.renderPipelineResources.shaders.customClearPS);
+            m_FullscreenPassMaterial = CoreUtils.CreateEngineMaterial(runtimeShaders.customClearPS);
+            m_ClearColorAndStencilPassIndex = m_FullscreenPassMaterial.FindPass("ClearColorAndStencil");
+            m_DrawTextureAndClearStencilPassIndex = m_FullscreenPassMaterial.FindPass("DrawTextureAndClearStencil");
         }
 
         protected override void Execute(CustomPassContext ctx)
@@ -72,7 +75,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
                 {
                     m_FullscreenPassMaterial.SetVector(ShaderIDs.k_BlitScaleBiasRt, new Vector4(1.0f, 1.0f, 0.0f, 0.0f));
                     m_FullscreenPassMaterial.SetVector(ShaderIDs.k_BlitScaleBias, new Vector4(1.0f, 1.0f, 0.0f, 0.0f));
-                    ctx.cmd.DrawProcedural(Matrix4x4.identity, m_FullscreenPassMaterial, (int)PassType.ClearColorAndStencil, MeshTopology.Quads, 4, 1);
+                    ctx.cmd.DrawProcedural(Matrix4x4.identity, m_FullscreenPassMaterial, m_ClearColorAndStencilPassIndex, MeshTopology.Quads, 4, 1);
                 }
 
                 m_FullscreenPassMaterial.SetTexture(ShaderIDs.k_BlitTexture, layerData.clearColorTexture);
@@ -80,8 +83,8 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
                 m_FullscreenPassMaterial.SetVector(ShaderIDs.k_BlitScaleBias, new Vector4(1.0f, 1.0f, 0.0f, 0.0f));
                 m_FullscreenPassMaterial.SetInt(ShaderIDs.k_ClearAlpha, layerData.clearAlpha ? 1 : 0);
 
-                // draw a quad (not Triangle), to support letter boxing and stretching 
-                ctx.cmd.DrawProcedural(Matrix4x4.identity, m_FullscreenPassMaterial, (int)PassType.DrawTextureAndClearStencil, MeshTopology.Quads, 4, 1);
+                // draw a quad (not Triangle), to support letter boxing and stretching
+                ctx.cmd.DrawProcedural(Matrix4x4.identity, m_FullscreenPassMaterial, m_DrawTextureAndClearStencilPassIndex, MeshTopology.Quads, 4, 1);
             }
         }
 

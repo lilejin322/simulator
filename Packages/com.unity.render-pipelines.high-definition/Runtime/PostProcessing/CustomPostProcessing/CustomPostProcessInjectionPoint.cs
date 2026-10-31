@@ -6,12 +6,19 @@ namespace UnityEngine.Rendering.HighDefinition
     public enum CustomPostProcessInjectionPoint
     {
         /// <summary>After Opaque and Sky.</summary>
-        AfterOpaqueAndSky   = 0,
+        [InspectorName("After Opaque And Sky")]
+        AfterOpaqueAndSky = 0,
         /// <summary>Before TAA and Post Processing.</summary>
-        BeforeTAA           = 3,
+        [InspectorName("Before Temporal Anti-Aliasing")]
+        BeforeTAA = 3,
         /// <summary>Before Post Processing.</summary>
-        BeforePostProcess   = 1,
+        [InspectorName("Before Post Process")]
+        BeforePostProcess = 1,
+        /// <summary>After Post Process Blurs.</summary>
+        [InspectorName("After Post Process Blurs")]
+        AfterPostProcessBlurs = 4,
         /// <summary>After Post Processing.</summary>
-        AfterPostProcess    = 2,
+        [InspectorName("After Post Process")]
+        AfterPostProcess = 2,
     }
 }

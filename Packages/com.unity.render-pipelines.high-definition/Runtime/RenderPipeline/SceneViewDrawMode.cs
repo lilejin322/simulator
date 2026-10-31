@@ -11,21 +11,19 @@ namespace UnityEngine.Rendering.HighDefinition
 
         static private bool RejectDrawMode(SceneView.CameraMode cameraMode)
         {
-            if (cameraMode.drawMode == DrawCameraMode.ShadowCascades ||
-                cameraMode.drawMode == DrawCameraMode.RenderPaths ||
-                cameraMode.drawMode == DrawCameraMode.AlphaChannel ||
-                cameraMode.drawMode == DrawCameraMode.Overdraw ||
-                cameraMode.drawMode == DrawCameraMode.Mipmaps ||
-                cameraMode.drawMode == DrawCameraMode.DeferredDiffuse ||
-                cameraMode.drawMode == DrawCameraMode.DeferredSpecular ||
-                cameraMode.drawMode == DrawCameraMode.DeferredSmoothness ||
-                cameraMode.drawMode == DrawCameraMode.DeferredNormal ||
-                cameraMode.drawMode == DrawCameraMode.ValidateAlbedo ||
-                cameraMode.drawMode == DrawCameraMode.ValidateMetalSpecular
-                )
-                return false;
-
-            return true;
+            return cameraMode.drawMode != DrawCameraMode.ShadowCascades &&
+                cameraMode.drawMode != DrawCameraMode.RenderPaths &&
+                cameraMode.drawMode != DrawCameraMode.AlphaChannel &&
+                cameraMode.drawMode != DrawCameraMode.Overdraw &&
+                cameraMode.drawMode != DrawCameraMode.Mipmaps &&
+                cameraMode.drawMode != DrawCameraMode.DeferredDiffuse &&
+                cameraMode.drawMode != DrawCameraMode.DeferredSpecular &&
+                cameraMode.drawMode != DrawCameraMode.DeferredSmoothness &&
+                cameraMode.drawMode != DrawCameraMode.DeferredNormal &&
+                cameraMode.drawMode != DrawCameraMode.ValidateAlbedo &&
+                cameraMode.drawMode != DrawCameraMode.ValidateMetalSpecular &&
+                cameraMode.drawMode != DrawCameraMode.SpriteMask &&
+                cameraMode.drawMode != DrawCameraMode.TextureStreaming;
         }
 
         static void UpdateSceneViewStates()
@@ -34,7 +32,7 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 if (sceneViewHaveValidateFunction.Contains(sceneView))
                     continue;
-                
+
 
                 sceneView.onValidateCameraMode += RejectDrawMode;
                 sceneViewHaveValidateFunction.Add(sceneView);
@@ -50,7 +48,7 @@ namespace UnityEngine.Rendering.HighDefinition
         static public void ResetDrawMode()
         {
             EditorApplication.update -= UpdateSceneViewStates;
-            
+
             foreach (var sceneView in sceneViewHaveValidateFunction)
                 sceneView.onValidateCameraMode -= RejectDrawMode;
             sceneViewHaveValidateFunction.Clear();

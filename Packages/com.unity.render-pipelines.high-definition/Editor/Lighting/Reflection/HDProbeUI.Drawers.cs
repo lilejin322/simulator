@@ -3,57 +3,36 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditorInternal;
 using System.Reflection;
+using UnityEditor.EditorTools;
+using UnityEditor.Experimental.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.Rendering;
-using UnityEditor.Experimental.Rendering;
+using Object = UnityEngine.Object;
+
+using UnityEditor.Rendering.Utilities;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
     static partial class HDProbeUI
     {
-        [Flags]
-        internal enum ToolBar
-        {
-            None = 0,
-            InfluenceShape = 1 << 0,
-            Blend = 1 << 1,
-            NormalBlend = 1 << 2,
-            CapturePosition = 1 << 3,
-            MirrorPosition = 1 << 4,
-            MirrorRotation = 1 << 5,
-            ShowChromeGizmo = 1 << 6, //not really an edit mode. Should be move later to contextual tool overlay
-        }
-
         internal interface IProbeUISettingsProvider
         {
             ProbeSettingsOverride displayedCaptureSettings { get; }
             ProbeSettingsOverride displayedAdvancedCaptureSettings { get; }
             ProbeSettingsOverride displayedCustomSettings { get; }
             Type customTextureType { get; }
-            ToolBar[] toolbars { get; }
-            Dictionary<KeyCode, ToolBar> shortcuts { get; }
         }
 
         // Constants
-        const EditMode.SceneViewEditMode EditBaseShape = (EditMode.SceneViewEditMode)100;
-        const EditMode.SceneViewEditMode EditInfluenceShape = (EditMode.SceneViewEditMode)101;
-        const EditMode.SceneViewEditMode EditInfluenceNormalShape = (EditMode.SceneViewEditMode)102;
-        const EditMode.SceneViewEditMode EditCapturePosition = (EditMode.SceneViewEditMode)103;
-        const EditMode.SceneViewEditMode EditMirrorPosition = (EditMode.SceneViewEditMode)104;
-        const EditMode.SceneViewEditMode EditMirrorRotation = (EditMode.SceneViewEditMode)105;
+        internal const EditMode.SceneViewEditMode EditBaseShape = (EditMode.SceneViewEditMode)100;
+        internal const EditMode.SceneViewEditMode EditInfluenceShape = (EditMode.SceneViewEditMode)101;
+        internal const EditMode.SceneViewEditMode EditInfluenceNormalShape = (EditMode.SceneViewEditMode)102;
+        internal const EditMode.SceneViewEditMode EditCapturePosition = (EditMode.SceneViewEditMode)103;
+        internal const EditMode.SceneViewEditMode EditMirrorPosition = (EditMode.SceneViewEditMode)104;
+        internal const EditMode.SceneViewEditMode EditMirrorRotation = (EditMode.SceneViewEditMode)105;
         //Note: EditMode.SceneViewEditMode.ReflectionProbeOrigin is still used
         //by legacy reflection probe and have its own mecanism that we don't want
-
-        static readonly Dictionary<ToolBar, EditMode.SceneViewEditMode> k_ToolbarMode = new Dictionary<ToolBar, EditMode.SceneViewEditMode>
-        {
-            { ToolBar.InfluenceShape, EditBaseShape },
-            { ToolBar.Blend, EditInfluenceShape },
-            { ToolBar.NormalBlend, EditInfluenceNormalShape },
-            { ToolBar.CapturePosition, EditCapturePosition },
-            { ToolBar.MirrorPosition, EditMirrorPosition },
-            { ToolBar.MirrorRotation, EditMirrorRotation }
-        };
 
         // Probe Setting Mode cache
         static readonly GUIContent[] k_ModeContents = { new GUIContent("Baked"), new GUIContent("Custom"), new GUIContent("Realtime") };
@@ -62,113 +41,6 @@ namespace UnityEditor.Rendering.HighDefinition
         internal struct Drawer<TProvider>
             where TProvider : struct, IProbeUISettingsProvider, InfluenceVolumeUI.IInfluenceUISettingsProvider
         {
-            // Toolbar content cache
-            static readonly EditMode.SceneViewEditMode[][] k_ListModes;
-            static readonly GUIContent[][] k_ListContent;
-
-            static Drawer()
-            {
-                var provider = new TProvider();
-
-                // Build toolbar content cache
-                var toolbars = provider.toolbars;
-                k_ListContent = new GUIContent[toolbars.Length][];
-                k_ListModes = new EditMode.SceneViewEditMode[toolbars.Length][];
-
-                var listMode = new List<EditMode.SceneViewEditMode>();
-                var listContent = new List<GUIContent>();
-                for (int i = 0; i < toolbars.Length; ++i)
-                {
-                    listMode.Clear();
-                    listContent.Clear();
-
-                    var toolBar = toolbars[i];
-                    for (int j = 0; j < sizeof(int) * 8; ++j)
-                    {
-                        var toolbarJ = (ToolBar)(1 << j);
-                        if ((toolBar & toolbarJ) > 0)
-                        {
-                            if (toolBar == ToolBar.ShowChromeGizmo)
-                            {
-                                listContent.Add(k_ToolbarContents[toolbarJ]);
-                            }
-                            else
-                            {
-                                listMode.Add(k_ToolbarMode[toolbarJ]);
-                                listContent.Add(k_ToolbarContents[toolbarJ]);
-                            }
-                        }
-                    }
-                    k_ListContent[i] = listContent.ToArray();
-                    k_ListModes[i] = listMode.ToArray();
-                }
-
-            }
-
-            // Tool bars
-            public static void DrawToolbars(SerializedHDProbe serialized, Editor owner)
-            {
-                var provider = new TProvider();
-
-                GUILayout.BeginHorizontal();
-                GUILayout.FlexibleSpace();
-                GUI.changed = false;
-
-                for (int i = 0; i < k_ListModes.Length - 1; ++i)
-                    EditMode.DoInspectorToolbar(k_ListModes[i], k_ListContent[i], HDEditorUtils.GetBoundsGetter(owner), owner);
-
-                //Special case: show chrome gizmo should be mouved to overlay tool.
-                //meanwhile, display it as an option of toolbar
-                EditorGUI.BeginChangeCheck();
-                IHDProbeEditor probeEditor = owner as IHDProbeEditor;
-                int selected = probeEditor.showChromeGizmo ? 0 : -1;
-                int newSelected = GUILayout.Toolbar(selected, new[] { k_ListContent[k_ListModes.Length - 1][0] }, GUILayout.Height(20), GUILayout.Width(30));
-                if(EditorGUI.EndChangeCheck())
-                {
-                    //allow deselection
-                    if (selected >= 0 && newSelected == selected)
-                        selected = -1;
-                    else
-                        selected = newSelected;
-                    probeEditor.showChromeGizmo = selected == 0;
-                    SceneView.RepaintAll();
-                }
-
-                GUILayout.FlexibleSpace();
-                GUILayout.EndHorizontal();
-            }
-            
-            public static void DoToolbarShortcutKey(Editor owner)
-            {
-                var provider = new TProvider();
-                var toolbars = provider.toolbars;
-                var shortcuts = provider.shortcuts;
-
-                var evt = Event.current;
-                if (evt.type != EventType.KeyDown || !evt.shift)
-                    return;
-
-                if (shortcuts.TryGetValue(evt.keyCode, out ToolBar toolbar))
-                {
-                    bool used = false;
-                    foreach (ToolBar t in toolbars)
-                    {
-                        if ((t & toolbar) > 0)
-                        {
-                            used = true;
-                            break;
-                        }
-                    }
-                    if (!used)
-                        return;
-
-                    var targetMode = k_ToolbarMode[toolbar];
-                    var mode = EditMode.editMode == targetMode ? EditMode.SceneViewEditMode.None : targetMode;
-                    EditorApplication.delayCall += () => EditMode.ChangeEditMode(mode, HDEditorUtils.GetBoundsGetter(owner)(), owner);
-                    evt.Use();
-                }
-            }
-
             // Drawers
             public static void DrawPrimarySettings(SerializedHDProbe serialized, Editor owner)
             {
@@ -183,33 +55,36 @@ namespace UnityEditor.Rendering.HighDefinition
                 {
 #endif
 
-                // Probe Mode
-                EditorGUILayout.IntPopup(serialized.probeSettings.mode, k_ModeContents, k_ModeValues, k_BakeTypeContent);
+                    // Probe Mode
+                    EditorGUILayout.IntPopup(serialized.probeSettings.mode, k_ModeContents, k_ModeValues, k_BakeTypeContent);
 
 #if !ENABLE_BAKED_PLANAR
                 }
+
 #endif
 
                 switch ((ProbeSettings.Mode)serialized.probeSettings.mode.intValue)
                 {
                     case ProbeSettings.Mode.Realtime:
-                        {
-                            EditorGUILayout.PropertyField(serialized.probeSettings.realtimeMode);
-                            break;
-                        }
+                    {
+                        EditorGUILayout.PropertyField(serialized.probeSettings.realtimeMode);
+                        if ((ProbeSettings.ProbeType)serialized.probeSettings.type.intValue == ProbeSettings.ProbeType.ReflectionProbe)
+                            EditorGUILayout.PropertyField(serialized.probeSettings.timeSlicing, k_TimeSlicingContent);
+                        break;
+                    }
                     case ProbeSettings.Mode.Custom:
+                    {
+                        Rect lineRect = EditorGUILayout.GetControlRect(true, 64);
+                        EditorGUI.BeginProperty(lineRect, k_CustomTextureContent, serialized.customTexture);
                         {
-                            Rect lineRect = EditorGUILayout.GetControlRect(true, 64);
-                            EditorGUI.BeginProperty(lineRect, k_CustomTextureContent, serialized.customTexture);
-                            {
-                                EditorGUI.BeginChangeCheck();
-                                var customTexture = EditorGUI.ObjectField(lineRect, k_CustomTextureContent, serialized.customTexture.objectReferenceValue, provider.customTextureType, false);
-                                if (EditorGUI.EndChangeCheck())
-                                    serialized.customTexture.objectReferenceValue = customTexture;
-                            }
-                            EditorGUI.EndProperty();
-                            break;
+                            EditorGUI.BeginChangeCheck();
+                            var customTexture = EditorGUI.ObjectField(lineRect, k_CustomTextureContent, serialized.customTexture.objectReferenceValue, provider.customTextureType, false);
+                            if (EditorGUI.EndChangeCheck())
+                                serialized.customTexture.objectReferenceValue = customTexture;
                         }
+                        EditorGUI.EndProperty();
+                        break;
+                    }
                 }
             }
 
@@ -219,7 +94,7 @@ namespace UnityEditor.Rendering.HighDefinition
                 ProbeSettingsUI.Draw(serialized.probeSettings, owner, provider.displayedCaptureSettings);
             }
 
-            public static void DrawAdvancedCaptureSettings(SerializedHDProbe serialized, Editor owner)
+            public static void DrawCaptureSettingsAdditionalProperties(SerializedHDProbe serialized, Editor owner)
             {
                 var provider = new TProvider();
                 ProbeSettingsUI.Draw(serialized.probeSettings, owner, provider.displayedAdvancedCaptureSettings);
@@ -257,15 +132,15 @@ namespace UnityEditor.Rendering.HighDefinition
                             k_ProxyInfluenceShapeMismatchHelpBoxText,
                             MessageType.Error,
                             true
-                            );
+                        );
                 }
                 else
                 {
                     EditorGUILayout.HelpBox(
-                            serialized.probeSettings.proxyUseInfluenceVolumeAsProxyVolume.boolValue ? k_NoProxyHelpBoxText : k_NoProxyInfiniteHelpBoxText,
-                            MessageType.Info,
-                            true
-                            );
+                        serialized.probeSettings.proxyUseInfluenceVolumeAsProxyVolume.boolValue ? k_NoProxyHelpBoxText : k_NoProxyInfiniteHelpBoxText,
+                        MessageType.Info,
+                        true
+                    );
                 }
 
                 // Don't display distanceBasedRoughness if the projection is infinite (as in this case we force distanceBasedRoughness to be 0 in code)
@@ -287,11 +162,22 @@ namespace UnityEditor.Rendering.HighDefinition
                     return;
                 }
 
+
+                //Display a warning for the user if we are not in the quality setting with the highest resolution setting for reflection probes
+                if (!IsHighestSettingForCubeResolution())
+                {
+                    EditorGUILayout.HelpBox(
+                        "You are currently not in the highest quality setting, if you bake now the reflection probe resolution will be lower than it should be for higher quality levels.",
+                        MessageType.Warning);
+                }
+
                 // Check if current mode support baking
                 var mode = (ProbeSettings.Mode)serialized.probeSettings.mode.intValue;
                 var doesModeSupportBaking = mode == ProbeSettings.Mode.Custom || mode == ProbeSettings.Mode.Baked;
                 if (!doesModeSupportBaking)
                     return;
+
+                var probeType = (ProbeSettings.ProbeType)serialized.probeSettings.type.intValue;
 
                 // Check if all scene are saved to a file (requirement to bake probes)
                 foreach (var target in serialized.serializedObject.targetObjects)
@@ -313,37 +199,53 @@ namespace UnityEditor.Rendering.HighDefinition
                 switch (mode)
                 {
                     case ProbeSettings.Mode.Custom:
+                    {
+                        if (serialized.target.IsTurnedOff())
+                        {
+                            EditorGUILayout.HelpBox("The Resolution of this Probe has been set to Off, it therefore cannot be baked", MessageType.Info);
+                        }
+                        else
                         {
                             if (ButtonWithDropdownList(
-                                EditorGUIUtility.TrTextContent(
-                                    "Bake", "Bakes Probe's texture, overwriting the existing texture asset (if any)."
-                                ),
-                                k_BakeCustomOptionText,
-                                data =>
-                                {
-                                    switch ((int)data)
+                                    EditorGUIUtility.TrTextContent(
+                                        "Bake",
+                                        "Bakes Probe's texture, overwriting the existing texture asset (if any)."
+                                    ),
+                                    k_BakeCustomOptionText,
+                                    data =>
                                     {
-                                        case 0:
-                                            RenderInCustomAsset(serialized.target, false);
-                                            break;
-                                    }
-                                }))
+                                        switch ((int)data)
+                                        {
+                                            case 0:
+                                                RenderInCustomAsset(serialized.target, false);
+                                                break;
+                                        }
+                                    }))
                             {
                                 RenderInCustomAsset(serialized.target, true);
                             }
+                        }
+
+                        break;
+                    }
+                    case ProbeSettings.Mode.Baked:
+                    {
+#pragma warning disable 618
+                        if (UnityEditor.Lightmapping.giWorkflowMode
+                            != UnityEditor.Lightmapping.GIWorkflowMode.OnDemand)
+                        {
+                            EditorGUILayout.HelpBox("Baking of this probe is automatic because this probe's type is 'Baked' and the Lighting window is using 'Auto Baking'. The texture created is stored in the GI cache.", MessageType.Info);
                             break;
                         }
-                    case ProbeSettings.Mode.Baked:
-                        {
-#pragma warning disable 618
-                            if (UnityEditor.Lightmapping.giWorkflowMode
-                                != UnityEditor.Lightmapping.GIWorkflowMode.OnDemand)
-                            {
-                                EditorGUILayout.HelpBox("Baking of this probe is automatic because this probe's type is 'Baked' and the Lighting window is using 'Auto Baking'. The texture created is stored in the GI cache.", MessageType.Info);
-                                break;
-                            }
 #pragma warning restore 618
-                            GUI.enabled = serialized.target.enabled;
+                        GUI.enabled = serialized.target.enabled;
+
+                        if (serialized.target.IsTurnedOff())
+                        {
+                            EditorGUILayout.HelpBox("The Resolution of this Probe has been set to Off, it therefore cannot be baked", MessageType.Info);
+                        }
+                        else
+                        {
 
                             // Bake button in non-continous mode
                             if (ButtonWithDropdownList(
@@ -359,17 +261,70 @@ namespace UnityEditor.Rendering.HighDefinition
                                     },
                                     GUILayout.ExpandWidth(true)))
                             {
-                                HDBakedReflectionSystem.BakeProbes(serialized.serializedObject.targetObjects.OfType<HDProbe>().ToArray());
-                                GUIUtility.ExitGUI();
+                                if (HDBakedReflectionSystem.AreAllOpenedSceneSaved())
+                                {
+                                    HDBakedReflectionSystem.BakeProbes(serialized.serializedObject.targetObjects
+                                    .OfType<HDProbe>().ToArray());
+                                    GUIUtility.ExitGUI();
+                                }
+                                else
+                                {
+                                    Debug.LogError($"Opened scenes are not saved. Please save before baking.");
+                                }
                             }
 
                             GUI.enabled = true;
-                            break;
+
+                            var staticLightingSky = SkyManager.GetStaticLightingSky();
+                            if (staticLightingSky != null && staticLightingSky.profile != null)
+                            {
+                                var skyType = staticLightingSky.staticLightingSkyUniqueID == 0
+                                    ? "no Sky"
+                                    : SkyManager.skyTypesDict[staticLightingSky.staticLightingSkyUniqueID].Name
+                                        .ToString();
+                                var cloudType = staticLightingSky.staticLightingCloudsUniqueID == 0
+                                    ? "no Clouds"
+                                    : SkyManager.cloudTypesDict[staticLightingSky.staticLightingCloudsUniqueID].Name
+                                        .ToString();
+                                EditorGUILayout.HelpBox(
+                                    $"Static Lighting Sky uses {skyType} and {cloudType} of profile {staticLightingSky.profile.name}.",
+                                    MessageType.Info);
+                            }
                         }
+
+                        break;
+                    }
                     case ProbeSettings.Mode.Realtime:
                         break;
                     default: throw new ArgumentOutOfRangeException();
                 }
+            }
+
+            public static void DrawSHNormalizationStatus(SerializedHDProbe serialized, Editor owner)
+            {
+                if (HDRenderPipeline.currentAsset.currentPlatformRenderPipelineSettings.lightProbeSystem != RenderPipelineSettings.LightProbeSystem.AdaptiveProbeVolumes)
+                    return;
+
+                const string kResolution = " Please ensure that probe positions are valid (not inside static geometry) then bake lighting to regenerate data.";
+                const string kMixedMode = "Unable to show normalization data validity when selecting probes with different modes.";
+                const string kMixedValidity = "Baked reflection probe normalization data is partially invalid." + kResolution;
+                const string kValid = "Baked reflection probe normalization data is valid.";
+                const string kInvalid = "Baked reflection probe normalization data is invalid." + kResolution;
+
+                var spMode = serialized.serializedObject.FindProperty("m_ProbeSettings.mode");
+                var spValid = serialized.serializedObject.FindProperty("m_HasValidSHForNormalization");
+
+                if (spMode.intValue != (int)ProbeSettings.Mode.Baked)
+                    return;
+
+                EditorGUILayout.Space();
+
+                if (spMode.hasMultipleDifferentValues)
+                    EditorGUILayout.HelpBox(kMixedMode, MessageType.Info);
+                else if (spValid.hasMultipleDifferentValues)
+                    EditorGUILayout.HelpBox(kMixedValidity, MessageType.Warning);
+                else
+                    EditorGUILayout.HelpBox(spValid.boolValue ? kValid : kInvalid, spValid.boolValue ? MessageType.Info : MessageType.Warning);
             }
 
             static MethodInfo k_EditorGUI_ButtonWithDropdownList = typeof(EditorGUI).GetMethod("ButtonWithDropdownList", BindingFlags.Static | BindingFlags.NonPublic, null, CallingConventions.Any, new[] { typeof(GUIContent), typeof(string[]), typeof(GenericMenu.MenuFunction2), typeof(GUILayoutOption[]) }, new ParameterModifier[0]);
@@ -400,9 +355,8 @@ namespace UnityEditor.Rendering.HighDefinition
                         probe, ProbeSettings.Mode.Custom
                     );
 
-
                     HDBakedReflectionSystem.RenderAndWriteToFile(
-                        probe, assetPath, target, null,
+                        probe, assetPath, target,
                         out var cameraSettings, out var cameraPositionSettings
                     );
                     AssetDatabase.ImportAsset(assetPath);
@@ -428,14 +382,140 @@ namespace UnityEditor.Rendering.HighDefinition
                     k_ProxyInfluenceShapeMismatchHelpBoxText,
                     MessageType.Error,
                     true
-                    );
+                );
             }
         }
 
-        static internal void Drawer_ToolBarButton(
-            ToolBar button, Editor owner,
-            params GUILayoutOption[] options
-        )
-            => HDEditorUtils.DrawToolBarButton(button, owner, k_ToolbarMode, k_ToolbarContents, options);
+        static internal bool IsHighestSettingForCubeResolution()
+        {
+            HDRenderPipelineAsset currentAsset = (QualitySettings.renderPipeline as HDRenderPipelineAsset);
+
+            if(currentAsset == null)
+            {
+                return true;
+            }
+
+            CubeReflectionResolution highestTierInCurrent = GetHighestCubemapResolutionSetting(currentAsset.currentPlatformRenderPipelineSettings);
+            CubeReflectionResolution highestResolution = highestTierInCurrent;
+
+            //Iterate over every quality setting to check their settings for the cubemap resolution
+            for (int i = 0; i < QualitySettings.count; ++i)
+            {
+                var asset = QualitySettings.GetRenderPipelineAssetAt(i) as HDRenderPipelineAsset;
+                if (asset != null)
+                {
+                    //Iterate through reflection cube map quality tiers
+                    CubeReflectionResolution highestInTier = GetHighestCubemapResolutionSetting(asset.currentPlatformRenderPipelineSettings);
+
+                    if (highestInTier > highestResolution)
+                    {
+                        highestResolution = highestInTier;
+                    }
+                }
+            }
+
+            return highestResolution == highestTierInCurrent;
+        }
+
+        //Iterating over every CubeReflectionResolutionTier for a certain RenderPipelineSetting and return the highest value found
+        static internal CubeReflectionResolution GetHighestCubemapResolutionSetting(RenderPipelineSettings settings)
+        {
+            CubeReflectionResolution highestTierInCurrent = CubeReflectionResolution.CubeReflectionResolution0;
+
+            //Iterate through reflection cube map quality tiers, hardcoded to 3 tiers as they are always low, medium and high and there
+            //doesnt seem to be a better way to iterate over ScalableSettings
+            for (int i = 0; i < 3; i++)
+            {
+                var res = settings.cubeReflectionResolution[i];
+                if(res > highestTierInCurrent)
+                {
+                    highestTierInCurrent = res;
+                }
+            }
+
+            return highestTierInCurrent;
+        }
     }
+
+    [EditorTool(Description, typeof(PlanarReflectionProbe), toolPriority = (int)Mode)]
+    internal class PlanarReflectionProbeModifyBaseShapeTool : GenericEditorTool<PlanarReflectionProbe>
+    {
+        private const string Description = "Modify the base shape.";
+        private const EditMode.SceneViewEditMode Mode = HDProbeUI.EditBaseShape;
+        private const string IconName = "EditShape";
+
+        public PlanarReflectionProbeModifyBaseShapeTool() : base(Description, Mode, IconName) { }
+    }
+
+    [EditorTool(Description, typeof(PlanarReflectionProbe), toolPriority = (int)Mode)]
+    internal class PlanarReflectionProbeModifyMirrorPositionTool : GenericEditorTool<PlanarReflectionProbe>
+    {
+        private const string Description = "Change the mirror position.";
+        private const EditMode.SceneViewEditMode Mode = HDProbeUI.EditMirrorPosition;
+        private const string IconName = "MoveTool";
+
+        public PlanarReflectionProbeModifyMirrorPositionTool() : base(Description, Mode, IconName) { }
+    }
+
+    [EditorTool(Description, typeof(PlanarReflectionProbe), toolPriority = (int)Mode)]
+    internal class PlanarReflectionProbeModifyMirrorRotationTool : GenericEditorTool<PlanarReflectionProbe>
+    {
+        private const string Description = "Change the mirror rotation.";
+        private const EditMode.SceneViewEditMode Mode = HDProbeUI.EditMirrorRotation;
+        private const string IconName = "RotateTool";
+
+        public PlanarReflectionProbeModifyMirrorRotationTool() : base(Description, Mode, IconName) { }
+    }
+
+    [EditorTool(Description, typeof(PlanarReflectionProbe), toolPriority = (int)Mode)]
+    internal class PlanarReflectionProbeModifyEditInfluenceShapeTool : GenericEditorTool<PlanarReflectionProbe>
+    {
+        private const string Description = "Modify the influence volume blend distance.";
+        private const EditMode.SceneViewEditMode Mode = HDProbeUI.EditInfluenceShape;
+        private const string IconName = "BlendDistance";
+
+        public PlanarReflectionProbeModifyEditInfluenceShapeTool() : base(Description, Mode, IconName) { }
+    }
+
+    [EditorTool(Description, typeof(ReflectionProbe), toolPriority = (int)Mode)]
+    internal class ReflectionProbeModifyBaseShapeTool : GenericEditorTool<ReflectionProbe>
+    {
+        private const string Description = "Modify the base shape.";
+        private const EditMode.SceneViewEditMode Mode = HDProbeUI.EditBaseShape;
+        private const string IconName = "EditShape";
+
+        public ReflectionProbeModifyBaseShapeTool() : base(Description, Mode, IconName) {}
+    }
+
+    [EditorTool(Description, typeof(ReflectionProbe), toolPriority = (int)Mode)]
+    internal class ReflectionProbeModifyEditInfluenceShapeTool : GenericEditorTool<ReflectionProbe>
+    {
+        private const string Description = "Modify the influence volume blend distance.";
+        private const EditMode.SceneViewEditMode Mode = HDProbeUI.EditInfluenceShape;
+        private const string IconName = "BlendDistance";
+
+        public ReflectionProbeModifyEditInfluenceShapeTool() : base(Description, Mode, IconName) { }
+    }
+
+    [EditorTool(Description, typeof(ReflectionProbe), toolPriority = (int)Mode)]
+    internal class ReflectionProbeModifyInfluenceNormalShapeTool : GenericEditorTool<ReflectionProbe>
+    {
+        private const string Description = "Modify the influence volume normal blend distance.";
+        private const EditMode.SceneViewEditMode Mode = HDProbeUI.EditInfluenceNormalShape;
+        private const string IconName = "NormalBlendDistance";
+
+        public ReflectionProbeModifyInfluenceNormalShapeTool() : base(Description, Mode, IconName) { }
+    }
+
+    [EditorTool(Description, typeof(ReflectionProbe), toolPriority = (int)Mode)]
+    internal class ReflectionProbeModifyCapturePositionTool : GenericEditorTool<ReflectionProbe>
+    {
+        private const string Description = "Change the capture position.";
+        private const EditMode.SceneViewEditMode Mode = HDProbeUI.EditCapturePosition;
+        private const string IconName = "CapturePosition";
+
+        protected ReflectionProbeModifyCapturePositionTool() : base(Description, Mode, IconName) { }
+    }
+
+   
 }

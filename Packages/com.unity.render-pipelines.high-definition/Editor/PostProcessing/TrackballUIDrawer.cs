@@ -1,6 +1,7 @@
 using System;
-using UnityEditor.Rendering;
+using JetBrains.Annotations;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
@@ -11,32 +12,35 @@ namespace UnityEditor.Rendering.HighDefinition
         static GUIStyle s_WheelThumb;
         static Vector2 s_WheelThumbSize;
         static Material s_Material;
+        static bool s_MaterialConfigured;
 
         Func<Vector4, Vector3> m_ComputeFunc;
         bool m_ResetState;
         Vector2 m_CursorPos;
 
-        static TrackballUIDrawer()
-        {
-            if (s_Material == null)
-                s_Material = new Material(Shader.Find("Hidden/HD PostProcessing/Editor/Trackball")) { hideFlags = HideFlags.HideAndDontSave };
-        }
-
-        public void OnGUI(SerializedProperty property, SerializedProperty overrideState, GUIContent title, Func<Vector4, Vector3> computeFunc)
+        public void OnGUI(SerializedProperty property, [CanBeNull] SerializedProperty overrideState, GUIContent title, Func<Vector4, Vector3> computeFunc)
         {
             if (property.propertyType != SerializedPropertyType.Vector4)
             {
                 Debug.LogWarning("TrackballUIDrawer requires a Vector4 property");
                 return;
             }
-            
+
+            if (!s_MaterialConfigured)
+            {
+                // Initialization of materials with Shader.Find from static constructors is not allowed.
+                s_Material = new Material(Shader.Find("Hidden/HD PostProcessing/Editor/Trackball")) { hideFlags = HideFlags.HideAndDontSave };
+                s_MaterialConfigured = true;
+            }
+
             m_ComputeFunc = computeFunc;
             var value = property.vector4Value;
 
             using (new EditorGUILayout.VerticalScope())
             {
-                using (new EditorGUI.DisabledScope(!overrideState.boolValue))
-                    DrawWheel(ref value, overrideState.boolValue);
+                bool isOverridden = overrideState?.boolValue ?? true;
+                using (new EditorGUI.DisabledScope(!isOverridden))
+                    DrawWheel(ref value, isOverridden);
 
                 DrawLabelAndOverride(title, overrideState);
             }
@@ -86,7 +90,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
                 // Wheel texture
                 var oldRT = RenderTexture.active;
-                var rt = RenderTexture.GetTemporary((int)(size * scale), (int)(size * scale), 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                var rt = RenderTexture.GetTemporary((int)(size * scale), (int)(size * scale), 0, GraphicsFormat.R8G8B8A8_SRGB);
                 s_Material.SetFloat("_Offset", offset);
                 s_Material.SetFloat("_DisabledState", overrideState && GUI.enabled ? 1f : 0.5f);
                 s_Material.SetVector("_Resolution", new Vector2(size * scale, size * scale / 2f));
@@ -159,7 +163,7 @@ namespace UnityEditor.Rendering.HighDefinition
             {
                 var valuesRect = GUILayoutUtility.GetRect(1f, 17f);
                 valuesRect.width /= (displayInputFields ? 4f : 3.0f);
-                if(displayInputFields)
+                if (displayInputFields)
                 {
                     GUI.Label(valuesRect, "RGB Value:", EditorStyles.centeredGreyMiniLabel);
                     valuesRect.x += valuesRect.width;
@@ -182,8 +186,13 @@ namespace UnityEditor.Rendering.HighDefinition
             GUI.Label(labelRect, title, EditorStyles.miniLabel);
 
             // Override checkbox
-            var overrideRect = new Rect(labelRect.x - 17, labelRect.y + 3, 17f, 17f);
-            overrideState.boolValue = GUI.Toggle(overrideRect, overrideState.boolValue, EditorGUIUtility.TrTextContent("", "Override this setting for this volume."), CoreEditorStyles.smallTickbox);
+            if (overrideState != null)
+            {
+                var overrideRect = new Rect(labelRect.x - 17, labelRect.y + 3, 17f, 17f);
+                overrideState.boolValue = GUI.Toggle(overrideRect, overrideState.boolValue,
+                    EditorGUIUtility.TrTextContent("", "Override this setting for this volume."),
+                    CoreEditorStyles.smallTickbox);
+            }
         }
 
         Vector3 GetInput(Rect bounds, Vector3 hsv, Vector2 thumbPos, float radius)

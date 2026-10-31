@@ -10,6 +10,7 @@ using UnityEngine.Rendering;
 using UnityEditor.Rendering.HighDefinition.ShaderGraph;
 using UnityEditor.ShaderGraph.Legacy;
 using ShaderPass = UnityEditor.ShaderGraph.PassDescriptor;
+using DoubleSidedGIMode = UnityEngine.Rendering.HighDefinition.DoubleSidedGIMode;
 
 // Include material common properties names
 using static UnityEngine.Rendering.HighDefinition.HDMaterialProperties;
@@ -21,6 +22,7 @@ namespace UnityEditor.Rendering.HighDefinition
         HDLitShader,    // For Lit, LayeredLit, LitTesselation, LayeredLitTesselation
         HDUnlitShader,  // Unlit
         Opaque,         // Used by Terrain
+        HDFogVolumeShader,  // Fog Volume ShaderGraphs
     }
 
     static class HDSubShaderUtilities
@@ -28,7 +30,8 @@ namespace UnityEditor.Rendering.HighDefinition
         // Utils property to add properties to the collector, all hidden because we use a custom UI to display them
         static void AddIntProperty(this PropertyCollector collector, string referenceName, int defaultValue, HLSLDeclaration declarationType = HLSLDeclaration.DoNotDeclare)
         {
-            collector.AddShaderProperty(new Vector1ShaderProperty{
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
                 floatType = FloatType.Integer,
                 value = defaultValue,
                 hidden = true,
@@ -40,7 +43,8 @@ namespace UnityEditor.Rendering.HighDefinition
 
         static void AddFloatProperty(this PropertyCollector collector, string referenceName, float defaultValue, HLSLDeclaration declarationType = HLSLDeclaration.DoNotDeclare)
         {
-            collector.AddShaderProperty(new Vector1ShaderProperty{
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
                 floatType = FloatType.Default,
                 hidden = true,
                 overrideHLSLDeclaration = true,
@@ -52,8 +56,24 @@ namespace UnityEditor.Rendering.HighDefinition
 
         static void AddFloatProperty(this PropertyCollector collector, string referenceName, string displayName, float defaultValue, HLSLDeclaration declarationType = HLSLDeclaration.DoNotDeclare)
         {
-            collector.AddShaderProperty(new Vector1ShaderProperty{
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
                 floatType = FloatType.Default,
+                value = defaultValue,
+                overrideReferenceName = referenceName,
+                hidden = true,
+                overrideHLSLDeclaration = true,
+                hlslDeclarationOverride = declarationType,
+                displayName = displayName,
+            });
+        }
+
+        static void AddSliderProperty(this PropertyCollector collector, string referenceName, string displayName, float defaultValue, Vector2 range, HLSLDeclaration declarationType = HLSLDeclaration.DoNotDeclare)
+        {
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
+                floatType = FloatType.Slider,
+                rangeValues = range,
                 value = defaultValue,
                 overrideReferenceName = referenceName,
                 hidden = true,
@@ -65,7 +85,8 @@ namespace UnityEditor.Rendering.HighDefinition
 
         static void AddToggleProperty(this PropertyCollector collector, string referenceName, bool defaultValue, HLSLDeclaration declarationType = HLSLDeclaration.DoNotDeclare)
         {
-            collector.AddShaderProperty(new BooleanShaderProperty{
+            collector.AddShaderProperty(new BooleanShaderProperty
+            {
                 value = defaultValue,
                 hidden = true,
                 overrideHLSLDeclaration = true,
@@ -74,7 +95,7 @@ namespace UnityEditor.Rendering.HighDefinition
             });
         }
 
-        public static void AddStencilShaderProperties(PropertyCollector collector, SystemData systemData, LightingData lightingData, bool splitLighting)
+        public static void AddStencilShaderProperties(PropertyCollector collector, SystemData systemData, LightingData lightingData, bool splitLighting, bool receivesLighting, bool forwardOnly)
         {
             bool ssrStencil = false;
 
@@ -99,11 +120,25 @@ namespace UnityEditor.Rendering.HighDefinition
                 collector.AddToggleProperty(kEnableBlendModePreserveSpecularLighting, false, HLSLDeclaration.UnityPerMaterial);
             }
 
+            bool excludeFromTUAndAA = systemData?.excludeFromTUAndAA ?? false;
+            collector.AddToggleProperty(kExcludeFromTUAndAA, excludeFromTUAndAA);
+
             // Configure render state
-            BaseLitGUI.ComputeStencilProperties(ssrStencil, splitLighting, out int stencilRef, out int stencilWriteMask,
-                out int stencilRefDepth, out int stencilWriteMaskDepth, out int stencilRefGBuffer, out int stencilWriteMaskGBuffer,
-                out int stencilRefMV, out int stencilWriteMaskMV
-            );
+            BaseLitAPI.ComputeStencilProperties(
+                receivesLighting,
+                forwardOnly,
+                ssrStencil,
+                splitLighting,
+                false,
+                excludeFromTUAndAA,
+                out int stencilRef,
+                out int stencilWriteMask,
+                out int stencilRefDepth,
+                out int stencilWriteMaskDepth,
+                out int stencilRefGBuffer,
+                out int stencilWriteMaskGBuffer,
+                out int stencilRefMV,
+                out int stencilWriteMaskMV);
 
             // All these properties values will be patched with the material keyword update
             collector.AddIntProperty("_StencilRef", stencilRef);
@@ -118,44 +153,48 @@ namespace UnityEditor.Rendering.HighDefinition
             collector.AddIntProperty("_StencilRefDistortionVec", (int)StencilUsage.DistortionVectors);
             collector.AddIntProperty("_StencilWriteMaskDistortionVec", (int)StencilUsage.DistortionVectors);
             // Gbuffer
-            collector.AddIntProperty("_StencilWriteMaskGBuffer", stencilWriteMaskGBuffer);
-            collector.AddIntProperty("_StencilRefGBuffer", stencilRefGBuffer);
-            collector.AddIntProperty("_ZTestGBuffer", 4);
+            if (!forwardOnly)
+            {
+                collector.AddIntProperty(kStencilWriteMaskGBuffer, stencilWriteMaskGBuffer);
+                collector.AddIntProperty(kStencilRefGBuffer, stencilRefGBuffer);
+                collector.AddIntProperty(kZTestGBuffer, 4);
+            }
         }
 
         public static void AddBlendingStatesShaderProperties(
-            PropertyCollector collector, SurfaceType surface, BlendMode blend, int sortingPriority,
-            bool alphaToMask, bool transparentZWrite, TransparentCullMode transparentCullMode,
+            PropertyCollector collector, SurfaceType surface, BlendingMode blending, int sortingPriority,
+            bool transparentZWrite, TransparentCullMode transparentCullMode,
             OpaqueCullMode opaqueCullMode, CompareFunction zTest,
-            bool backThenFrontRendering, bool fogOnTransparent)
+            bool backThenFrontRendering, bool fogOnTransparent, HDRenderQueue.RenderQueueType renderQueueType)
         {
             collector.AddFloatProperty("_SurfaceType", (int)surface);
-            collector.AddFloatProperty("_BlendMode", (int)blend, HLSLDeclaration.UnityPerMaterial);
+            collector.AddFloatProperty("_BlendMode", (int)blending, HLSLDeclaration.UnityPerMaterial);
 
             // All these properties values will be patched with the material keyword update
             collector.AddFloatProperty("_SrcBlend", 1.0f);
             collector.AddFloatProperty("_DstBlend", 0.0f);
+            collector.AddFloatProperty("_DstBlend2", 0.0f);
             collector.AddFloatProperty("_AlphaSrcBlend", 1.0f);
             collector.AddFloatProperty("_AlphaDstBlend", 0.0f);
-            collector.AddToggleProperty("_AlphaToMask", alphaToMask);
-            collector.AddToggleProperty("_AlphaToMaskInspectorValue", alphaToMask);
             collector.AddToggleProperty(kZWrite, (surface == SurfaceType.Transparent) ? transparentZWrite : true);
             collector.AddToggleProperty(kTransparentZWrite, transparentZWrite);
             collector.AddFloatProperty("_CullMode", (int)CullMode.Back);
             collector.AddIntProperty(kTransparentSortPriority, sortingPriority);
             collector.AddToggleProperty(kEnableFogOnTransparent, fogOnTransparent);
             collector.AddFloatProperty("_CullModeForward", (int)CullMode.Back);
-            collector.AddShaderProperty(new Vector1ShaderProperty{
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
                 overrideReferenceName = kTransparentCullMode,
                 floatType = FloatType.Enum,
                 value = (int)transparentCullMode,
-                enumNames = {"Front", "Back"},
-                enumValues = {(int)TransparentCullMode.Front, (int)TransparentCullMode.Back},
+                enumNames = { "Front", "Back" },
+                enumValues = { (int)TransparentCullMode.Front, (int)TransparentCullMode.Back },
                 hidden = true,
                 overrideHLSLDeclaration = true,
                 hlslDeclarationOverride = HLSLDeclaration.DoNotDeclare,
             });
-            collector.AddShaderProperty(new Vector1ShaderProperty{
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
                 overrideReferenceName = kOpaqueCullMode,
                 floatType = FloatType.Enum,
                 value = (int)opaqueCullMode,
@@ -166,9 +205,21 @@ namespace UnityEditor.Rendering.HighDefinition
                 hlslDeclarationOverride = HLSLDeclaration.DoNotDeclare,
             });
 
-            // Add ZTest properties:
-            collector.AddIntProperty("_ZTestDepthEqualForOpaque", (int)CompareFunction.LessEqual);
-            collector.AddShaderProperty(new Vector1ShaderProperty{
+            // Add ZTest properties (keep in sync with BaseUnlitAPI opaque ztest setup):
+            if (surface == SurfaceType.Opaque)
+            {
+                if (HDRenderQueue.GetOpaqueEquivalent(renderQueueType) == HDRenderQueue.RenderQueueType.AfterPostProcessOpaque)
+                    collector.AddIntProperty("_ZTestDepthEqualForOpaque", (int)CompareFunction.LessEqual);
+                else
+                    collector.AddIntProperty("_ZTestDepthEqualForOpaque", (int)CompareFunction.Equal);
+            }
+            else
+            {
+                collector.AddIntProperty("_ZTestDepthEqualForOpaque", (int)zTest);
+            }
+
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
                 overrideReferenceName = kZTestTransparent,
                 floatType = FloatType.Enum,
                 value = (int)zTest,
@@ -182,6 +233,30 @@ namespace UnityEditor.Rendering.HighDefinition
             collector.AddToggleProperty(kTransparentBackfaceEnable, backThenFrontRendering);
         }
 
+        public static void AddTessellationShaderProperties(PropertyCollector collector, TessellationMode tessellationMode,
+            float tessellationFactorMinDistance, float tessellationFactorMaxDistance, float tessellationFactorTriangleSize,
+            float tessellationShapeFactor, float tessellationBackFaceCullEpsilon, float tessellationMaxDisplacement)
+        {
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
+                overrideReferenceName = kTessellationMode,
+                floatType = FloatType.Enum,
+                value = (int)tessellationMode,
+                enumNames = { "None", "Phong" },
+                enumValues = { (int)TessellationMode.None, (int)TessellationMode.Phong },
+                hidden = true,
+                overrideHLSLDeclaration = true,
+                hlslDeclarationOverride = HLSLDeclaration.DoNotDeclare,
+            });
+
+            collector.AddFloatProperty(kTessellationFactorMinDistance, tessellationFactorMinDistance, HLSLDeclaration.UnityPerMaterial);
+            collector.AddFloatProperty(kTessellationFactorMaxDistance, tessellationFactorMaxDistance, HLSLDeclaration.UnityPerMaterial);
+            collector.AddFloatProperty(kTessellationFactorTriangleSize, tessellationFactorTriangleSize, HLSLDeclaration.UnityPerMaterial);
+            collector.AddSliderProperty(kTessellationShapeFactor, "Tessellation shape factor", tessellationShapeFactor, new Vector2(0.0f, 1.0f), HLSLDeclaration.UnityPerMaterial);
+            collector.AddSliderProperty(kTessellationBackFaceCullEpsilon, "Tessellation back face epsilon", tessellationBackFaceCullEpsilon, new Vector2(-1.0f, 0.0f), HLSLDeclaration.UnityPerMaterial);
+            collector.AddFloatProperty(kTessellationMaxDisplacement, tessellationMaxDisplacement, HLSLDeclaration.UnityPerMaterial);
+        }
+
         public static void AddAlphaCutoffShaderProperties(PropertyCollector collector, bool alphaCutoff, bool shadowThreshold)
         {
             collector.AddToggleProperty("_AlphaCutoffEnable", alphaCutoff);
@@ -189,12 +264,13 @@ namespace UnityEditor.Rendering.HighDefinition
             collector.AddToggleProperty("_UseShadowThreshold", shadowThreshold, HLSLDeclaration.UnityPerMaterial);
         }
 
-        public static void AddDoubleSidedProperty(PropertyCollector collector, DoubleSidedMode mode = DoubleSidedMode.Enabled)
+        public static void AddDoubleSidedProperty(PropertyCollector collector, DoubleSidedMode mode = DoubleSidedMode.Enabled, DoubleSidedGIMode giMode = DoubleSidedGIMode.Auto)
         {
             var normalMode = ConvertDoubleSidedModeToDoubleSidedNormalMode(mode);
             collector.AddToggleProperty("_DoubleSidedEnable", mode != DoubleSidedMode.Disabled);
-            collector.AddShaderProperty(new Vector1ShaderProperty{
-                enumNames = {"Flip", "Mirror", "None"}, // values will be 0, 1 and 2
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
+                enumNames = { "Flip", "Mirror", "None" }, // values will be 0, 1 and 2
                 floatType = FloatType.Enum,
                 overrideReferenceName = "_DoubleSidedNormalMode",
                 hidden = true,
@@ -202,12 +278,23 @@ namespace UnityEditor.Rendering.HighDefinition
                 hlslDeclarationOverride = HLSLDeclaration.DoNotDeclare,
                 value = (int)normalMode
             });
-            collector.AddShaderProperty(new Vector4ShaderProperty{
+            collector.AddShaderProperty(new Vector4ShaderProperty
+            {
                 overrideReferenceName = "_DoubleSidedConstants",
                 hidden = true,
                 overrideHLSLDeclaration = true,
                 hlslDeclarationOverride = HLSLDeclaration.UnityPerMaterial,
                 value = new Vector4(1, 1, -1, 0)
+            });
+            collector.AddShaderProperty(new Vector1ShaderProperty
+            {
+                enumNames = { "Auto", "On", "Off" }, // values will be 0, 1 and 2
+                floatType = FloatType.Enum,
+                overrideReferenceName = "_DoubleSidedGIMode",
+                hidden = true,
+                overrideHLSLDeclaration = true,
+                hlslDeclarationOverride = HLSLDeclaration.DoNotDeclare,
+                value = (int)giMode
             });
         }
 
@@ -215,7 +302,7 @@ namespace UnityEditor.Rendering.HighDefinition
         {
             collector.AddToggleProperty("_RayTracing", isRayTracing, HLSLDeclaration.UnityPerMaterial);
         }
-        
+
         public static void AddPrePostPassProperties(PropertyCollector collector, bool prepass, bool postpass)
         {
             collector.AddToggleProperty(kTransparentDepthPrepassEnable, prepass);
@@ -268,10 +355,7 @@ namespace UnityEditor.Rendering.HighDefinition
 
         public static bool IsValidRenderingPassValue(HDRenderQueue.RenderQueueType value, bool needAfterPostProcess)
         {
-            if (!needAfterPostProcess && (value == HDRenderQueue.RenderQueueType.AfterPostProcessOpaque || value == HDRenderQueue.RenderQueueType.AfterPostprocessTransparent))
-                return false;
-
-            return true;
+            return needAfterPostProcess || (value != HDRenderQueue.RenderQueueType.AfterPostProcessOpaque && value != HDRenderQueue.RenderQueueType.AfterPostprocessTransparent);
         }
 
         public static bool UpgradeLegacyAlphaClip(IMasterNode1 masterNode)
@@ -279,25 +363,25 @@ namespace UnityEditor.Rendering.HighDefinition
             var clipThresholdId = 8;
             var node = masterNode as AbstractMaterialNode;
             var clipThresholdSlot = node.FindSlot<Vector1MaterialSlot>(clipThresholdId);
-            if(clipThresholdSlot == null)
+            if (clipThresholdSlot == null)
                 return false;
 
             clipThresholdSlot.owner = node;
             return (clipThresholdSlot.isConnected || clipThresholdSlot.value > 0.0f);
         }
 
-        public static BlendMode UpgradeLegacyAlphaModeToBlendMode(int alphaMode)
+        public static BlendingMode UpgradeLegacyAlphaModeToBlendMode(int alphaMode)
         {
             switch (alphaMode)
             {
                 case 0: //AlphaMode.Alpha:
-                    return BlendMode.Alpha;
+                    return BlendingMode.Alpha;
                 case 1: //AlphaMode.Premultiply:
-                    return BlendMode.Premultiply;
+                    return BlendingMode.Premultiply;
                 case 2: //AlphaMode.Additive:
-                    return BlendMode.Additive;
+                    return BlendingMode.Additive;
                 case 3: //AlphaMode.Multiply: // In case of multiply we fall back to Premultiply
-                    return BlendMode.Premultiply;
+                    return BlendingMode.Premultiply;
                 default:
                     throw new System.Exception("Unknown AlphaMode at index: " + alphaMode + ": can't convert to BlendMode.");
             }

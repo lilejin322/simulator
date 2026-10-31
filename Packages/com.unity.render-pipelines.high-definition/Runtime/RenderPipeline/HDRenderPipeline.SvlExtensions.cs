@@ -8,13 +8,13 @@
 namespace UnityEngine.Rendering.HighDefinition
 {
     using System;
-    using Experimental.Rendering.RenderGraphModule;
+    using RenderGraphModule;
 
     public partial class HDRenderPipeline
     {
         public struct GBufferRenderData
         {
-            public RenderGraphContext context;
+            public CommandBuffer cmd;
             public HDCamera camera;
             public RenderTargetIdentifier[] gBuffer;
             public RTHandle depthBuffer;
@@ -52,12 +52,15 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
-        public ref FrameSettings GetDefaultCameraFrameSettings() { return ref m_Asset.m_RenderingActiveCameraFrameSettings; }
+        public ref FrameSettings GetDefaultCameraFrameSettings()
+        {
+            return ref m_RenderingPathFrameSettings.GetActiveFrameSettings(FrameSettingsRenderType.Camera);
+        }
 
         /// <summary>
         /// <para>
         /// Event called after each shadow request rendering is done. State is set up to render to proper viewport
-        /// in shadow map. See <see cref="HDShadowAtlas.RenderShadows"/> for available GPU variables.
+        /// in shadow map. See <see cref="HDShadowAtlas.RenderShadowMaps"/> for available GPU variables.
         /// </para>
         /// <para>
         /// arg0 [CommandBuffer] - Buffer used for shadows rendering.<br/>
@@ -79,7 +82,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <summary>
         /// MSAA samples currently used by this render pipeline.
         /// </summary>
-        public MSAASamples MSAASamples => m_MSAASamples;
+        public MSAASamples MSAASamples => m_Asset ? m_Asset.currentPlatformRenderPipelineSettings.msaaSampleCount : MSAASamples.None;
 
         /// <summary>
         /// Marks current copy of depth buffer as invalid. Should be called after original depth buffer is modified.
@@ -98,10 +101,7 @@ namespace UnityEngine.Rendering.HighDefinition
         /// <param name="depthBuffer">Target depth buffer.</param>
         public void ForceRenderSky(HDCamera camera, CommandBuffer cmd, RTHandle colorBuffer, RTHandle depthBuffer)
         {
-            if (m_EnableRenderGraph)
-                m_SkyManager.RenderSky(camera, GetCurrentSunLight(), colorBuffer, depthBuffer, m_CurrentDebugDisplaySettings, cmd);
-            else
-                RenderSky(camera, cmd);
+            m_SkyManager.RenderSkyImmediate(camera, cmd, colorBuffer, depthBuffer);
         }
 
         /// <summary>
@@ -173,16 +173,24 @@ namespace UnityEngine.Rendering.HighDefinition
             OnRenderShadowMap?.Invoke(cmd, worldTexelSize);
         }
 
-        internal void InvokeGBufferRender(RenderGraphContext context, HDCamera camera, RenderTargetIdentifier[] gBuffer, RTHandle depthBuffer)
+        RenderTargetIdentifier[] m_GBufferRenderTargets;
+
+        internal void InvokeGBufferRender(CommandBuffer cmd, HDCamera camera, TextureHandle[] gBuffer, int gBufferCount, TextureHandle depthBuffer)
         {
             if (OnRenderGBuffer == null)
                 return;
 
+            if (m_GBufferRenderTargets == null || m_GBufferRenderTargets.Length != gBufferCount)
+                m_GBufferRenderTargets = new RenderTargetIdentifier[gBufferCount];
+
+            for (var i = 0; i < gBufferCount; ++i)
+                m_GBufferRenderTargets[i] = gBuffer[i];
+
             var data = new GBufferRenderData
             {
-                context = context,
+                cmd = cmd,
                 camera = camera,
-                gBuffer = gBuffer,
+                gBuffer = m_GBufferRenderTargets,
                 depthBuffer = depthBuffer,
                 customPassColorBuffer = m_CustomPassColorBuffer.Value,
                 customPassDepthBuffer = m_CustomPassDepthBuffer.Value

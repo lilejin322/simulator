@@ -5,12 +5,12 @@ using UnityEngine.Rendering.HighDefinition;
 namespace UnityEditor.ShaderGraph
 {
     [SRPFilter(typeof(HDRenderPipeline))]
-    [Title("Utility", "High Definition Render Pipeline", "Eye", "ScleraUVLocation (Preview)")]
+    [Title("Utility", "High Definition Render Pipeline", "Eye", "ScleraUVLocation")]
     class ScleraUVLocation : CodeFunctionNode
     {
         public ScleraUVLocation()
         {
-            name = "Sclera UV Location (Preview)";
+            name = "Sclera UV Location";
         }
 
         public override bool hasPreview
@@ -29,7 +29,7 @@ namespace UnityEditor.ShaderGraph
         {
             ScleraUV = Vector2.zero;
             return
-                @"
+@"
                 {
                     ScleraUV =  PositionOS.xy + $precision2(0.5, 0.5);
                 }

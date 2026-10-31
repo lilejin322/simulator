@@ -11,6 +11,7 @@ using UnityEngine.Experimental.Rendering;
 namespace UnityEngine.Rendering.HighDefinition.Compositor
 {
     // The main entry point for the compositing operations. Manages the list of layers, output displays, etc.
+    [AddComponentMenu("")] // Hide.
     [ExecuteAlways]
     internal class CompositionManager : MonoBehaviour
     {
@@ -32,6 +33,11 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             Rendering,
             RenderingAndPostProcessing
         }
+
+        [SerializeField]
+        bool m_Enable = true;
+
+        public bool enableInternal { get { return m_Enable; } set { m_Enable = value; } }
 
         [SerializeField] Material m_Material;
 
@@ -68,7 +74,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
                     m_OutputCamera.enabled = value;
 
                     // Aside from the output compositor camera, we also have to change the cameras of the layers
-                    foreach(var layer in m_InputLayers)
+                    foreach (var layer in m_InputLayers)
                     {
                         if (layer.camera && layer.isUsingACameraClone)
                         {
@@ -83,14 +89,13 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
                     }
 
                     // Toggle the compositor-related custom passes
-                    var hdPipeline = RenderPipelineManager.currentPipeline as HDRenderPipeline;
                     if (value)
                     {
-                        RegisterCustomPasses(hdPipeline);
+                        RegisterCustomPasses();
                     }
                     else
                     {
-                        UnRegisterCustomPasses(hdPipeline);
+                        UnRegisterCustomPasses();
                     }
                 }
             }
@@ -101,10 +106,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
         public Shader shader
         {
             get => m_Shader;
-            set
-            {
-                m_Shader = value;
-            }
+            set => m_Shader = value;
         }
 
         [SerializeField] Shader m_Shader;
@@ -140,24 +142,24 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
         {
             set
             {
+#if UNITY_EDITOR
                 m_ShaderPropertiesAreDirty = true;
+#endif
             }
         }
 
+#if UNITY_EDITOR
         internal bool m_ShaderPropertiesAreDirty = false;
+#endif
 
         internal Matrix4x4 m_ViewProjMatrix;
         internal Matrix4x4 m_ViewProjMatrixFlipped;
         internal GameObject m_CompositorGameObject;
+        internal MaterialPropertyBlock fullscreenProperties;
 
         ShaderVariablesGlobal m_ShaderVariablesGlobalCB = new ShaderVariablesGlobal();
 
-        int m_RecorderTempRT = Shader.PropertyToID("TempRecorder");
-
-        static private CompositionManager s_CompositorInstance;
-
-        // Built-in Color.black has an alpha of 1, so defien here a fully transparent black 
-        static Color s_TransparentBlack = new Color(0, 0, 0, 0); 
+        static readonly int _RecorderTempRT = Shader.PropertyToID("TempRecorder");
 
         #region Validation
         public bool ValidateLayerListOrder(int oldIndex, int newIndex)
@@ -187,7 +189,6 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             return true;
         }
 
-
         // Validates the rendering pipeline and fixes potential issues
         bool ValidatePipeline()
         {
@@ -195,16 +196,16 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             if (hdPipeline != null)
             {
                 m_AlphaSupport = AlphaChannelSupport.RenderingAndPostProcessing;
-                if (hdPipeline.asset.currentPlatformRenderPipelineSettings.colorBufferFormat == RenderPipelineSettings.ColorBufferFormat.R11G11B10)
+                if (hdPipeline.GetColorBufferFormat() == (GraphicsFormat)RenderPipelineSettings.ColorBufferFormat.R11G11B10)
                 {
                     m_AlphaSupport = AlphaChannelSupport.None;
                 }
-                else if (hdPipeline.asset.currentPlatformRenderPipelineSettings.postProcessSettings.bufferFormat == PostProcessBufferFormat.R11G11B10)
+                else if (hdPipeline.GetColorBufferFormat() == (GraphicsFormat)PostProcessBufferFormat.R11G11B10)
                 {
                     m_AlphaSupport = AlphaChannelSupport.Rendering;
                 }
 
-                RegisterCustomPasses(hdPipeline);
+                RegisterCustomPasses();
                 return true;
             }
             return false;
@@ -246,8 +247,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
                 return false;
             }
 
-            var cameraData = m_OutputCamera.GetComponent<HDAdditionalCameraData>();
-            if (cameraData == null)
+            if (!m_OutputCamera.TryGetComponent<HDAdditionalCameraData>(out var cameraData))
             {
                 m_OutputCamera.gameObject.AddComponent(typeof(HDAdditionalCameraData));
                 cameraData = m_OutputCamera.GetComponent<HDAdditionalCameraData>();
@@ -297,6 +297,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
 
             return true;
         }
+
         #endregion
 
         // This is called when we change camera, to remove the custom draw callback from the old camera before we set the new one
@@ -320,7 +321,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
 
                 SetupCompositionMaterial();
 
-                SetupCompositorLayers();
+                SetupCompositorLayers(false);
 
                 SetupGlobalCompositorVolume();
 
@@ -331,7 +332,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             else
             {
                 Debug.LogError("The compositor was disabled due to a validation error in the configuration.");
-                enabled = false;
+                enableInternal = false;
             }
         }
 
@@ -358,11 +359,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             //This is a work-around, to make edit and continue work when editing source code
             UnityEditor.AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
 #endif
-#if UNITY_2021_1_OR_NEWER
             RenderPipelineManager.beginContextRendering += ResizeCallback;
-#else
-            RenderPipelineManager.beginFrameRendering += ResizeCallback;
-#endif
         }
 
         public void DeleteLayerRTs()
@@ -372,7 +369,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             {
                 m_InputLayers[i].DestroyCameras();
             }
-            
+
             for (int i = m_InputLayers.Count - 1; i >= 0; --i)
             {
                 m_InputLayers[i].DestroyRT();
@@ -399,11 +396,11 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             }
         }
 
-        void SetupCompositorLayers()
+        void SetupCompositorLayers(bool allowUndo = true)
         {
             for (int i = 0; i < m_InputLayers.Count; ++i)
             {
-                m_InputLayers[i].Init($"Layer{i}");
+                m_InputLayers[i].Init($"Layer{i}", allowUndo);
             }
 
             SetLayerRenderTargets();
@@ -411,7 +408,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
 
         public void SetNewCompositionShader()
         {
-            // When we load a new shader, we need to clear the serialized material. 
+            // When we load a new shader, we need to clear the serialized material.
             m_Material = null;
             SetupCompositionMaterial();
         }
@@ -464,21 +461,16 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             enableOutput = false;
         }
 
+        const string k_CompositorGlobalVolumeName = "__Internal_Global_Composition_Volume";
+
         // Setup a global volume used for chroma keying, alpha injection etc
         void SetupGlobalCompositorVolume()
         {
             var compositorVolumes = Resources.FindObjectsOfTypeAll(typeof(CustomPassVolume));
-            foreach (CustomPassVolume volume in compositorVolumes)
-            {
-                if(volume.isGlobal && volume.injectionPoint == CustomPassInjectionPoint.BeforeRendering)
-                {
-                    Debug.LogWarning($"A custom volume pass with name ${volume.name} was already registered on the BeforeRendering injection point.");
-                }
-            }
 
             // Instead of using one volume per layer/camera, we setup one global volume and we store the data in the camera
             // This way the compositor has to use only one layer/volume for N cameras (instead of N).
-            m_CompositorGameObject = new GameObject("Global Composition Volume") { hideFlags = HideFlags.HideAndDontSave };
+            m_CompositorGameObject = new GameObject(k_CompositorGlobalVolumeName) { hideFlags = HideFlags.HideAndDontSave };
             Volume globalPPVolume = m_CompositorGameObject.AddComponent<Volume>();
             globalPPVolume.gameObject.layer = 31;
             AlphaInjection injectAlphaNode = globalPPVolume.profile.Add<AlphaInjection>();
@@ -502,6 +494,8 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             SetupCompositorLayers();
             SetupLayerPriorities();
         }
+
+        HDRenderPipelineAsset m_CurrentAsset;
 
         // LateUpdate is called once per frame
         void LateUpdate()
@@ -552,16 +546,12 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             }
 
             // We don't need the custom passes anymore
-            var hdPipeline = RenderPipelineManager.currentPipeline as HDRenderPipeline;
-            UnRegisterCustomPasses(hdPipeline);
+            UnRegisterCustomPasses();
 
             // By now the s_CompositorManagedCameras should be empty, but clear it just to be safe
             CompositorCameraRegistry.GetInstance().CleanUpCameraOrphans();
-#if UNITY_2021_1_OR_NEWER
+
             RenderPipelineManager.beginContextRendering -= ResizeCallback;
-#else
-            RenderPipelineManager.beginFrameRendering -= ResizeCallback;
-#endif
         }
 
         public void AddInputFilterAtLayer(CompositionFilter filter, int index)
@@ -625,7 +615,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
         public void AddNewLayer(int index, CompositorLayer.LayerType type = CompositorLayer.LayerType.Camera)
         {
             var newLayer = CompositorLayer.CreateStackLayer(type, GetNewSubLayerName(index, type));
-            
+
             if (index >= 0 && index < m_InputLayers.Count)
             {
                 m_InputLayers.Insert(index, newLayer);
@@ -753,11 +743,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             }
         }
 
-#if UNITY_2021_1_OR_NEWER
         void ResizeCallback(ScriptableRenderContext cntx, List<Camera> cameras)
-#else
-        void ResizeCallback(ScriptableRenderContext cntx, Camera[] cameras)
-#endif
         {
             if (m_OutputCamera && enableOutput)
             {
@@ -784,26 +770,17 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
 
         void InternalRender(ScriptableRenderContext cntx)
         {
-            HDRenderPipeline renderPipeline = RenderPipelineManager.currentPipeline as HDRenderPipeline;
-            if (enableOutput && renderPipeline != null)
+            if (enableOutput && RenderPipelineManager.currentPipeline is HDRenderPipeline renderPipeline)
             {
-#if UNITY_2021_1_OR_NEWER
                 List<Camera> cameras = new List<Camera>(1);
-#else
-                Camera[] cameras = new Camera[1];
-#endif
                 foreach (var layer in m_InputLayers)
                 {
                     if (layer.camera && layer.camera.enabled)
                     {
+                        cameras.Clear();
                         // Emit geometry manually for this camera (Unity will not do it for us because we call the internal render)
                         ScriptableRenderContext.EmitGeometryForCamera(layer.camera);
-#if UNITY_2021_1_OR_NEWER
-                        cameras.Clear();
                         cameras.Add(layer.camera);
-#else
-                        cameras[0] = layer.camera;
-#endif
                         renderPipeline.InternalRender(cntx, cameras);
                     }
                 }
@@ -819,7 +796,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
                 cmdbuff.ClearRenderTarget(false, true, Color.black);
                 return;
             }
-                
+
 
             timeSinceLastRepaint = 0;
 
@@ -829,7 +806,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             int layerIndex = 0;
             foreach (var layer in m_InputLayers)
             {
-                if (layer.outputTarget != CompositorLayer.OutputTarget.CameraStack)  // stacked cameras are not exposed as compositor layers 
+                if (layer.outputTarget != CompositorLayer.OutputTarget.CameraStack)  // stacked cameras are not exposed as compositor layers
                 {
                     m_Material.SetTexture(layer.name, layer.GetRenderTarget(), RenderTextureSubElement.Color);
                 }
@@ -852,18 +829,31 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
                     if (layer.clearsBackGround)
                     {
                         cmd.SetRenderTarget(layer.GetRenderTarget());
-                        cmd.ClearRenderTarget(false, true, s_TransparentBlack);
+                        cmd.ClearRenderTarget(false, true, Color.clear);
                     }
                 }
             }
 
+            int materialPass = m_Material.FindPass("DrawProcedural");
+            bool isFullscreen = materialPass != -1;
+
+            if (!isFullscreen)
+                materialPass = m_Material.FindPass("ForwardOnly");
+
             if (camera.camera.targetTexture)
             {
-                // When rendering to texture (or to camera bridge) we don't need to flip the image.
-                // If this matrix was used for the game view, then the image would appear flipped, hense the name of the variable.
-                m_ShaderVariablesGlobalCB._ViewProjMatrix = m_ViewProjMatrixFlipped;
-                ConstantBuffer.PushGlobal(cmd, m_ShaderVariablesGlobalCB, HDShaderIDs._ShaderVariablesGlobal);
-                cmd.Blit(null, camera.camera.targetTexture, m_Material, m_Material.FindPass("ForwardOnly"));
+                if (isFullscreen)
+                {
+                    CoreUtils.DrawFullScreen(cmd, m_Material, camera.camera.targetTexture, shaderPassId: materialPass);
+                }
+                else
+                {
+                    // When rendering to texture (or to camera bridge) we don't need to flip the image.
+                    // If this matrix was used for the game view, then the image would appear flipped, hense the name of the variable.
+                    m_ShaderVariablesGlobalCB._ViewProjMatrix = m_ViewProjMatrixFlipped;
+                    ConstantBuffer.PushGlobal(cmd, m_ShaderVariablesGlobalCB, HDShaderIDs._ShaderVariablesGlobal);
+                    cmd.Blit(null, camera.camera.targetTexture, m_Material, materialPass);
+                }
 
                 var recorderCaptureActions = CameraCaptureBridge.GetCaptureActions(camera.camera);
                 if (recorderCaptureActions != null)
@@ -880,23 +870,42 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
 
                 if (recorderCaptureActions != null)
                 {
-                    m_ShaderVariablesGlobalCB._ViewProjMatrix = m_ViewProjMatrixFlipped;
-                    ConstantBuffer.PushGlobal(cmd, m_ShaderVariablesGlobalCB, HDShaderIDs._ShaderVariablesGlobal);
                     var format = m_InputLayers[0].GetRenderTarget().format;
-                    cmd.GetTemporaryRT(m_RecorderTempRT, camera.camera.pixelWidth, camera.camera.pixelHeight, 0, FilterMode.Point, format);
-                    cmd.Blit(null, m_RecorderTempRT, m_Material, m_Material.FindPass("ForwardOnly"));
-                    for (recorderCaptureActions.Reset(); recorderCaptureActions.MoveNext();)
+                    cmd.GetTemporaryRT(_RecorderTempRT, camera.camera.pixelWidth, camera.camera.pixelHeight, 0, FilterMode.Point, format);
+
+                    if (isFullscreen)
                     {
-                        recorderCaptureActions.Current(m_RecorderTempRT, cmd);
+                        CoreUtils.DrawFullScreen(cmd, m_Material, _RecorderTempRT, shaderPassId: materialPass);
+                    }
+                    else
+                    {
+                        m_ShaderVariablesGlobalCB._ViewProjMatrix = m_ViewProjMatrixFlipped;
+                        ConstantBuffer.PushGlobal(cmd, m_ShaderVariablesGlobalCB, HDShaderIDs._ShaderVariablesGlobal);
+                        cmd.Blit(null, _RecorderTempRT, m_Material, materialPass);
+                        for (recorderCaptureActions.Reset(); recorderCaptureActions.MoveNext();)
+                        {
+                            recorderCaptureActions.Current(_RecorderTempRT, cmd);
+                        }
                     }
                 }
 
-                // When we render directly to game view, we render the image flipped up-side-down, like other HDRP cameras
-                m_ShaderVariablesGlobalCB._ViewProjMatrix = m_ViewProjMatrix;
-                ConstantBuffer.PushGlobal(cmd, m_ShaderVariablesGlobalCB, HDShaderIDs._ShaderVariablesGlobal);
-                cmd.Blit(null, BuiltinRenderTextureType.CameraTarget, m_Material, m_Material.FindPass("ForwardOnly"));
+                if (isFullscreen)
+                {
+                    if (fullscreenProperties == null)
+                        fullscreenProperties = new MaterialPropertyBlock();
+
+                    fullscreenProperties.SetFloat("_FlipY", 1);
+                    CoreUtils.DrawFullScreen(cmd, m_Material, BuiltinRenderTextureType.CameraTarget, fullscreenProperties, shaderPassId: materialPass);
+                }
+                else
+                {
+                    // When we render directly to game view, we render the image flipped up-side-down, like other HDRP cameras
+                    m_ShaderVariablesGlobalCB._ViewProjMatrix = m_ViewProjMatrix;
+                    ConstantBuffer.PushGlobal(cmd, m_ShaderVariablesGlobalCB, HDShaderIDs._ShaderVariablesGlobal);
+                    cmd.Blit(null, BuiltinRenderTextureType.CameraTarget, m_Material, materialPass);
+                }
             }
-            
+
             context.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
         }
@@ -908,7 +917,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
         /// <returns>Returns true if this camera is used to render in more than one layer</returns>
         internal bool IsThisCameraShared(Camera camera)
         {
-            if (camera == null)
+            if (!camera)
             {
                 return false;
             }
@@ -916,7 +925,6 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             int count = 0;
             foreach (var layer in m_InputLayers)
             {
-                
                 if (layer.outputTarget == CompositorLayer.OutputTarget.CameraStack &&
                     camera.Equals(layer.sourceCamera))
                 {
@@ -927,11 +935,12 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             return count > 1;
         }
 
-        static public Camera GetSceneCamera()
+        public static Camera GetSceneCamera()
         {
-            if (Camera.main != null)
+            Camera main = Camera.main;
+            if (main)
             {
-                return Camera.main;
+                return main;
             }
             foreach (var camera in Camera.allCameras)
             {
@@ -944,7 +953,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             return null;
         }
 
-        static public Camera CreateCamera(string cameraName)
+        public static Camera CreateCamera(string cameraName)
         {
             var newCameraGameObject = new GameObject(cameraName)
             {
@@ -956,10 +965,18 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
             return newCamera;
         }
 
-        static public CompositionManager GetInstance() =>
-            s_CompositorInstance ?? (s_CompositorInstance = GameObject.FindObjectOfType(typeof(CompositionManager), true) as CompositionManager);
+        private static CompositionManager s_CompositorInstance;
 
-        static public Vector4 GetAlphaScaleAndBiasForCamera(HDCamera hdCamera)
+        public static CompositionManager GetInstance()
+        {
+            if (!s_CompositorInstance)
+            {
+                s_CompositorInstance = FindAnyObjectByType<CompositionManager>(FindObjectsInactive.Include);
+            }
+            return s_CompositorInstance;
+        }
+
+        public static Vector4 GetAlphaScaleAndBiasForCamera(HDCamera hdCamera)
         {
             AdditionalCompositorData compositorData = null;
             hdCamera.camera.TryGetComponent<AdditionalCompositorData>(out compositorData);
@@ -970,7 +987,7 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
                 float alphaMax = compositorData.alphaMax;
 
                 if (alphaMax == alphaMin)
-                    alphaMax += 0.0001f; // Mathf.Epsilon is too small and in this case it creates precission issues 
+                    alphaMax += 0.0001f; // Mathf.Epsilon is too small and in this case it creates precission issues
 
                 float alphaScale = 1.0f / (alphaMax - alphaMin);
                 float alphaBias = -alphaMin * alphaScale;
@@ -987,12 +1004,9 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
         /// </summary>
         /// <param name="hdCamera">The input camera</param>
         /// <returns> The color buffer that will be used to draw on top, or null if not a stacked camera </returns>
-        static internal Texture GetClearTextureForStackedCamera(HDCamera hdCamera)
+        internal static Texture GetClearTextureForStackedCamera(HDCamera hdCamera)
         {
-            AdditionalCompositorData compositorData = null;
-            hdCamera.camera.TryGetComponent<AdditionalCompositorData>(out compositorData);
-
-            if (compositorData)
+            if (hdCamera.camera.TryGetComponent<AdditionalCompositorData>(out var compositorData))
             {
                 return compositorData.clearColorTexture;
             }
@@ -1004,12 +1018,9 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
         /// </summary>
         /// <param name="hdCamera">The input camera</param>
         /// <returns> The depth buffer that will be used to draw on top, or null if not a stacked camera </returns>
-        static internal RenderTexture GetClearDepthForStackedCamera(HDCamera hdCamera)
+        internal static RenderTexture GetClearDepthForStackedCamera(HDCamera hdCamera)
         {
-            AdditionalCompositorData compositorData = null;
-            hdCamera.camera.TryGetComponent<AdditionalCompositorData>(out compositorData);
-
-            if (compositorData)
+            if (hdCamera.camera.TryGetComponent<AdditionalCompositorData>(out var compositorData))
             {
                 return compositorData.clearDepthTexture;
             }
@@ -1017,43 +1028,43 @@ namespace UnityEngine.Rendering.HighDefinition.Compositor
         }
 
         // Register the custom pp passes used by the compositor
-        static internal void RegisterCustomPasses(HDRenderPipeline hdPipeline)
+        void RegisterCustomPasses()
         {
-            if (hdPipeline == null)
+            if (GraphicsSettings.currentRenderPipeline is not HDRenderPipelineAsset hdrpAsset)
             {
-                return;
+                UnRegisterCustomPasses();
+                m_CurrentAsset = null;
             }
+            else if (m_CurrentAsset != hdrpAsset)
+            {
+                UnRegisterCustomPasses();
+                m_CurrentAsset = hdrpAsset;
+            }
+
+            if (m_CurrentAsset == null)
+                return;
 
             // If custom post processes are not registered in the HDRP asset, they are never executed so we have to add them manually
-            if (!hdPipeline.asset.beforePostProcessCustomPostProcesses.Contains(typeof(ChromaKeying).AssemblyQualifiedName))
-            {
-                hdPipeline.asset.beforePostProcessCustomPostProcesses.Add(typeof(ChromaKeying).AssemblyQualifiedName);
-            }
-
-            if (!hdPipeline.asset.beforePostProcessCustomPostProcesses.Contains(typeof(AlphaInjection).AssemblyQualifiedName))
-            {
-                hdPipeline.asset.beforePostProcessCustomPostProcesses.Add(typeof(AlphaInjection).AssemblyQualifiedName);
-            }
+            m_CurrentAsset.compositorCustomVolumeComponentsList.Add<ChromaKeying>();
+            m_CurrentAsset.compositorCustomVolumeComponentsList.Add<AlphaInjection>();
         }
 
         // Unregister the custom pp passes used by the compositor
-        static internal void UnRegisterCustomPasses(HDRenderPipeline hdPipeline)
+        void UnRegisterCustomPasses()
         {
-            if (hdPipeline == null)
+            if (m_CurrentAsset != null)
             {
-                return;
-            }
-
-            if (hdPipeline.asset.beforePostProcessCustomPostProcesses.Contains(typeof(ChromaKeying).AssemblyQualifiedName))
-            {
-                hdPipeline.asset.beforePostProcessCustomPostProcesses.Remove(typeof(ChromaKeying).AssemblyQualifiedName);
-            }
-
-            if (hdPipeline.asset.beforePostProcessCustomPostProcesses.Contains(typeof(AlphaInjection).AssemblyQualifiedName))
-            {
-                hdPipeline.asset.beforePostProcessCustomPostProcesses.Remove(typeof(AlphaInjection).AssemblyQualifiedName);
+                m_CurrentAsset.compositorCustomVolumeComponentsList.Remove<ChromaKeying>();
+                m_CurrentAsset.compositorCustomVolumeComponentsList.Remove<AlphaInjection>();
             }
         }
 
+#if UNITY_EDITOR
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStaticsOnLoad()
+        {
+            s_CompositorInstance = null;
+        }
+#endif
     }
 }

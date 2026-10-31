@@ -22,7 +22,7 @@ class SDFCollision : SDFParserBase
     {
         // FIXME we should be able to collapse collision objects into a component of the parent object if there is no transform on it
         GameObject collisionObject = CreateChildObject(collisionElement, parentLink);
-        PhysicMaterial material = document.DefaultPhysicMaterial;
+        PhysicsMaterial material = document.DefaultPhysicMaterial;
 
         foreach (var childElement in collisionElement.Elements())
         {
@@ -51,13 +51,13 @@ class SDFCollision : SDFParserBase
         return collisionObject;
     }
 
-    private PhysicMaterial HandleSurface(XElement surfaceElement, GameObject collisionObject)
+    private PhysicsMaterial HandleSurface(XElement surfaceElement, GameObject collisionObject)
     {
-        var material = new PhysicMaterial()
+        var material = new PhysicsMaterial()
         {
             bounciness = ParseSingle(surfaceElement.Element("bounce")?.Element("restitution_coefficient"), 0.0f),
-            frictionCombine = PhysicMaterialCombine.Average,
-            bounceCombine = PhysicMaterialCombine.Average
+            frictionCombine = PhysicsMaterialCombine.Average,
+            bounceCombine = PhysicsMaterialCombine.Average
         };
 
         var frictionElement = surfaceElement.Element("friction")?.Element("ode");

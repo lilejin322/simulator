@@ -9,8 +9,8 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/AtmosphericScattering/AtmosphericScattering.hlsl"
 #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/MaterialBlendModeEnum.cs.hlsl"
+#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/AtmosphericScattering/AtmosphericScattering.hlsl"
 
 // Guidelines for Material Keyword.
 // There is a set of Material Keyword that a HD shaders must define (or not define). We call them system KeyWord.
@@ -20,6 +20,13 @@
 // - _DISABLE_DECALS if the material don't support decals
 
 #define HAVE_DECALS ( (defined(DECALS_3RT) || defined(DECALS_4RT)) && !defined(_DISABLE_DECALS) )
+
+// If decals require surface gradients, we will use gradients too
+#if HAVE_DECALS && defined(DECAL_SURFACE_GRADIENT)
+#define DECAL_NORMAL_BLENDING
+#endif
+
+#define APPLY_FOG_ON_SKY_REFLECTIONS
 
 //-----------------------------------------------------------------------------
 // ApplyBlendMode function
@@ -34,9 +41,9 @@ float4 ApplyBlendMode(float3 diffuseLighting, float3 specularLighting, float opa
         opacity = 0;
     #ifndef _ALPHATEST_ON
     else
-        // We hardcode opacity to 1 to avoid issues in forward when alpha might be coming from the texture source, but we don't want to keep it in case alpha is preserved. 
+        // We hardcode opacity to 1 to avoid issues in forward when alpha might be coming from the texture source, but we don't want to keep it in case alpha is preserved.
         opacity = 1;
-    #endif    
+    #endif
     return float4(diffuseLighting + specularLighting, opacity);
 #else
 
@@ -48,14 +55,18 @@ float4 ApplyBlendMode(float3 diffuseLighting, float3 specularLighting, float opa
 
     // In the case of alpha blend mode the code should be float4(diffuseLighting + (specularLighting / max(opacity, 0.01)), opacity)
     // However this have precision issue when reaching 0, so we change the blend mode and apply src * src_a inside the shader instead
-    if (_BlendMode == BLENDMODE_ALPHA || _BlendMode == BLENDMODE_ADDITIVE)
+    if (_BlendMode == BLENDINGMODE_ALPHA || _BlendMode == BLENDINGMODE_ADDITIVE)
         return float4(diffuseLighting * opacity + specularLighting * (
 #ifdef SUPPORT_BLENDMODE_PRESERVE_SPECULAR_LIGHTING
         _EnableBlendModePreserveSpecularLighting ? 1.0f :
 #endif
             opacity), opacity);
     else
-        return float4(diffuseLighting + specularLighting, opacity);
+        return float4(diffuseLighting + specularLighting * (
+#ifdef SUPPORT_BLENDMODE_PRESERVE_SPECULAR_LIGHTING
+        _EnableBlendModePreserveSpecularLighting ? 1.0f :
+#endif
+            opacity), opacity);
 
 #endif
 }
@@ -80,7 +91,7 @@ float4 EvaluateAtmosphericScattering(PositionInputs posInput, float3 V, float4 i
     float3 volColor, volOpacity;
     EvaluateAtmosphericScattering(posInput, V, volColor, volOpacity); // Premultiplied alpha
 
-    if (_BlendMode == BLENDMODE_ALPHA)
+    if (_BlendMode == BLENDINGMODE_ALPHA)
     {
         // Regular alpha blend need to multiply fog color by opacity (as we do src * src_a inside the shader)
         // result.rgb = lerp(result.rgb, unpremul_volColor * result.a, volOpacity);
@@ -88,12 +99,12 @@ float4 EvaluateAtmosphericScattering(PositionInputs posInput, float3 V, float4 i
         // result.rgb = result.rgb + volColor * result.a - result.rgb * volOpacity;
         result.rgb = result.rgb * (1 - volOpacity) + volColor * result.a;
     }
-    else if (_BlendMode == BLENDMODE_ADDITIVE)
+    else if (_BlendMode == BLENDINGMODE_ADDITIVE)
     {
         // For additive, we just need to fade to black with fog density (black + background == background color == fog color)
         result.rgb = result.rgb * (1.0 - volOpacity);
     }
-    else if (_BlendMode == BLENDMODE_PREMULTIPLY)
+    else if (_BlendMode == BLENDINGMODE_PREMULTIPLY)
     {
         // For Pre-Multiplied Alpha Blend, we need to multiply fog color by src alpha to match regular alpha blending formula.
         // result.rgb = lerp(result.rgb, unpremul_volColor * result.a, volOpacity);
@@ -102,13 +113,31 @@ float4 EvaluateAtmosphericScattering(PositionInputs posInput, float3 V, float4 i
         // (see the appendix in the Deep Compositing paper). But do we?
         // Additionally, we do not modify the alpha here, which is most certainly WRONG.
     }
-
 #else
     // Evaluation of fog for opaque objects is currently done in a full screen pass independent from any material parameters.
     // but this funtction is called in generic forward shader code so we need it to be neutral in this case.
 #endif
 
     return result;
+}
+
+// Used for sky reflection. The sky reflection cubemap doesn't contain fog.
+// Apply height fog between pixel position and skybox, ignores volumetric fog for performance.
+float4 EvaluateFogForSkyReflections(float3 positionWS, float3 R)
+{
+    float cosZenith = dot(R, _PlanetUp);
+    float startHeight = dot(positionWS, _PlanetUp);
+    #if (SHADEROPTIONS_CAMERA_RELATIVE_RENDERING == 0)
+    startHeight += _CameraAltitude;
+    #endif
+
+    float3 volAlbedo = _HeightFogBaseScattering.xyz / _HeightFogBaseExtinction;
+    float  odFallback = OpticalDepthHeightFog(_HeightFogBaseExtinction, _HeightFogBaseHeight,
+            _HeightFogExponents, cosZenith, startHeight, _MaxFogDistance);
+    float  trFallback = TransmittanceFromOpticalDepth(odFallback);
+
+    float3 fog = GetFogColor(-R, _MaxFogDistance) * volAlbedo * (1 - trFallback);
+    return float4(fog, trFallback);
 }
 
 //-----------------------------------------------------------------------------
@@ -123,9 +152,8 @@ void DoAlphaTest(float alpha, float alphaCutoff)
     // For Forward Opaque:
     // If we have a prepass, we may want to remove the clip from the forward pass (otherwise HiZ does not work on PS4) - SHADERPASS_FORWARD_BYPASS_ALPHA_TEST
     // For Forward Transparent
-    // Also no alpha test for light transport
     // Note: If SHADERPASS_GBUFFER_BYPASS_ALPHA_TEST or SHADERPASS_FORWARD_BYPASS_ALPHA_TEST are used, it mean that we must use ZTest depth equal for the pass (Need to use _ZTestDepthEqualForOpaque property).
-#if !defined(SHADERPASS_FORWARD_BYPASS_ALPHA_TEST) && !defined(SHADERPASS_GBUFFER_BYPASS_ALPHA_TEST) && !(SHADERPASS == SHADERPASS_LIGHT_TRANSPORT)
+#if !defined(SHADERPASS_FORWARD_BYPASS_ALPHA_TEST) && !defined(SHADERPASS_GBUFFER_BYPASS_ALPHA_TEST)
     clip(alpha - alphaCutoff);
 #endif
 }
