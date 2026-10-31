@@ -27,7 +27,6 @@ using Simulator.Sensors.Postprocessing;
 using Simulator.Utilities;
 using Simulator.Web;
 using UnityEngine;
-using VirtualFileSystem;
 
 public class SensorsController : MonoBehaviour, ISensorsController, IMessageSender, IMessageReceiver
 {
@@ -148,13 +147,18 @@ public class SensorsController : MonoBehaviour, ISensorsController, IMessageSend
 
     public void OnDestroy()
     {
+        UnregisterSensors();
+        MessagesManager?.UnregisterObject(this);
+    }
+
+    /// <summary>Removes this agent's sensors from the simulation's sensor registry.</summary>
+    public void UnregisterSensors()
+    {
         var sensorsManager = SimulatorManager.Instance.Sensors;
         foreach (var sensorInstanceController in sensorsInstances)
         {
             sensorsManager.UnregisterSensor(sensorInstanceController.Value.Instance);
         }
-
-        MessagesManager?.UnregisterObject(this);
     }
 
     private static string GetSensorType(SensorBase sensor)
@@ -205,10 +209,14 @@ public class SensorsController : MonoBehaviour, ISensorsController, IMessageSend
                 var name = item.Name;
                 var type = item.Type;
                 GameObject prefab = null;
+                if (item.Plugin?.AssetGuid != null) BuiltinSensorCatalog.TryRegister(item.Plugin.AssetGuid);
                 if (item.Plugin?.AssetGuid == null)
                 {
                     Debug.LogWarning($"sensor without assetguid: {item.Name} {item.Type}");
-                    prefab = Config.SensorPrefabs.FirstOrDefault(s => GetSensorType(s) == type)?.gameObject;
+                    var guid = BuiltinSensorCatalog.FindAssetGuid(type);
+                    prefab = guid != null && BuiltinSensorCatalog.TryRegister(guid)
+                        ? Config.SensorTypeLookup[guid].gameObject
+                        : Config.SensorPrefabs.FirstOrDefault(s => BuiltinSensorCatalog.MatchesType(s, type))?.gameObject;
                     if (prefab == null)
                     {
                         Debug.LogError($"could not find alternative for {item.Name} {item.Type} choices were: {string.Join(",", Config.SensorPrefabs.Select(sp=> GetSensorType(sp)))}");
@@ -217,16 +225,6 @@ public class SensorsController : MonoBehaviour, ISensorsController, IMessageSend
                 else if (Config.SensorTypeLookup.ContainsKey(item.Plugin.AssetGuid))
                 {
                     prefab = Config.SensorTypeLookup[item.Plugin.AssetGuid]?.gameObject;
-                }
-                else
-                {
-                    var dir = Path.Combine(Config.PersistentDataPath, "Sensors");
-                    var vfs = VfsEntry.makeRoot(dir);
-                    Config.CheckDir(vfs.GetChild(item.Plugin.AssetGuid), Config.LoadSensorPlugin);
-                    if (Config.SensorTypeLookup.ContainsKey(item.Plugin.AssetGuid))
-                    {
-                        prefab = Config.SensorTypeLookup[item.Plugin.AssetGuid]?.gameObject;
-                    }
                 }
 
                 if (prefab == null)

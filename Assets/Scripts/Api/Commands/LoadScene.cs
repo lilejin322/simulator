@@ -6,13 +6,10 @@
  */
 
 using System.Collections;
-using System.Text;
-using System.IO;
 using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using SimpleJSON;
-using ICSharpCode.SharpZipLib.Zip;
 using System.Threading.Tasks;
 using Simulator.Web;
 
@@ -31,99 +28,34 @@ namespace Simulator.Api.Commands
         private async Task LoadMap(JSONNode args, string userMapId, int? seed = null)
         {
             var api = ApiManager.Instance;
-            MapDetailData mapData = await ConnectionManager.API.GetByIdOrName<MapDetailData>(userMapId);
+            MapDetailData mapData = await BuiltinAssetLibrary.GetByIdOrName<MapDetailData>(userMapId);
             var ret = await DownloadManager.GetAsset(BundleConfig.BundleTypes.Environment, mapData.AssetGuid, mapData.Name);
             api.StartCoroutine(LoadMapAssets(this, mapData, ret.LocalPath, userMapId, seed));
         }
 
-        static IEnumerator LoadMapAssets(LoadScene sourceCommand, MapDetailData map, string localPath, string userMapId, int? seed = null)
+        static IEnumerator LoadMapAssets(LoadScene sourceCommand, MapDetailData map, string scenePath, string userMapId, int? seed = null)
         {
             var api = ApiManager.Instance;
 
-            AssetBundle textureBundle = null;
-            AssetBundle mapBundle = null;
+            var loader = BuiltinMap.LoadSceneAsync(scenePath, LoadSceneMode.Single);
+            yield return new WaitUntil(() => loader.isDone);
 
-            ZipFile zip = new ZipFile(localPath);
-            try
+            if (Loader.Instance.SimConfig != null)
             {
-                Manifest manifest;
-                ZipEntry entry = zip.GetEntry("manifest.json");
-                using (var ms = zip.GetInputStream(entry))
-                {
-                    int streamSize = (int)entry.Size;
-                    byte[] buffer = new byte[streamSize];
-                    streamSize = ms.Read(buffer, 0, streamSize);
-                    manifest = Newtonsoft.Json.JsonConvert.DeserializeObject<Manifest>(Encoding.UTF8.GetString(buffer));
-                }
-
-                if (manifest.assetFormat != BundleConfig.Versions[BundleConfig.BundleTypes.Environment])
-                {
-                    zip.Close();
-                    api.SendError(sourceCommand,
-                        "Out of date Map AssetBundle. Please check content website for updated bundle or rebuild the bundle.");
-                    sourceCommand.Executed?.Invoke(sourceCommand);
-                    yield break;
-                }
-
-                if (zip.FindEntry($"{manifest.assetGuid}_environment_textures", true) != -1)
-                {
-                    entry = zip.GetEntry($"{manifest.assetGuid}_environment_textures");
-                    var texStream = VirtualFileSystem.VirtualFileSystem.EnsureSeekable(zip.GetInputStream(entry), entry.Size);
-                    textureBundle = AssetBundle.LoadFromStream(texStream, 0, 1 << 20);
-                    texStream.Close();
-                    texStream.Dispose();
-                }
-
-                string platform = SystemInfo.operatingSystemFamily == OperatingSystemFamily.Windows
-                    ? "windows"
-                    : "linux";
-                var mapStream =
-                    zip.GetInputStream(zip.GetEntry($"{manifest.assetGuid}_environment_main_{platform}"));
-                mapBundle = AssetBundle.LoadFromStream(mapStream, 0, 1 << 20);
-
-                if (mapBundle == null)
-                {
-                    api.SendError(sourceCommand, $"Failed to load environment from '{map.AssetGuid}' asset bundle '{map.Name}'");
-                    sourceCommand.Executed?.Invoke(sourceCommand);
-                    yield break;
-                }
-
-                textureBundle?.LoadAllAssets();
-
-                var scenes = mapBundle.GetAllScenePaths();
-                if (scenes.Length != 1)
-                {
-                    api.SendError(sourceCommand, $"Unsupported environment in '{map.AssetGuid}' asset bundle '{map.Name}', only 1 scene expected");
-                    sourceCommand.Executed?.Invoke(sourceCommand);
-                    yield break;
-                }
-
-                var sceneName = Path.GetFileNameWithoutExtension(scenes[0]);
-
-                var loader = SceneManager.LoadSceneAsync(sceneName, LoadSceneMode.Single);
-                yield return new WaitUntil(() => loader.isDone);
-
-                if (Loader.Instance.SimConfig != null)
-                {
-                    Loader.Instance.SimConfig.Seed = seed;
-                    Loader.Instance.SimConfig.MapName = map.Name;
-                    Loader.Instance.SimConfig.MapAssetGuid = map.AssetGuid;
-                }
-
-                var sim = Loader.Instance.CreateSimulatorManager();
-                sim.Init(seed);
-
-                if (Loader.Instance.CurrentSimulation != null)
-                {
-                    Loader.Instance.reportStatus(SimulatorStatus.Running);
-                }
-
+                Loader.Instance.SimConfig.Seed = seed;
+                Loader.Instance.SimConfig.MapName = map.Name;
+                Loader.Instance.SimConfig.MapAssetGuid = map.AssetGuid;
+                // AnalysisManager records agents added through the API in SimConfig.Agents; they belong to the
+                // previous scene and SimulatorManager.Init must not respawn them before the scene is set up
+                Loader.Instance.SimConfig.Agents = Array.Empty<AgentConfig>();
             }
-            finally
+
+            var sim = Loader.Instance.CreateSimulatorManager();
+            sim.Init(seed);
+
+            if (Loader.Instance.CurrentSimulation != null)
             {
-                textureBundle?.Unload(false);
-                mapBundle?.Unload(false);
-                zip.Close();
+                Loader.Instance.reportStatus(SimulatorStatus.Running);
             }
 
             var resetTask = api.Reset();

@@ -75,7 +75,7 @@ namespace Simulator.Api.Commands
                     var agents = SimulatorManager.Instance.AgentManager;
                     GameObject agentGO = null;
 
-                    VehicleDetailData vehicleData = await ConnectionManager.API.GetByIdOrName<VehicleDetailData>(name);
+                    VehicleDetailData vehicleData = await BuiltinAssetLibrary.GetByIdOrName<VehicleDetailData>(name);
                     var config = new AgentConfig(vehicleData.ToVehicleData());
                     config.Position = position;
                     config.Rotation = Quaternion.Euler(rotation);
@@ -87,7 +87,7 @@ namespace Simulator.Api.Commands
                     else
                     {
                         var assetModel = await DownloadManager.GetAsset(BundleConfig.BundleTypes.Vehicle, vehicleData.AssetGuid, vehicleData.Name);
-                        config.Prefab = Loader.LoadVehicleBundle(assetModel.LocalPath);
+                        config.Prefab = Loader.LoadVehicle(assetModel.LocalPath);
                     }
 
                     if (config.Prefab == null)

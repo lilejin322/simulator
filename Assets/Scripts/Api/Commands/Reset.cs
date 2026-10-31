@@ -5,6 +5,7 @@
  *
  */
 
+using System;
 using SimpleJSON;
 using System.Threading.Tasks;
 
@@ -17,7 +18,17 @@ namespace Simulator.Api.Commands
         private static async Task ResetAsync(Reset sourceCommand)
         {
             var api = ApiManager.Instance;
-            await api.Reset();
+            try
+            {
+                await api.Reset();
+            }
+            catch (Exception ex)
+            {
+                // Nothing awaits this task: answer the client, or it waits forever.
+                UnityEngine.Debug.LogException(ex);
+                api.SendError(sourceCommand, ex.Message);
+                return;
+            }
             ApiManager.Instance.SendResult(sourceCommand);
         }
 

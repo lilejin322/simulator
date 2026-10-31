@@ -5,9 +5,9 @@
  *
  */
 
-using System.Collections.Generic;
+using System;
+using System.IO;
 using System.Linq;
-using Simulator.Database.Services;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -47,9 +47,21 @@ namespace Simulator.Web
         public enum LoaderUIStateType { START, PROGRESS, READY };
         public LoaderUIStateType LoaderUIState = LoaderUIStateType.START;
 
-        private SimulationService simulationService = new SimulationService();
-        private List<SimulationData> simulationData;
-        private int selectedSim;
+        // Replace the list of simulations WISE sent (offlineDropdown, offlineStartButton, offlineStopButton):
+        // the only simulation left is API Only
+        private Button startApiButton;
+        private Button stopApiButton;
+
+        // Python API port, whether other machines may connect and headless; they change Config for this run only
+        private InputField apiPortInput;
+        private Toggle apiRemoteToggle;
+        private Toggle apiHeadlessToggle;
+
+        // the status line's own color, and the one for problems to fix (no built-in assets, wrong port, ...)
+        private Color statusColor;
+        private static readonly Color WarningColor = new Color(1f, 0.78f, 0.34f);
+        // api_hostname from config.yml or --apihost, used when remote connections are off
+        private string configuredApiHost;
 
         public void Awake()
         {
@@ -59,17 +71,21 @@ namespace Simulator.Web
                 return;
             }
 
-            SimulatorVersionText.text = $"Simulator Version: {CloudAPI.GetInfo().version}";
+            SimulatorVersionText.text = $"Simulator Version: {Config.SimulatorVersion}";
             UnityVersionText.text = $"Unity Version: {Application.unityVersion}";
             ColorUtility.TryParseHtmlString("#1F2940", out offlineColor);
             ColorUtility.TryParseHtmlString("#FFFFFF", out onlineColor);
             statusButtonIcon.material.color = Color.white;
+            statusColor = statusText.color;
             instance = this;
             statusButton.onClick.AddListener(OnStatusButtonClicked);
-            statusMenuButton.onClick.AddListener(OnStatusMenuButtonClicked);
-            linkButton.onClick.AddListener(OnLinkButtonClicked);
-            offlineStartButton.onClick.AddListener(OnOfflineStartButtonClicked);
-            offlineStopButton.onClick.AddListener(OnOfflineStopButtonClicked);
+            // icons are Font Awesome glyphs, as on the buttons they replace
+            startApiButton = CreateApiButton("StartApiButton", "\uF144", "Start API", OnStartApiButtonClicked);
+            stopApiButton = CreateApiButton("StopApiButton", "\uF04D", "Stop API", OnStopApiButtonClicked);
+            configuredApiHost = Config.ApiHost;
+            CreateApiSettings();
+            // WISE showed its cloud address here
+            CloudTypeText.gameObject.SetActive(false);
             clearAssetCacheButton.onClick.AddListener(() =>
             {
                 CacheControlWindow.gameObject.SetActive(true);
@@ -78,14 +94,140 @@ namespace Simulator.Web
             {
                 LoadedAssetsWindow.SetActive(true);
             });
-            unlinkButton.onClick.AddListener(OnUnlinkButtonClicked);
             quitButton.onClick.AddListener(OnQuitButtonClicked);
             SettingsButton.onClick.AddListener(OnSettingsButtonClicked);
-            UpdateDropdown();
-            offlineDropdown.onValueChanged.AddListener(OnDropdownValueChanged);
-            UpdateStatus(ConnectionManager.Status, "");
+            ShowLocalStatus();
             TaskProgressManager.Instance.OnUpdate += UpdateDownloadProgress;
-            ConnectionManager.OnStatusChanged += UpdateStatus;
+        }
+
+        // A copy of the Visual Editor button with another icon and label, placed where the dropdown was
+        Button CreateApiButton(string objectName, string icon, string label, UnityEngine.Events.UnityAction onClick)
+        {
+            var button = Instantiate(VSEButton, VSEButton.transform.parent);
+            button.name = objectName;
+            button.onClick = new Button.ButtonClickedEvent();
+            button.onClick.AddListener(onClick);
+            foreach (var text in button.GetComponentsInChildren<Text>(true))
+            {
+                text.text = text.name == "VSEText" ? icon : label;
+            }
+
+            var position = VSEButton.transform.position;
+            button.transform.position = new Vector3(position.x, offlineDropdown.transform.position.y, position.z);
+            return button;
+        }
+
+        // "Port [8181]" left of the Start API button, "[ ] Allow remote" and "[ ] Headless" right of it,
+        // styled like the dropdown they replace
+        void CreateApiSettings()
+        {
+            var anchor = (RectTransform)startApiButton.transform;
+            var height = anchor.rect.height;
+            var gap = height * 0.4f;
+            var background = offlineDropdown.GetComponent<Image>();
+            var buttonLabel = startApiButton.GetComponentsInChildren<Text>(true).First(t => t.name != "VSEText");
+            var resources = new DefaultControls.Resources { standard = background.sprite };
+
+            var inputWidth = height * 2.2f;
+            var inputOffset = -(anchor.rect.width / 2 + gap + inputWidth / 2);
+            apiPortInput = CreateInput("ApiPortInput", background, buttonLabel, TextAnchor.MiddleCenter, "Port");
+            Place(apiPortInput.gameObject, anchor, inputOffset, inputWidth, height);
+            apiPortInput.contentType = InputField.ContentType.IntegerNumber;
+            apiPortInput.characterLimit = 5;
+            apiPortInput.text = Config.ApiPort.ToString();
+
+            var labelWidth = height * 1.6f;
+            var label = DefaultControls.CreateText(resources);
+            label.name = "ApiPortLabel";
+            Place(label, anchor, inputOffset - inputWidth / 2 - gap / 2 - labelWidth / 2, labelWidth, height);
+            var labelText = label.GetComponent<Text>();
+            CopyLook(labelText, buttonLabel, TextAnchor.MiddleRight);
+            labelText.text = "Port";
+
+            // checkboxes in a column right of the Start API button
+            var toggleWidth = height * 4.5f;
+            var toggleOffset = anchor.rect.width / 2 + gap + toggleWidth / 2;
+            Toggle CreateToggle(string objectName, string text, bool isOn, float offsetY)
+            {
+                var toggle = DefaultControls.CreateToggle(resources);
+                toggle.name = objectName;
+                Place(toggle, anchor, toggleOffset, toggleWidth, height, offsetY);
+                var component = toggle.GetComponent<Toggle>();
+                component.isOn = isOn;
+                var box = (RectTransform)component.targetGraphic.transform;
+                box.anchorMin = box.anchorMax = new Vector2(0, 0.5f);
+                box.pivot = new Vector2(0.5f, 0.5f);
+                box.sizeDelta = new Vector2(height * 0.6f, height * 0.6f);
+                box.anchoredPosition = new Vector2(height * 0.3f, 0);
+                CopyLook((Image)component.targetGraphic, background);
+                var check = (RectTransform)component.graphic.transform;
+                check.anchorMin = Vector2.zero;
+                check.anchorMax = Vector2.one;
+                check.offsetMin = check.offsetMax = Vector2.zero;
+                check.localScale = Vector3.one * 0.6f;
+                component.graphic.color = startApiButton.GetComponent<Image>().color;
+                var toggleLabel = toggle.GetComponentInChildren<Text>();
+                var toggleLabelRect = (RectTransform)toggleLabel.transform;
+                toggleLabelRect.offsetMin = new Vector2(height * 0.8f, 0);
+                toggleLabelRect.offsetMax = Vector2.zero;
+                CopyLook(toggleLabel, buttonLabel, TextAnchor.MiddleLeft);
+                toggleLabel.text = text;
+                return component;
+            }
+
+            apiRemoteToggle = CreateToggle("ApiRemoteToggle", "Allow remote", Config.ApiHost == "*", 0);
+            apiHeadlessToggle = CreateToggle("ApiHeadlessToggle", "Headless", Config.Headless, -height * 0.9f);
+        }
+
+        // A KeyInputField (see there why not a plain InputField) looking like the given background and text
+        static InputField CreateInput(string objectName, Image background, Text font, TextAnchor alignment, string placeholderText)
+        {
+            var input = DefaultControls.CreateInputField(new DefaultControls.Resources { standard = background.sprite });
+            input.name = objectName;
+            CopyLook(input.GetComponent<Image>(), background);
+            var stock = input.GetComponent<InputField>();
+            var (textComponent, placeholder) = (stock.textComponent, (Text)stock.placeholder);
+            DestroyImmediate(stock);
+            var field = input.AddComponent<KeyInputField>();
+            field.targetGraphic = input.GetComponent<Image>();
+            field.textComponent = textComponent;
+            field.placeholder = placeholder;
+            CopyLook(textComponent, font, alignment);
+            CopyLook(placeholder, font, alignment);
+            placeholder.text = placeholderText;
+            return field;
+        }
+
+        // Same parent, size and center as the anchor, moved by offsetX and offsetY (in the anchor's units)
+        static void Place(GameObject control, RectTransform anchor, float offsetX, float width, float height, float offsetY = 0)
+        {
+            var rect = (RectTransform)control.transform;
+            rect.SetParent(anchor.parent, false);
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = new Vector2(width, height);
+            rect.position = anchor.position + anchor.TransformVector(new Vector3(offsetX, offsetY, 0));
+        }
+
+        static void CopyLook(Image image, Image from)
+        {
+            image.sprite = from.sprite;
+            image.type = from.type;
+            image.color = from.color;
+        }
+
+        static void CopyLook(Text text, Text from, TextAnchor alignment)
+        {
+            text.font = from.font;
+            text.fontSize = from.fontSize;
+            text.color = from.color;
+            text.alignment = alignment;
+        }
+
+        void SetApiSettingsInteractable(bool interactable)
+        {
+            apiPortInput.interactable = interactable;
+            apiRemoteToggle.interactable = interactable;
+            apiHeadlessToggle.interactable = interactable;
         }
 
         public void UpdateDownloadProgress()
@@ -96,90 +238,52 @@ namespace Simulator.Web
                 text += $"{item.Description} {Mathf.Floor(item.Progress * 100)}%\n";
             }
             if (statusText != null)
-                statusText.text = text;
+                SetStatus(text);
         }
 
-        public void UpdateStatus(ConnectionManager.ConnectionStatus status, string message)
+        // Idle loader screen: start the Python API or the Visual Editor.
+        // Linking to a WISE cluster, going online and the list of simulations WISE sent no longer exist.
+        public void ShowLocalStatus()
         {
-            if (statusText == null || linkButton == null || statusButtonIcon == null || statusButtonText == null || linkButtonText == null || statusButton == null)
+            if (statusText == null || statusButtonIcon == null || statusButtonText == null || statusButton == null)
                 return; // fix for editor stop playmode null
 
-            switch (status)
+            // no Python API and no Visual Editor without assets, e.g. in a player built without the asset sources
+            var hasAssets = BuiltinAssetLibrary.HasAssets;
+            if (hasAssets)
             {
-                case ConnectionManager.ConnectionStatus.Connecting:
-                    statusText.text = message;
-                    unlinkButton.interactable = false;
-                    linkButton.gameObject.SetActive(false);
-                    statusButtonIcon.color = offlineColor;
-                    offlineDropdown.gameObject.SetActive(false);
-                    offlineStartButton.gameObject.SetActive(false);
-                    VSEButton.gameObject.SetActive(false);
-                    CloudTypeText.text = $"URL: {ConnectionManager.API?.CloudType}";
-                    break;
-                case ConnectionManager.ConnectionStatus.Connected:
-                    statusText.text = "";
-                    statusButtonText.text = "Online";
-                    statusMenuButtonText.text = "Go Offline";
-                    statusButtonIcon.color = offlineColor;
-                    linkButtonText.text = "LINK TO CLOUD";
-                    unlinkButton.interactable = false;
-                    linkButton.gameObject.SetActive(true);
-                    offlineDropdown.gameObject.SetActive(false);
-                    offlineStartButton.gameObject.SetActive(false);
-                    VSEButton.gameObject.SetActive(false);
-                    CloudTypeText.text = $"URL: {ConnectionManager.API?.CloudType}";
-                    break;
-                case ConnectionManager.ConnectionStatus.Offline:
-                    statusText.text = message ?? "Go Online to start new simulation or run previous simulations while being Offline";
-                    statusButtonText.text = "Offline";
-                    statusMenuButtonText.text = "Go Online";
-                    statusButtonIcon.color = offlineColor;
-                    unlinkButton.interactable = true;
-                    linkButton.gameObject.SetActive(false);
-                    offlineDropdown.gameObject.SetActive(true);
-                    offlineStartButton.gameObject.SetActive(true);
-                    VSEButton.gameObject.SetActive(false);
-                    UpdateDropdown();
-                    CloudTypeText.text = $"OFFLINE ({ConnectionManager.API?.CloudType})";
-                    break;
-                case ConnectionManager.ConnectionStatus.Online:
-                    statusButtonText.text = "Online";
-                    statusMenuButtonText.text = "Go Offline";
-                    statusButtonIcon.color = onlineColor;
-                    statusText.text = "";
-                    linkButtonText.text = "OPEN BROWSER";
-                    unlinkButton.interactable = true;
-                    linkButton.gameObject.SetActive(true);
-                    offlineDropdown.gameObject.SetActive(false);
-                    offlineStartButton.gameObject.SetActive(false);
-                    VSEButton.gameObject.SetActive(true);
-                    CloudTypeText.text = $"URL: {ConnectionManager.API?.CloudType}";
-                    break;
+                SetStatus("Start the API to connect with the Python API, or open the Visual Editor");
             }
+            else
+            {
+                SetStatus("No assets are built into this simulator: build it with the asset sources in Assets/", true);
+            }
+            statusButtonText.text = "Local";
+            statusButtonIcon.color = onlineColor;
+            statusMenuButton.gameObject.SetActive(false);
+            unlinkButton.gameObject.SetActive(false);
+            linkButton.gameObject.SetActive(false);
+            offlineDropdown.gameObject.SetActive(false);
+            offlineStartButton.gameObject.SetActive(false);
+            offlineStopButton.gameObject.SetActive(false);
+            startApiButton.gameObject.SetActive(true);
+            startApiButton.interactable = hasAssets;
+            stopApiButton.gameObject.SetActive(false);
+            SetApiSettingsInteractable(true);
+            VSEButton.gameObject.SetActive(true);
+            VSEButton.interactable = hasAssets;
         }
 
+        // Loader reports failures here
         public void UpdateStatusText(string text)
         {
+            SetStatus(text, true);
+        }
+
+        void SetStatus(string text, bool warning = false)
+        {
             statusText.text = text;
-        }
-
-        public void UpdateDropdown()
-        {
-            simulationData = simulationService.List().ToList();
-            offlineDropdown.ClearOptions();
-            offlineDropdown.AddOptions(simulationData.Select(s => s.Name).ToList());
-            offlineDropdown.value = 0;
-            selectedSim = 0;
-            if (simulationData.Count == 0)
-            {
-                offlineDropdown.gameObject.SetActive(false);
-                offlineStartButton.gameObject.SetActive(false);
-            }
-        }
-
-        public void OnDropdownValueChanged(int value)
-        {
-            selectedSim = value;
+            statusText.color = warning ? WarningColor : statusColor;
         }
 
         public void OnStatusButtonClicked()
@@ -206,46 +310,34 @@ namespace Simulator.Web
 #endif
         }
 
-        public void OnOfflineStartButtonClicked()
+        public void OnStartApiButtonClicked()
         {
-            Loader.Instance.StartSimulation(simulationData[selectedSim]);
-            if (simulationData[selectedSim].ApiOnly)
+            if (!BuiltinAssetLibrary.HasAssets)
             {
-                offlineStopButton.gameObject.SetActive(true);
+                ShowLocalStatus();
+                return;
             }
+
+            if (!int.TryParse(apiPortInput.text, out var port) || port < 1 || port > 65535)
+            {
+                SetStatus("Port must be a number from 1 to 65535", true);
+                return;
+            }
+
+            Config.ApiPort = port;
+            Config.ApiHost = apiRemoteToggle.isOn ? "*" : configuredApiHost == "*" ? "localhost" : configuredApiHost;
+            Config.Headless = apiHeadlessToggle.isOn;
+            Loader.Instance.StartSimulation(SimulationConfigUtils.CreateApiOnlySimulation());
         }
 
-        public void OnOfflineStopButtonClicked()
+        public void OnStopApiButtonClicked()
         {
             Loader.Instance.StopAsync();
-        }
-
-        public void SetLinkingButtonActive(bool active)
-        {
-            linkButton.gameObject.SetActive(active);
         }
 
         public void SetVSEButtonActive(bool active)
         {
             VSEButton.gameObject.SetActive(active);
-        }
-
-        public void OnStatusMenuButtonClicked()
-        {
-            statusMenuRoot.gameObject.SetActive(false);
-            ConnectionManager.instance.ConnectionStatusEvent();
-        }
-
-        public void OnLinkButtonClicked()
-        {
-            if (ConnectionManager.Status == ConnectionManager.ConnectionStatus.Connected)
-            {
-                Application.OpenURL(ConnectionManager.instance.LinkUrl);
-            }
-            else if (ConnectionManager.Status == ConnectionManager.ConnectionStatus.Online)
-            {
-                Application.OpenURL(Simulator.Web.Config.CloudUrl);
-            }
         }
 
         public void SetLoaderUIState(LoaderUIStateType state)
@@ -254,26 +346,23 @@ namespace Simulator.Web
             switch (LoaderUIState)
             {
                 case LoaderUIStateType.START:
+                    ShowLocalStatus();
                     break;
                 case LoaderUIStateType.PROGRESS:
                     statusButtonText.text = "Loading...";
-                    statusText.text = "Loading...";
+                    SetStatus("Loading...");
+                    startApiButton.gameObject.SetActive(false);
+                    stopApiButton.gameObject.SetActive(false);
+                    SetApiSettingsInteractable(false);
                     break;
                 case LoaderUIStateType.READY:
                     statusButtonText.text = "API ready!";
-                    statusText.text = "API ready!";
+                    var address = Config.ApiHost == "*" ? $"port {Config.ApiPort} of all network interfaces" : $"{Config.ApiHost}:{Config.ApiPort}";
+                    SetStatus($"API ready! Python API listens on {address}");
+                    stopApiButton.gameObject.SetActive(true);
+                    SetApiSettingsInteractable(false);
                     break;
             }
-        }
-
-        public void OnUnlinkButtonClicked()
-        {
-            statusMenuRoot.SetActive(false);
-            if (ConnectionManager.Status == ConnectionManager.ConnectionStatus.Online)
-            {
-                ConnectionManager.instance.Disconnect();
-            }
-            Config.RegenerateSimID();
         }
 
         public void EnterScenarioEditor()

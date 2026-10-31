@@ -1,3 +1,7 @@
+# Text files use LF in the repo and in the working tree on every OS.
+# Must stay first: later lines (LFS, -text) override it for binary files.
+* text=auto eol=lf
+
 *.tga filter=lfs diff=lfs merge=lfs -text
 *.TGA filter=lfs diff=lfs merge=lfs -text
 *.bmp filter=lfs diff=lfs merge=lfs -text
@@ -37,7 +41,9 @@
 *.psd filter=lfs diff=lfs merge=lfs -text
 *.exr filter=lfs diff=lfs merge=lfs -text
 ffmpeg filter=lfs diff=lfs merge=lfs -text
-LICENSE text eol=crlf
-LICENSE-3RD-PARTY text eol=crlf
-PRIVACY text eol=crlf
-README.md text eol=crlf
+Docs/**/*.png -filter -diff -merge -text
+Docs/**/*.PNG -filter -diff -merge -text
+Docs/**/*.jpg -filter -diff -merge -text
+Docs/**/*.JPG -filter -diff -merge -text
+Docs/**/*.jpeg -filter -diff -merge -text
+Docs/**/*.JPEG -filter -diff -merge -text

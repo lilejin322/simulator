@@ -17,7 +17,6 @@ using Simulator.Network.Core.Messaging;
 using Simulator.Network.Shared;
 using Simulator.Bridge;
 using System.IO;
-using VirtualFileSystem;
 
 public class AgentManager : MonoBehaviour
 {
@@ -46,6 +45,44 @@ public class AgentManager : MonoBehaviour
         go.name = config.Name;
         // set it inactive until we can be sure setting up sensors etc worked without exceptions and it AgentController was initialized
         go.SetActive(false);
+        try
+        {
+            SetupAgent(go, config);
+        }
+        catch
+        {
+            DiscardAgent(go);
+            throw;
+        }
+        var controller = go.GetComponent<IAgentController>();
+
+        if (SimulatorManager.Instance.IsAPI)
+        {
+            SimulatorManager.Instance.EnvironmentEffectsManager.InitRainVFX(go.transform);
+        }
+
+        if (controller != null)
+        {
+            SimulatorManager.Instance.UpdateSegmentationColors(go, controller.GTID);
+        }
+
+        // Add components for auto light layers change
+        var triggerCollider = go.AddComponent<SphereCollider>();
+        if (triggerCollider != null)
+        {
+            triggerCollider.radius = 0.3f;
+            triggerCollider.isTrigger = true;
+        }
+        go.AddComponent<AgentZoneController>();
+
+        go.SetActive(true);
+        return go;
+    }
+
+    /// <summary>Registers the agent's controller, bridge and sensors; any of them may fail for a configuration.</summary>
+    void SetupAgent(GameObject go, AgentConfig config)
+    {
+        Simulator.Web.BuiltinVehicleCatalog.ApplyRuntimeOverrides(config.AssetBundle, go);
         var controller = go.GetComponent<IAgentController>();
         if (controller == null)
         {
@@ -92,12 +129,13 @@ public class AgentManager : MonoBehaviour
         BridgeClient bridgeClient = null;
         if (config.BridgeData != null)
         {
-            var dir = Path.Combine(Simulator.Web.Config.PersistentDataPath, "Bridges");
-            var vfs = VfsEntry.makeRoot(dir);
-            Simulator.Web.Config.CheckDir(vfs.GetChild(config.BridgeData.AssetGuid), Simulator.Web.Config.LoadBridgePlugin);
+            if (!Simulator.Web.BuiltinBridgeCatalog.TryRegister(config.BridgeData.AssetGuid, out var plugin))
+            {
+                throw new Exception($"Bridge '{config.BridgeData.Name}' ({config.BridgeData.AssetGuid}) is not built into the simulator");
+            }
 
             bridgeClient = go.AddComponent<BridgeClient>();
-            config.Bridge = BridgePlugins.Get(config.BridgeData.Name);
+            config.Bridge = plugin;
             bridgeClient.Init(config.Bridge);
 
             if (!String.IsNullOrEmpty(config.Connection))
@@ -108,30 +146,24 @@ public class AgentManager : MonoBehaviour
 
         go.transform.SetPositionAndRotation(config.Position, config.Rotation);
         sensorsController.SetupSensors(config.Sensors);
-        
+
         controller?.Init();
+    }
 
-        if (SimulatorManager.Instance.IsAPI)
+    /// <summary>
+    /// Undoes SetupAgent for an agent that failed to set up. It was never active, so Unity calls no OnDestroy on its
+    /// components: unregister its sensors and close its bridge here, or later agent changes reach its broken sensors.
+    /// </summary>
+    void DiscardAgent(GameObject go)
+    {
+        ActiveAgents.RemoveAll(config => config.AgentGO == go);
+        (go.GetComponent<ISensorsController>() as SensorsController)?.UnregisterSensors();
+        var bridge = go.GetComponent<BridgeClient>()?.Bridge;
+        if (bridge != null && bridge.Status != Simulator.Bridge.Status.Disconnected)
         {
-            SimulatorManager.Instance.EnvironmentEffectsManager.InitRainVFX(go.transform);
+            bridge.Disconnect();
         }
-
-        if (controller != null)
-        {
-            SimulatorManager.Instance.UpdateSegmentationColors(go, controller.GTID);
-        }
-
-        // Add components for auto light layers change
-        var triggerCollider = go.AddComponent<SphereCollider>();
-        if (triggerCollider != null)
-        {
-            triggerCollider.radius = 0.3f;
-            triggerCollider.isTrigger = true;
-        }
-        go.AddComponent<AgentZoneController>();
-
-        go.SetActive(true);
-        return go;
+        Destroy(go);
     }
 
     public void SpawnAgents(AgentConfig[] agentConfigs)

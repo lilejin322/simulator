@@ -207,7 +207,8 @@ namespace Simulator.FMU
 
         private void OnDestroy()
         {
-            fmu.Dispose();
+            fmu?.Dispose();
+            fmu = null;
         }
 
         private void GetInput()

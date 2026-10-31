@@ -1,0 +1,255 @@
+# Built-in asset sources. Edit true/false, then run ./build.sh.
+# Keys are exact directories under Assets/<category>/, including the GUID suffix.
+# true: include this ready source; false or omitted: do not select it.
+# Shared dependencies and script compilation are still handled by Unity.
+# Runtime settings belong in config.yml.
+version: 1
+
+# Assets/Maps/
+maps:
+  "Airport_0a4026cb": true
+  "ApaParkinglotTestBigObstacle_7835bb9f": true
+  "AshCity_df2ffe18": true
+  "Austria_RaceTrack_d7747848": true
+  "AutonomouStuff_0c86501c": true
+  "BearcarCourse1_2612c2e7": true
+  "BorregasAve_4552b7ac": true
+  "ChancellorsPlaceV2_cc0eba47": true
+  "CircuitLaunch_4c6cac03": true
+  "CubeTown_0595d9d3": true
+  "CubeTown_0eefb0f6": true
+  "CubeTown_9540609b": true
+  "CubeTown_b606ca6e": true
+  "CubeTown_d818e54e": true
+  "CubeTown_d959797b": true
+  "CubeTown_ebe4611c": true
+  "Curve1LaneSame_decf3c08": true
+  "Curve2LaneOpposing_d58a61b3": true
+  "Custom2_67119da8": true
+  "Custom3_9faeba05": true
+  "GoMentumDTL_ce7d07ec": true
+  "GoMentum_e4c3e4dd": true
+  "Highway101GLE_62156e42": true
+  "IMSF1Tenth_79435363": true
+  "IndianapolisMotorSpeedway_68b3eec6": true
+  "LGSeocho_c391ab33": true
+  "LaneAvenueV2_60e08c09": true
+  "LasVegasMotorSpeedway_c28d5f6a": true
+  "ModernCity_927f9b19": true
+  "NarrowLane_3680d398": true
+  "NewMap_29376801": true
+  "NewMap_bdbb89e8": true
+  "NewMap_dc9861cb": true
+  "PJ_HILLS_1_9f75d1da": true
+  "PJ_HILLS_1_e7837fcf": true
+  "ParallelParking_da7c8a8b": true
+  "Parking2_bca42fdd": true
+  "ParkingLot1_1e251ace": true
+  "PiazzaCastello1_da80912c": true
+  "RubisTestbedStatic_98619789": true
+  "RubisTestbed_d07a3bfe": true
+  "SAN_912f1f66": true
+  "SanFrancisco_33086dd4": true
+  "SanFrancisco_37d02526": true
+  "SanFrancisco_49714179": true
+  "SanFrancisco_b7149b5c": true
+  "SanFrancisco_dc39550a": true
+  "SanFrancisco_test_20d202d9": true
+  "Shalun_fce86ba3": true
+  "SingleLaneRoad_8ca2fc23": true
+  "SingleLaneRoad_b819be12": true
+  "SingleLaneRoad_d0be5c1d": true
+  "SingleLaneRoad_de1f0722": true
+  "SingleLaneRoad_f1dbb6d2": true
+  "Straight1LanePedestrianCrosswalkSign_7f9c3bd7": true
+  "Straight1LanePedestrianCrosswalk_f1d0d3ab": true
+  "Straight1LanePedestrian_7f47c666": true
+  "Straight1LaneSame_03621315": true
+  "Straight2LaneOpposingCulDeSecIslandRaised_1ff90ade": true
+  "Straight2LaneOpposingCulDeSec_6a582ec5": true
+  "Straight2LaneOpposingMedianRaisedPedestrianCrosswalk_ec9130a2": true
+  "Straight2LaneOpposingPedestrianCrosswalk3WaysStopSign_2831f329": true
+  "Straight2LaneOpposingPedestrianCrosswalk3WaysTrafficSignal_6603ea68": true
+  "Straight2LaneOpposingPedestrianCrosswalk3Ways_457ba5f5": true
+  "Straight2LaneOpposingPedestrianCrosswalk_b554f105": true
+  "Straight2LaneOpposing_7f4d4eb4": true
+  "Straight2LaneSameCurbRightIntersection_8eeafc9b": true
+  "Straight2LaneSameCurbRight_ac65c414": true
+  "Straight2LaneSame_8cc07d43": true
+  "Straight3Lane1Opposing_8ea672ea": true
+  "Tartu_8c299cbe": true
+  "TeknofestSign_18462b01": true
+  "TeknofestSign_37248373": true
+  "TeknofestSign_a67a300f": true
+  "TestMap_fbe4d7f5": true
+  "TestSceneParking_362c4de7": true
+  "TestSceneParking_add53c5e": true
+  "WarehouseDT_cca8a560": true
+  "Warehouse_34bfe354": true
+  "WideFlatMap_755177d3": true
+  "hd3_524f0389": true
+  "hd_164e1542": true
+  "hd_37fbd78e": true
+  "map1207_80e5f06d": true
+  "map1207_dd8232c4": true
+  "map_s1_c7b0154b": true
+  "small_town_america_dee927e6": true
+  "test2_16036271": true
+  "test_128c62e2": true
+  "test_1cb42bee": true
+  "test_3588a4fb": true
+  "test_735159e4": true
+  "test_84913f83": true
+  "test_d0b84cc6": true
+
+# Assets/Vehicles/
+vehicles:
+  "210820_v12_bfedea1f": true
+  "210823_v14_072b7dc4": true
+  "210823_v14_2d57c96d": true
+  "210823_v14_4119f973": true
+  "AWFLexus2016RXHybrid_d9e4d508": true
+  "AirportTug_d4603cbd": true
+  "Cybertruck_177046a3": true
+  "Cybertruck_74e497d2": true
+  "DaBa_874d6c48": true
+  "DallaraIL15_a7a860aa": true
+  "F1TenthCar_56a2f356": true
+  "GWMWeyVV72018_36715078": true
+  "Hyundai2018Nexo_3b79d7bf": true
+  "Jaguar2015XE_4a8181ce": true
+  "Jaguar2015XE_506ab839": true
+  "Jaguar2015XE_665e4ee0": true
+  "Jaguar2015XE_6761a228": true
+  "Jaguar2015XE_d0144400": true
+  "LGCloi_85fa169a": true
+  "Lexus2016RXHybrid_af9a96a5": true
+  "Lincoln2017MKZ_d3688d7d": true
+  "Panther_86ec8266": true
+  "Pod3_8b6d8c1b": true
+  "SpectatorEgo_bed89141": true
+  "Transporter_118f6760": true
+  "Truck_GM_3cce4e04": true
+  "Vesta_a85dc959": true
+  "seniorcar_211116_8552a73c": true
+  "test_5a0eec0b": true
+  "testcar_8fdcb726": true
+  "utlexus_c4a7863a": true
+
+# Assets/Sensors/
+sensors:
+  "AIChallenge_TimerSensor_d178d557": true
+  "ApolloControlSensor_090891ee": true
+  "ApolloPerceptionVisualizer3D_bc448549": true
+  "AutoDriveCarStateSensor_c8d5c6c4": false # not ready: source dependencies are missing
+  "AutoDriveVehicleControlSensor_8319b90c": true
+  "AutowareAiControlSensor_0e4cf3c0": true
+  "CanBusSensor_cd38d045": true
+  "CheckDestinationSensor_ee2ad072": true
+  "ClockSensor_fb75d445": true
+  "ColorCameraSensor_f9073a10": true
+  "ComfortSensor_67759e40": true
+  "ComfortSensor_711f4e1d": true
+  "ComfortSensor_a0dd4347": true
+  "ControlCalibrationSensor_089e2531": true
+  "CruiseControlSensor_83344a45": true
+  "DepthCameraSensor_e3d6ad23": true
+  "DestinationSensor_8bb43ad1": true
+  "DifferentialDriveControlSensor_4aab0ec6": true
+  "DirectionalLidarSensor_9cae1c9e": true
+  "DoorStateSensor_7a79379c": false # not ready: source dependencies are missing
+  "GpsInsSensor_b78a10b6": true
+  "GpsOdometrySensor_d672c52e": true
+  "GpsSensor_f73de137": true
+  "HUDKeyboardControlSensor_bfbff467": true
+  "ImuSensor_29d043bf": true
+  "ImuSensor_88c08315": false # not ready: source dependencies are missing
+  "ImuSensor_cf06a7ce": true
+  "IntelRealSenseD435Sensor_084a42cd": true
+  "KeyboardControlSensor_990aa76e": true
+  "LGSVLControlSensor_02e462ce": true
+  "LaneFollowingSensor_7e7c37df": true
+  "LaneLineSensor_79beb559": true
+  "LaneViolationSensor_7475aa0d": true
+  "LiDAR2DSensor_0afbd4a7": true
+  "LidarSensor_dd44a969": true
+  "PerceptionSensor2D_67d4aed4": true
+  "PerceptionSensor3D_fc200028": true
+  "RadarSensor_7404a9f8": true
+  "SegmentationCameraSensor_37402ea8": true
+  "SignalSensor_b96c848a": true
+  "StopLineSensor_9907ff05": true
+  "TransformSensor_fc585c8d": true
+  "UltrasonicSensor_3832048b": true
+  "VehicleOdometrySensor_48d73849": true
+  "VehicleStateSensor_4e098c4c": true
+  "VehicleStateSensor_64316c91": true
+  "VideoRecordingSensor_5578e7e7": true
+  "WheelControlSensor_f7a442e9": true
+
+# Assets/Bridges/
+bridges:
+  "CyberRT_2b853ede": true
+  "CyberRT_6aca1444": true
+  "CyberRT_fffac85a": true
+  "Logging_fb88c841": true
+  "ROS2ForUnitySVLBridge_50cb9eb3": false # not ready: source dependencies are missing
+  "ROS2_95f50cac": true
+  "ROS2_cf21f8c6": true
+  "ROS_102a21ab": true
+  "ROS_386670e5": false # not ready: source dependencies are missing
+  "ROS_568f6162": false # not ready: source dependencies are missing
+  "ROS_8b93093e": true
+
+# Assets/NPCs/
+npcs:
+  "Bicyclist_9e1b957a": true
+  "BoxTruck_ccf4f138": true
+  "Hatchback_50ccc853": true
+  "Jeep_79e819e0": true
+  "SUV_a6df799d": true
+  "SchoolBus_88389c0c": true
+  "Sedan_3d351456": true
+
+# Assets/Pedestrians/
+pedestrians:
+  "Bill_abce6a2e": true
+  "Bob_803ea0ff": true
+  "Deer_98ccff88": true
+  "EntrepreneurFemale_6a63480c": true
+  "Howard_d82b52d1": true
+  "Johny_2711fc10": true
+  "Jun_f159fa84": true
+  "Pamela_e158786b": true
+  "Presley_aa408bab": true
+  "Robin_639908dd": true
+  "SegwayKickScooterMaxG30LP_53e2f549": true
+  "Stephen_77a36853": true
+  "Turkey_5245b221": true
+  "Yun_d838c4dc": true
+  "Zoe_6a7fe2e5": true
+
+# Assets/Controllables/
+controllables:
+  "Bench0_5e9b2358": true
+  "Bench1_cecb7033": true
+  "BigTrashBin_975551bc": true
+  "Bin_cb5772f6": true
+  "BinBlue_214e21ee": true
+  "BinGreen_2d5c8a12": true
+  "BinRed_d42f3217": true
+  "BinYellow_c89ba829": true
+  "BusStopPole_841a7964": true
+  "Cart_9f1facf7": true
+  "ChargingStation_6f8092d6": true
+  "Hydrant_7c73f985": true
+  "Rock5_1af09f3b": true
+  "Tank_f966d656": true
+  "TrafficCone_90c798c2": true
+  "TrashBag_90a4f602": true
+  "Tree0_c0a1c97b": true
+  "Tree1_49c8f747": true
+  "Tree2_242a6e57": true
+  "TriggerZone_8e39c0da": true
+  "WarningStand_9f1eb1e4": true
+  "WaterTank0_a76b0b90": true

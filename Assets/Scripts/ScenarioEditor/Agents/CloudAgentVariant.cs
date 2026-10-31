@@ -60,7 +60,7 @@ namespace Simulator.ScenarioEditor.Agents
         {
             try
             {
-                prefab = Loader.LoadVehicleBundle(assetModel.LocalPath);
+                prefab = Loader.LoadVehicle(assetModel.LocalPath);
             }
             catch (Exception ex)
             {

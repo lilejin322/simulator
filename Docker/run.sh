@@ -1,39 +1,44 @@
 #!/bin/sh
+#
+# Start one simulator container in the background, no display needed.
+# Usage: Docker/run.sh [--name NAME] HOST_PORT GPU DATA_DIR [simulator arguments...]
+#   Docker/run.sh 8181 0 ~/svl-data-1
+#   Docker/run.sh --name sim-b 8182 0 ~/svl-data-2   # second instance
+# --name     container name (optional, default simulator-HOST_PORT, so instances never collide)
+# HOST_PORT  API port; the container listens on the same port (-p PORT:PORT --apiport PORT),
+#            because the API server (websocket-sharp) rejects clients whose Host port differs
+# GPU        GPU index as in nvidia-smi (docker --gpus device=N); the container only sees that GPU
+# DATA_DIR   cache/logs/videos, mounted at /data; created if missing, files belong to the calling user
+# Host services (ROS/Apollo bridges): use host.docker.internal, not localhost (that is the container).
+# Image: $SIM_IMAGE (default svlsimulator).
+#
+set -e
 
-usage()
-{
-     echo "run.sh [-h|--help] [:VERSION] [COMMAND] [ARG...]"
-     exit 1
-}
+usage() { sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
-case "$1" in
-     :*)  tag=$1
-          shift
-          ;;
-
-     -h|--help)
-          usage
-          ;;
-esac
-
-if [ -z "$DISPLAY" ]; then
-    echo "ABORT: DISPLAY not set"
-    exit 1
+NAME=
+if [ "$1" = "--name" ] || [ "$1" = "-n" ]; then
+    [ -n "$2" ] || usage
+    NAME=$2
+    shift 2
 fi
+[ $# -ge 3 ] || usage
 
-DOCKER_MAJOR_VERSION=$(docker version --format '{{.Client.Version}}' | cut -d. -f1)
-if [ $DOCKER_MAJOR_VERSION -ge 19 ] && ! which nvidia-docker > /dev/null; then
-     readonly RUNTIME="--gpus=all"
-else
-     readonly RUNTIME="--runtime=nvidia"
-fi
+PORT=$1; GPU=$2; DATA=$3
+shift 3
+NAME=${NAME:-simulator-$PORT}
+IMAGE=${SIM_IMAGE:-svlsimulator}
 
-docker run -ti \
-     $RUNTIME \
-     --net=host \
-     -e DISPLAY \
-     -e XAUTHORITY=/tmp/.Xauthority \
-     -v ${XAUTHORITY}:/tmp/.Xauthority \
-     -v /tmp/.X11-unix:/tmp/.X11-unix \
-     -v ~/.config/unity3d:/root/.config/unity3d \
-     svlsimulator$tag "$@"
+mkdir -p "$DATA"
+DATA=$(cd "$DATA" && pwd)
+
+docker run -d \
+    --name "$NAME" \
+    --gpus "device=$GPU" \
+    --user "$(id -u):$(id -g)" \
+    -p "$PORT:$PORT" \
+    --add-host=host.docker.internal:host-gateway \
+    -v "$DATA:/data" \
+    "$IMAGE" --apiport "$PORT" "$@"
+
+echo "started $NAME: API on port $PORT, logs: docker logs -f $NAME"

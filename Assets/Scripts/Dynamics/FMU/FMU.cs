@@ -143,6 +143,7 @@ namespace Simulator.FMU
         private IntPtr dll;
         private IntPtr Component;
         private IntPtr Callbacks;
+        private fmi2CallbackFunctions callbackFunctions;
         private string DLLGUID;
 
         private fmi2InstantiateDelegate FMI2Instantiate;
@@ -176,20 +177,16 @@ namespace Simulator.FMU
             var modelIdentifier = fmuName;
             DLLGUID = GUID;
 
-            Web.Config.FMUs.TryGetValue(GUID, out dll);
-            if (dll == default)
-            {
-                // load the DLL
+            // Each instance owns a loader reference; dlclose/FreeLibrary balances it.
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-                //dllPath += "/win" + IntPtr.Size * 8 + "/" + modelIdentifier + ".dll";
-                dll = LoadLibrary(dllPath);
+            dll = LoadLibrary(dllPath);
 #else
-                //dllPath += "linux64/" + modelIdentifier + ".so"; //.dylib
-                dll = dlopen(dllPath, 4);
+            dll = dlopen(dllPath, 2); // RTLD_NOW; 4 is RTLD_NOLOAD, not a load mode.
 #endif
-                Web.Config.FMUs.Add(GUID, dll);
-            }
+            if (dll == IntPtr.Zero)
+                throw new DllNotFoundException($"Could not load FMU native library: {dllPath}");
 
+            // Keep callback delegates alive for the entire native instance lifetime.
             fmi2CallbackFunctions functions;
             functions.logger = new fmi2CallbackLogger(LogMessage); // no log message
             functions.allocateMemory = new fmi2CallbackAllocateMemory(AllocateMemory);
@@ -223,9 +220,16 @@ namespace Simulator.FMU
             FMI2GetString = GetFunc<fmi2GetStringDelegate>(dll, "fmi2GetString");
             FMI2SetString = GetFunc<fmi2SetStringDelegate>(dll, "fmi2SetString");
 
+            callbackFunctions = functions;
+
             //var resourceLocation = new Uri(unzipdir).AbsoluteUri;
 
             Component = FMI2Instantiate(instanceName, (int)ModelType.ModelCoSimulation, DLLGUID, null, this.Callbacks, false, loggingOn ? true : false);
+            if (Component == IntPtr.Zero)
+            {
+                Dispose();
+                throw new InvalidOperationException($"FMU rejected instance {instanceName} ({DLLGUID}).");
+            }
         }
 
         public uint GetValueReference(string variable)
@@ -235,22 +239,20 @@ namespace Simulator.FMU
 
         public void Dispose()
         {
-            FMI2FreeInstance(Component);
-            //unsafe
-            //{
-            Marshal.FreeHGlobal(Callbacks);
-            //UnsafeUtility.Free(Callbacks.ToPointer(), Unity.Collections.Allocator.Persistent);
-            //}
-
+            FreeInstance();
+            if (Callbacks != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(Callbacks);
+                Callbacks = IntPtr.Zero;
+            }
+            if (dll == IntPtr.Zero) return;
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             FreeLibrary(dll);
 #else
-		    dlclose(dll);
+            dlclose(dll);
 #endif
-            if (Web.Config.FMUs.TryGetValue(DLLGUID, out dll))
-            {
-                Web.Config.FMUs.Remove(DLLGUID);
-            }
+            dll = IntPtr.Zero;
+            GC.KeepAlive(callbackFunctions);
         }
 
         public void SetupExperiment(double startTime, double? tolerance = null, double? stopTime = null)
@@ -285,7 +287,9 @@ namespace Simulator.FMU
 
         public void FreeInstance()
         {
+            if (Component == IntPtr.Zero) return;
             FMI2FreeInstance(Component);
+            Component = IntPtr.Zero;
         }
 
         public void DoStep(double currentCommunicationPoint, double communicationStepSize, bool noSetFMUStatePriorToCurrentPoint = true)
@@ -458,13 +462,13 @@ namespace Simulator.FMU
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool FreeLibrary(IntPtr hModule);
 #else
-        [DllImport("libdl")]
+        [DllImport("libdl.so.2")]
         protected static extern IntPtr dlopen(string filename, int flags);
 
-        [DllImport("libdl")]
+        [DllImport("libdl.so.2")]
         protected static extern int dlclose(IntPtr handle);
 
-        [DllImport("libdl")]
+        [DllImport("libdl.so.2")]
         private static extern IntPtr dlsym(IntPtr handle, String symbol);
 #endif
 

@@ -2,6 +2,7 @@
     "name": "Simulator.Web.Tests",
     "references": [
         "UnityEngine.TestRunner",
+        "Unity.ugui",
         "UnityEditor.TestRunner",
         "Simulator"
     ],

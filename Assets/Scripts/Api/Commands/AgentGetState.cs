@@ -5,6 +5,7 @@
  *
  */
 
+using System.Linq;
 using SimpleJSON;
 using UnityEngine;
 using UnityEngine.AI;
@@ -14,6 +15,10 @@ namespace Simulator.Api.Commands
     class AgentGetState : ICommand
     {
         public string Name => "agent/state/get";
+
+        /// <summary>Articulated robots (e.g. LGCloi) move through ArticulationBody links instead of a root Rigidbody.</summary>
+        internal static ArticulationBody RootArticulation(GameObject agent) =>
+            agent.GetComponentsInChildren<ArticulationBody>().FirstOrDefault(body => body.isRoot);
 
         public void Execute(JSONNode args)
         {
@@ -41,10 +46,16 @@ namespace Simulator.Api.Commands
                         result.Add("velocity", npc.GetVelocity());
                         result.Add("angular_velocity", npc.GetAngularVelocity());
                     }
+                    else if (rb != null)
+                    {
+                        result.Add("velocity", rb.velocity);
+                        result.Add("angular_velocity", rb.angularVelocity);
+                    }
                     else
                     {
-                    result.Add("velocity", rb.velocity);
-                    result.Add("angular_velocity", rb.angularVelocity);
+                        var body = RootArticulation(obj);
+                        result.Add("velocity", body != null ? body.velocity : obj.GetComponent<IAgentController>()?.Velocity ?? Vector3.zero);
+                        result.Add("angular_velocity", body != null ? body.angularVelocity : Vector3.zero);
                     }
                 }
                 else
